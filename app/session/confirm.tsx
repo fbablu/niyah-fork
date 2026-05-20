@@ -265,7 +265,7 @@ function ConfirmSessionScreenInner() {
 
     if (isSolo) {
       try {
-        startSoloSession(cadence);
+        await startSoloSession(cadence);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Could not start session.";

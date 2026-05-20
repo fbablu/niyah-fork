@@ -23,6 +23,17 @@ jest.mock("../../../constants/config", () => ({
 jest.mock("../../../config/functions", () => ({
   handleSessionComplete: jest.fn(),
   handleSessionForfeit: jest.fn(),
+  createSoloSession: jest
+    .fn()
+    .mockImplementation(async (_cadence: string, sessionId: string) => ({
+      success: true,
+      sessionId,
+      startedAtMs: Date.now(),
+      endsAtMs: Date.now() + 60_000,
+      stakeAmount: 0,
+      newBalance: 0,
+      idempotent: false,
+    })),
 }));
 
 // logEvent fires Firestore writes in DEMO_MODE=false; stub to keep tests hermetic.
@@ -91,7 +102,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
 
   describe("completeSession", () => {
     it("calls cloudComplete with correct sessionId and stakeAmount", async () => {
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       const { id: sessionId, stakeAmount } =
         useSessionStore.getState().currentSession!;
 
@@ -111,7 +122,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
         .mocked(handleSessionComplete)
         .mockRejectedValueOnce(new Error("Server error"));
 
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       const stake = CADENCES.daily.stake;
 
       useSessionStore.getState().completeSession();
@@ -129,7 +140,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
     });
 
     it("does not call cloudForfeit when completing a session", async () => {
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       useSessionStore.getState().completeSession();
       await Promise.resolve();
 
@@ -141,7 +152,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
 
   describe("surrenderSession", () => {
     it("calls cloudForfeit with correct sessionId and stakeAmount", async () => {
-      useSessionStore.getState().startSession("weekly");
+      await useSessionStore.getState().startSession("weekly");
       const { id: sessionId, stakeAmount } =
         useSessionStore.getState().currentSession!;
 
@@ -156,7 +167,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
         .mocked(handleSessionForfeit)
         .mockRejectedValueOnce(new Error("Timeout"));
 
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       useSessionStore.getState().surrenderSession();
       await Promise.resolve();
 
@@ -167,7 +178,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
     });
 
     it("does not call cloudComplete when surrendering", async () => {
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       useSessionStore.getState().surrenderSession();
       await Promise.resolve();
 
@@ -178,7 +189,7 @@ describe("sessionStore — cloud sync (DEMO_MODE=false)", () => {
       // Monthly requires 10000 cents; ensure wallet has enough
       useWalletStore.getState().deposit(10000);
       const balanceBeforeStake = useWalletStore.getState().balance;
-      useSessionStore.getState().startSession("monthly");
+      await useSessionStore.getState().startSession("monthly");
       const expectedStake = CADENCES.monthly.stake;
       const walletAfterStart = useWalletStore.getState().balance;
       expect(walletAfterStart).toBe(balanceBeforeStake - expectedStake);

@@ -11,6 +11,7 @@ import { useWalletStore } from "./walletStore";
 import {
   handleSessionComplete as cloudComplete,
   handleSessionForfeit as cloudForfeit,
+  createSoloSession as cloudCreateSoloSession,
 } from "../config/functions";
 import {
   writeSession,
@@ -50,7 +51,7 @@ interface SessionState {
    */
   lastForgivenCents: number | null;
 
-  startSession: (cadence: CadenceType) => void;
+  startSession: (cadence: CadenceType) => Promise<void>;
   surrenderSession: () => void;
   completeSession: () => void;
   getTimeRemaining: () => number;
@@ -66,7 +67,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   violationCount: 0,
   lastForgivenCents: null,
 
-  startSession: (cadence: CadenceType) => {
+  startSession: async (cadence: CadenceType) => {
     const { currentSession, sessionHistory } = get();
     if (currentSession || _isRecovering) {
       throw new Error(
@@ -79,7 +80,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     // Daily stake cap (mirrored in Cloud Functions). Sums stakes from solo
     // sessions started today in local history; group session stakes enforced
-    // server-side by createGroupSession / respondToGroupInvite CFs.
+    // server-side by createGroupSession / respondToGroupInvite CFs. Server
+    // also enforces this in createSoloSession — local check is for fast UX
+    // feedback so the user doesn't round-trip just to see "cap reached".
     if (!DEMO_MODE) {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
@@ -94,16 +97,45 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     }
 
+    const sessionId = generateId();
+    let startedAtMs = Date.now();
+    let endsAtMs = startedAtMs + duration;
+
+    // Production path: server creates the session doc and debits the wallet
+    // atomically via createSoloSession CF. Returns canonical startedAt/endsAt
+    // so the client clock can't drift from server. DEMO_MODE preserves the
+    // legacy local-only flow (no money on the line; offline-friendly).
+    if (!DEMO_MODE) {
+      try {
+        const result = await cloudCreateSoloSession(
+          cadence,
+          sessionId,
+          USE_SHORT_TIMERS,
+        );
+        startedAtMs = result.startedAtMs;
+        endsAtMs = result.endsAtMs;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to start session";
+        logger.error("createSoloSession failed:", err);
+        // Bubble user-friendly error up to the screen.
+        throw new Error(message);
+      }
+    }
+
     const session: Session = {
-      id: generateId(),
+      id: sessionId,
       cadence,
       stakeAmount: config.stake,
       potentialPayout: config.stake,
-      startedAt: new Date(),
-      endsAt: new Date(Date.now() + duration),
+      startedAt: new Date(startedAtMs),
+      endsAt: new Date(endsAtMs),
       status: "active",
     };
 
+    // Local wallet deduct mirrors the server-side debit so the UI updates
+    // immediately. The Firestore wallet snapshot subscription will reconcile
+    // if there's drift. In DEMO_MODE this is the source of truth.
     useWalletStore.getState().deductStake(config.stake, session.id);
 
     // Clear stale forgiveness flag — only relevant to the most recent surrender.
@@ -163,9 +195,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }).catch((err) => logger.warn("Failed to update violation count:", err));
     });
 
-    // Persist session to Firestore (fire-and-forget)
+    // Persist session to Firestore (fire-and-forget). In production the
+    // createSoloSession CF already wrote the canonical doc via admin SDK,
+    // and the Firestore rule denies client-side creates, so we only write
+    // here in DEMO_MODE where there's no CF round-trip.
     const userId = useAuthStore.getState().user?.id;
-    if (userId) {
+    if (DEMO_MODE && userId) {
       writeSession(session.id, {
         userId,
         cadence: session.cadence,

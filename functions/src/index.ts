@@ -7,8 +7,10 @@
  */
 
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onMessagePublished } from "firebase-functions/v2/pubsub";
 import { defineSecret } from "firebase-functions/params";
 import Stripe from "stripe";
 import {
@@ -62,8 +64,13 @@ const PUBLIC_HTTP_OPTIONS = {
   invoker: "public" as const,
 };
 
+// Money-path CFs: no CORS preflight is needed because the only legitimate
+// caller is the native mobile app (URLSession/OkHttp don't send OPTIONS).
+// Setting cors: false blocks browser-based replay of a stolen Firebase ID
+// token from a different origin — defense-in-depth alongside App Check.
 const PUBLIC_STRIPE_HTTP_OPTIONS = {
   ...PUBLIC_HTTP_OPTIONS,
+  cors: false,
   secrets: [STRIPE_SECRET_KEY],
 };
 
@@ -74,13 +81,22 @@ const PUBLIC_STRIPE_WEBHOOK_OPTIONS = {
   secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET],
 };
 
+const PUBLIC_PLAID_WEBHOOK_OPTIONS = {
+  cors: false,
+  region: "us-central1",
+  invoker: "public" as const,
+  secrets: [PLAID_CLIENT_ID, PLAID_SECRET],
+};
+
 const PUBLIC_PLAID_HTTP_OPTIONS = {
   ...PUBLIC_HTTP_OPTIONS,
+  cors: false, // see PUBLIC_STRIPE_HTTP_OPTIONS — money-path, mobile-only callers
   secrets: [PLAID_CLIENT_ID, PLAID_SECRET],
 };
 
 const PUBLIC_PLAID_STRIPE_HTTP_OPTIONS = {
   ...PUBLIC_HTTP_OPTIONS,
+  cors: false,
   secrets: [PLAID_CLIENT_ID, PLAID_SECRET, STRIPE_SECRET_KEY],
 };
 
@@ -180,6 +196,175 @@ function sendError(res: Response, code: number, message: string): void {
  * pick up via console hook. Keeps payout, withdrawal, and bank link calls
  * forensically traceable across retries and failures.
  */
+/**
+ * Sensitive field names that H1 migrates from the public `users/{uid}` doc
+ * to the owner-readable `userPrivate/{uid}` collection. Listed here so the
+ * helpers below treat them uniformly and the migration CF has one source of
+ * truth for what to move.
+ */
+const SENSITIVE_USER_FIELDS = [
+  "stripeAccountId",
+  "stripeAccountStatus",
+  "stripeCustomerId",
+  "stripeKycProvidedAt",
+  "plaidAccessToken",
+  "plaidItemId",
+  "plaidAccountId",
+  "legalFirstName",
+  "legalLastName",
+] as const;
+
+/**
+ * Reads the merged view of a user's public + private data. `userPrivate/{uid}`
+ * wins on conflict — the legacy `users.<field>` is only used as a fallback
+ * during the H1 migration window so CFs keep working for users who haven't
+ * been migrated yet.
+ *
+ * Returns null when the user doc itself is missing.
+ */
+async function readUserWithPrivate(
+  uid: string,
+): Promise<{ user: Record<string, unknown>; merged: Record<string, unknown> } | null> {
+  const [userSnap, privateSnap] = await Promise.all([
+    db.collection("users").doc(uid).get(),
+    db.collection("userPrivate").doc(uid).get(),
+  ]);
+  if (!userSnap.exists) return null;
+  const user = (userSnap.data() ?? {}) as Record<string, unknown>;
+  const priv = (privateSnap.exists ? privateSnap.data() : {}) as Record<
+    string,
+    unknown
+  >;
+  return { user, merged: { ...user, ...priv } };
+}
+
+/**
+ * Writes sensitive fields to `userPrivate/{uid}` AND deletes the same keys
+ * from `users/{uid}` in one batch. Use whenever a CF persists Stripe / Plaid
+ * / legal-name fields so legacy data on the public doc gets cleared in the
+ * same turn — over time this drains the public doc of secrets without a
+ * separate migration step (the explicit migration CF handles the long tail).
+ *
+ * `userPublicUpdate` is for non-sensitive fields that should stay on
+ * `users/{uid}` (e.g. `linkedBank` display state). Pass an empty object if
+ * you have no public fields to write.
+ */
+async function writeUserPrivate(
+  uid: string,
+  privateFields: Record<string, unknown>,
+  userPublicUpdate: Record<string, unknown> = {},
+): Promise<void> {
+  const batch = db.batch();
+  const userRef = db.collection("users").doc(uid);
+  const privateRef = db.collection("userPrivate").doc(uid);
+
+  if (Object.keys(privateFields).length > 0) {
+    batch.set(
+      privateRef,
+      {
+        ...privateFields,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    // Clear legacy mirrors of these fields from the public doc.
+    const clearPublic: Record<string, unknown> = {};
+    for (const key of Object.keys(privateFields)) {
+      clearPublic[key] = admin.firestore.FieldValue.delete();
+    }
+    batch.set(
+      userRef,
+      { ...clearPublic, ...userPublicUpdate, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  } else if (Object.keys(userPublicUpdate).length > 0) {
+    batch.set(
+      userRef,
+      { ...userPublicUpdate, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  }
+
+  await batch.commit();
+}
+
+/**
+ * Reputation thresholds mirror src/constants/config.ts REPUTATION_LEVELS.
+ * Server-side derivation lets us increment counters + recompute level from
+ * an authoritative source instead of letting the client write reputation
+ * directly (the old path let users forge any level they wanted — M1).
+ */
+const REPUTATION_REFERRAL_BOOST = 10;
+function reputationLevelFromScore(score: number): string {
+  if (score >= 81) return "oak";
+  if (score >= 61) return "tree";
+  if (score >= 41) return "sapling";
+  if (score >= 21) return "sprout";
+  return "seed";
+}
+
+/**
+ * Increments the user's reputation counters and rewrites the derived
+ * `score` + `level`. Called from session-lifecycle CFs (handleSessionComplete,
+ * handleSessionForfeit, reportSessionStatus) so reputation is server-driven.
+ *
+ * `kind` is "completed" for successful sessions (counts as a kept commitment)
+ * and "missed" for surrenders/forfeits (counts as a missed payment).
+ *
+ * Fire-and-forget safe — failures are logged but do not surface to the user
+ * because reputation is a soft signal, not a money-path invariant.
+ */
+async function bumpReputationServerSide(
+  uid: string,
+  kind: "completed" | "missed",
+): Promise<void> {
+  try {
+    const userRef = db.collection("users").doc(uid);
+    await db.runTransaction(async (txn) => {
+      const snap = await txn.get(userRef);
+      if (!snap.exists) return;
+      const data = snap.data() ?? {};
+      const rep = (data.reputation as Record<string, unknown>) ?? {};
+      const paymentsCompleted =
+        (typeof rep.paymentsCompleted === "number"
+          ? rep.paymentsCompleted
+          : 0) + (kind === "completed" ? 1 : 0);
+      const paymentsMissed =
+        (typeof rep.paymentsMissed === "number" ? rep.paymentsMissed : 0) +
+        (kind === "missed" ? 1 : 0);
+      const referralCount =
+        typeof rep.referralCount === "number" ? rep.referralCount : 0;
+      const totalPayments = paymentsCompleted + paymentsMissed;
+      let score = 50;
+      if (totalPayments > 0) {
+        const successRate = paymentsCompleted / totalPayments;
+        score = Math.round(50 + (successRate - 0.5) * 100);
+        score = Math.max(0, Math.min(100, score));
+      }
+      score = Math.min(100, score + referralCount * REPUTATION_REFERRAL_BOOST);
+      const level = reputationLevelFromScore(score);
+      txn.set(
+        userRef,
+        {
+          reputation: {
+            ...rep,
+            paymentsCompleted,
+            paymentsMissed,
+            referralCount,
+            score,
+            level,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    });
+  } catch (err) {
+    console.warn(`bumpReputationServerSide(${uid}, ${kind}) failed:`, err);
+  }
+}
+
 function payoutBreadcrumb(
   flow: "linkBankAccount" | "requestWithdrawal" | "distributeGroupPayouts",
   step: string,
@@ -199,6 +384,72 @@ const DAILY_STAKE_CAP_CENTS: number = (() => {
   const parsed = parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 2500;
 })();
+
+// Server-authoritative cadence table. Mirrors src/constants/config.ts CADENCES.
+// Used by handleSessionComplete / handleSessionForfeit to reconstruct stake +
+// duration from the session's cadence field, ignoring client-supplied
+// stakeAmount / endsAt (which are still validated by Firestore rules for shape
+// but not for value). Keep in sync with the client constants.
+const CADENCES_SERVER: Record<string, { stake: number; duration: number }> = {
+  test: { stake: 100, duration: 60 * 1000 },
+  focus: { stake: 200, duration: 25 * 60 * 1000 },
+  hour: { stake: 500, duration: 60 * 60 * 1000 },
+  daily: { stake: 500, duration: 24 * 60 * 60 * 1000 },
+  weekly: { stake: 2500, duration: 7 * 24 * 60 * 60 * 1000 },
+  monthly: { stake: 10000, duration: 30 * 24 * 60 * 60 * 1000 },
+};
+
+// Demo / short-timer durations used by clients when EXPO_PUBLIC_DEMO_MODE or
+// EXPO_PUBLIC_SHORT_TIMERS is set. Stake stays the same; only duration shrinks.
+// Server must accept these endsAt windows because clients in those modes write
+// sessions with the demoDuration window. The stake derivation is unaffected.
+const CADENCES_SERVER_DEMO_DURATION: Record<string, number> = {
+  test: 10 * 1000,
+  focus: 15 * 1000,
+  hour: 30 * 1000,
+  daily: 10 * 1000,
+  weekly: 60 * 1000,
+  monthly: 90 * 1000,
+};
+
+/**
+ * Returns the server-derived stake (cents) for a session, or throws if the
+ * cadence is unknown. Replaces trusting `sessionData.stakeAmount`.
+ */
+function resolveCadenceStake(cadence: unknown): number {
+  if (typeof cadence !== "string") {
+    throw new Error("Session missing cadence");
+  }
+  const entry = CADENCES_SERVER[cadence];
+  if (!entry) throw new Error("Unknown cadence");
+  return entry.stake;
+}
+
+/**
+ * Validates that the session's claimed `endsAt` falls within a known cadence
+ * window (regular or demo) starting from `startedAt`. Allows ±2 minutes of
+ * skew to accommodate clock drift between client and server. Throws on
+ * mismatch — prevents an attacker from minting a session with endsAt=1970
+ * to immediately complete it.
+ */
+function assertEndsAtMatchesCadence(
+  cadence: string,
+  startedAtMs: number,
+  endsAtMs: number,
+): void {
+  const reg = CADENCES_SERVER[cadence];
+  if (!reg) throw new Error("Unknown cadence");
+  const demoMs = CADENCES_SERVER_DEMO_DURATION[cadence];
+  const candidates = demoMs ? [reg.duration, demoMs] : [reg.duration];
+  const diffMs = endsAtMs - startedAtMs;
+  const skewToleranceMs = 2 * 60 * 1000;
+  const ok = candidates.some(
+    (expected) => Math.abs(diffMs - expected) <= skewToleranceMs,
+  );
+  if (!ok) {
+    throw new Error("Session endsAt does not match cadence");
+  }
+}
 
 /**
  * Sum of absolute stake amounts the user committed today (UTC day window).
@@ -393,12 +644,16 @@ async function settleGroupSessionPayouts(
     }
 
     try {
-      const recipientDoc = await db
-        .collection("users")
-        .doc(payout.userId)
-        .get();
+      // Read stripeAccountId from userPrivate first (post-H1), legacy
+      // top-level field on users as fallback for unmigrated recipients.
+      const [recipientPriv, recipientDoc] = await Promise.all([
+        db.collection("userPrivate").doc(payout.userId).get(),
+        db.collection("users").doc(payout.userId).get(),
+      ]);
       const connectAccountId: string =
-        recipientDoc.data()?.stripeAccountId ?? "";
+        (recipientPriv.data()?.stripeAccountId as string | undefined) ??
+        (recipientDoc.data()?.stripeAccountId as string | undefined) ??
+        "";
 
       let stripeTransferId: string | undefined;
 
@@ -471,8 +726,26 @@ async function sendPushToUser(
   data?: Record<string, string>,
 ): Promise<void> {
   try {
-    const userDoc = await db.collection("users").doc(uid).get();
-    const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+    // Prefer the server-only userPushTokens collection. Fall back to
+    // users.fcmTokens during the H1 migration window so users who haven't
+    // re-registered their device tokens yet keep getting pushes. Once the
+    // migration CF runs the legacy field is deleted.
+    const tokenRef = db.collection("userPushTokens").doc(uid);
+    const tokenDoc = await tokenRef.get();
+    let tokens: string[] = tokenDoc.exists
+      ? (tokenDoc.data()?.tokens ?? [])
+      : [];
+
+    let usingLegacy = false;
+    if (tokens.length === 0) {
+      const userDoc = await db.collection("users").doc(uid).get();
+      const legacy: string[] = userDoc.data()?.fcmTokens ?? [];
+      if (legacy.length > 0) {
+        tokens = legacy;
+        usingLegacy = true;
+      }
+    }
+
     if (tokens.length === 0) return;
 
     const messaging = admin.messaging();
@@ -489,7 +762,7 @@ async function sendPushToUser(
       ),
     );
 
-    // Clean up invalid tokens
+    // Clean up invalid tokens from whichever collection we read from.
     const invalidTokens: string[] = [];
     results.forEach((result, i) => {
       if (
@@ -500,12 +773,18 @@ async function sendPushToUser(
       }
     });
     if (invalidTokens.length > 0) {
-      await db
-        .collection("users")
-        .doc(uid)
-        .update({
-          fcmTokens: admin.firestore.FieldValue.arrayRemove(...invalidTokens),
+      if (usingLegacy) {
+        await db
+          .collection("users")
+          .doc(uid)
+          .update({
+            fcmTokens: admin.firestore.FieldValue.arrayRemove(...invalidTokens),
+          });
+      } else {
+        await tokenRef.update({
+          tokens: admin.firestore.FieldValue.arrayRemove(...invalidTokens),
         });
+      }
     }
   } catch (err) {
     console.error(`sendPushToUser failed for uid=${uid}:`, err);
@@ -551,6 +830,7 @@ const FAIL_CLOSED_FUNCTIONS = new Set<string>([
   "createPaymentIntent",
   "verifyAndCreditDeposit",
   "requestWithdrawal",
+  "createSoloSession",
   "handleSessionComplete",
   "handleSessionForfeit",
   "distributeGroupPayouts",
@@ -597,13 +877,68 @@ async function checkRateLimit(
   }
 }
 
+/**
+ * SHA-256 of the caller IP, truncated to 16 hex chars for a short doc-id
+ * suffix. Hashing avoids storing raw IPs in the rateLimits collection (PII
+ * minimization) while preserving the same-IP equivalence we need for the
+ * rate-limit check.
+ */
+function ipFingerprint(ip: string): string {
+  return crypto.createHash("sha256").update(ip).digest("hex").slice(0, 16);
+}
+
+/**
+ * Companion to checkRateLimit that buckets requests by client IP instead of
+ * user UID. Stops the "spin up a million accounts" abuse vector — even when
+ * each fresh account passes its own per-user limit, the IP that originated
+ * them all is still capped. Use on money paths and registration/auth CFs.
+ *
+ * Returns true when the caller should be BLOCKED. When no IP is available
+ * (local emulator, missing X-Forwarded-For) the check is a no-op so dev
+ * flows aren't broken — the per-user limit still applies.
+ */
+async function checkIpRateLimit(
+  req: Request,
+  functionName: string,
+  config: RateLimitConfig,
+): Promise<boolean> {
+  const callerIp = getCallerIp(req);
+  if (!callerIp) return false; // no IP visible → defer to per-user limiter
+  const docId = `ip_${ipFingerprint(callerIp)}_${functionName}`;
+  const ref = db.collection("rateLimits").doc(docId);
+  const now = Date.now();
+  const windowStart = now - config.windowMs;
+
+  try {
+    return await db.runTransaction(async (txn) => {
+      const snap = await txn.get(ref);
+      const data = snap.data();
+      const timestamps: number[] = data?.timestamps ?? [];
+      const recent = timestamps.filter((t) => t > windowStart);
+      if (recent.length >= config.maxCalls) return true;
+      recent.push(now);
+      txn.set(ref, { timestamps: recent, updatedAt: now });
+      return false;
+    });
+  } catch (err) {
+    // Same fail-closed policy as checkRateLimit for money paths.
+    const failClosed = FAIL_CLOSED_FUNCTIONS.has(functionName);
+    console.error(
+      `IP rate limit check failed (${failClosed ? "BLOCKING" : "allowing"} ${functionName}):`,
+      err,
+    );
+    return failClosed;
+  }
+}
+
 // Rate limit configurations per function
 const RATE_LIMITS = {
+  createSoloSession: { maxCalls: 10, windowMs: 3_600_000 }, // 10/hr — bounded by daily-stake cap anyway
   handleSessionComplete: { maxCalls: 5, windowMs: 3_600_000 }, // 5/hr
   handleSessionForfeit: { maxCalls: 5, windowMs: 3_600_000 }, // 5/hr
   createPaymentIntent: { maxCalls: 3, windowMs: 600_000 }, // 3/10min
   verifyAndCreditDeposit: { maxCalls: 5, windowMs: 600_000 }, // 5/10min
-  requestWithdrawal: { maxCalls: 10, windowMs: 3_600_000 }, // 10/hr (relaxed for testing)
+  requestWithdrawal: { maxCalls: 3, windowMs: 3_600_000 }, // 3/hr — backstops the $25k/day aggregate cap; a compromised account can still hit the daily ceiling but in fewer attempts
   distributeGroupPayouts: { maxCalls: 3, windowMs: 3_600_000 }, // 3/hr
   awardReferral: { maxCalls: 10, windowMs: 86_400_000 }, // 10/day
   createConnectAccount: { maxCalls: 3, windowMs: 3_600_000 }, // 3/hr
@@ -623,7 +958,25 @@ const RATE_LIMITS = {
   unlinkBankAccount: { maxCalls: 5, windowMs: 3_600_000 }, // 5/hr
   replaceBankAccount: { maxCalls: 5, windowMs: 3_600_000 }, // 5/hr
   requestAccountMerge: { maxCalls: 10, windowMs: 3_600_000 }, // 10/hr — runs on every fresh sign-in
-  findContactsOnNiyah: { maxCalls: 3, windowMs: 86_400_000 }, // 3/day — prevent phone enumeration
+  findContactsOnNiyah: { maxCalls: 1, windowMs: 86_400_000 }, // 1/day — cap phone→name enumeration to 500 contacts/attacker/day
+  registerPushToken: { maxCalls: 20, windowMs: 600_000 }, // 20/10min — token refresh fires occasionally
+  removePushToken: { maxCalls: 10, windowMs: 600_000 }, // 10/10min — logout / device removal
+} as const;
+
+/**
+ * Per-IP ceilings for the money-path CFs. Sized ~3x the per-user limit so
+ * legitimate NAT-shared callers (family, dorm, office) don't trip but a
+ * single attacker spinning up many fresh accounts to multiply their
+ * per-user budget still hits a wall. Backstops `RATE_LIMITS` above.
+ */
+const IP_RATE_LIMITS = {
+  createPaymentIntent: { maxCalls: 8, windowMs: 600_000 },
+  verifyAndCreditDeposit: { maxCalls: 12, windowMs: 600_000 },
+  requestWithdrawal: { maxCalls: 6, windowMs: 3_600_000 },
+  createSoloSession: { maxCalls: 25, windowMs: 3_600_000 },
+  linkBankAccount: { maxCalls: 12, windowMs: 3_600_000 },
+  respondToGroupInvite: { maxCalls: 25, windowMs: 3_600_000 },
+  createGroupSession: { maxCalls: 12, windowMs: 3_600_000 },
 } as const;
 
 // ─── createPaymentIntent ────────────────────────────────────────────────────
@@ -642,9 +995,14 @@ export const createPaymentIntent = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -656,6 +1014,16 @@ export const createPaymentIntent = onRequest(
       )
     ) {
       sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+    if (
+      await checkIpRateLimit(
+        req,
+        "createPaymentIntent",
+        IP_RATE_LIMITS.createPaymentIntent,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
       return;
     }
 
@@ -676,25 +1044,26 @@ export const createPaymentIntent = onRequest(
     try {
       const stripe = getStripe();
 
-      // Get or create Stripe customer
-      const userDoc = await db.collection("users").doc(uid).get();
-      const userData = userDoc.data() ?? {};
-      let customerId: string = userData.stripeCustomerId ?? "";
+      // Get or create Stripe customer. Customer ID lives in userPrivate so
+      // a malicious user can't forge another user's stripeCustomerId to
+      // enumerate their saved payment methods via PaymentSheet (H1/H2).
+      const userView = await readUserWithPrivate(uid);
+      if (!userView) {
+        sendError(res, 400, "User not found");
+        return;
+      }
+      const userData = userView.user;
+      let customerId: string =
+        (userView.merged.stripeCustomerId as string | undefined) ?? "";
 
       if (!customerId) {
         const customer = await stripe.customers.create({
           metadata: { firebaseUid: uid },
-          email: userData.email ?? undefined,
-          name: userData.name ?? undefined,
+          email: (userData.email as string | undefined) ?? undefined,
+          name: (userData.name as string | undefined) ?? undefined,
         });
         customerId = customer.id;
-        await db.collection("users").doc(uid).set(
-          {
-            stripeCustomerId: customerId,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
+        await writeUserPrivate(uid, { stripeCustomerId: customerId });
       }
 
       const paymentIntent = await stripe.paymentIntents.create({
@@ -739,9 +1108,14 @@ export const verifyAndCreditDeposit = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -753,6 +1127,16 @@ export const verifyAndCreditDeposit = onRequest(
       )
     ) {
       sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+    if (
+      await checkIpRateLimit(
+        req,
+        "verifyAndCreditDeposit",
+        IP_RATE_LIMITS.verifyAndCreditDeposit,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
       return;
     }
 
@@ -886,12 +1270,19 @@ export const createConnectAccount = onRequest(
     }
 
     try {
-      const userDoc = await db.collection("users").doc(uid).get();
-      const userData = userDoc.data() ?? {};
+      const userView = await readUserWithPrivate(uid);
+      if (!userView) {
+        sendError(res, 400, "User not found");
+        return;
+      }
+      const userData = userView.user;
+      const merged = userView.merged;
 
-      // Return existing if already set up
-      if (userData.stripeAccountId) {
-        res.json({ accountId: userData.stripeAccountId });
+      // Return existing if already set up. stripeAccountId lives in
+      // userPrivate after H1 migration; merged view falls back to the legacy
+      // top-level field for unmigrated users.
+      if (merged.stripeAccountId) {
+        res.json({ accountId: merged.stripeAccountId as string });
         return;
       }
 
@@ -911,16 +1302,21 @@ export const createConnectAccount = onRequest(
           : undefined;
 
       // Client-provided legal names win over the profile display name, which
-      // may be a nickname. Fallback to profile data as a last resort.
-      const displayName =
-        typeof userData.displayName === "string"
-          ? userData.displayName.trim()
-          : "";
+      // may be a nickname. Fallback to profile data as a last resort. Cap
+      // lengths to belt-and-suspenders the Firestore rule size limits — an
+      // attacker who slipped a long string past the rule still can't push a
+      // megabyte into Stripe's metadata.
+      const trim = (v: unknown, max: number): string | undefined => {
+        if (typeof v !== "string") return undefined;
+        const t = v.trim();
+        return t.length === 0 ? undefined : t.slice(0, max);
+      };
+      const displayName = trim(userData.displayName, 100) ?? "";
       const nameParts = displayName.split(/\s+/);
       const fallbackFirst =
-        (userData.firstName as string | undefined) || nameParts[0] || undefined;
+        trim(userData.firstName, 50) || nameParts[0] || undefined;
       const fallbackLast =
-        (userData.lastName as string | undefined) ||
+        trim(userData.lastName, 50) ||
         (nameParts.length > 1 ? nameParts.slice(1).join(" ") : undefined);
       const firstName = kycData?.legalFirstName || fallbackFirst;
       const lastName = kycData?.legalLastName || fallbackLast;
@@ -962,21 +1358,18 @@ export const createConnectAccount = onRequest(
         metadata: { firebaseUid: uid },
       });
 
-      await db
-        .collection("users")
-        .doc(uid)
-        .update({
-          stripeAccountId: account.id,
-          stripeAccountStatus: "pending",
-          ...(kycData
-            ? {
-                legalFirstName: kycData.legalFirstName,
-                legalLastName: kycData.legalLastName,
-                stripeKycProvidedAt:
-                  admin.firestore.FieldValue.serverTimestamp(),
-              }
-            : {}),
-        });
+      await writeUserPrivate(uid, {
+        stripeAccountId: account.id,
+        stripeAccountStatus: "pending",
+        ...(kycData
+          ? {
+              legalFirstName: kycData.legalFirstName,
+              legalLastName: kycData.legalLastName,
+              stripeKycProvidedAt:
+                admin.firestore.FieldValue.serverTimestamp(),
+            }
+          : {}),
+      });
 
       res.json({ accountId: account.id });
     } catch (err) {
@@ -1149,9 +1542,10 @@ export const createAccountLink = onRequest(
     }
 
     try {
-      // Read accountId from Firestore — NEVER trust client-provided accountId
-      const userDoc = await db.collection("users").doc(uid).get();
-      const accountId: string = userDoc.data()?.stripeAccountId ?? "";
+      // Read accountId from userPrivate — NEVER trust client-provided accountId
+      const userView = await readUserWithPrivate(uid);
+      const accountId: string =
+        (userView?.merged.stripeAccountId as string | undefined) ?? "";
       if (!accountId) {
         sendError(
           res,
@@ -1210,8 +1604,9 @@ export const getConnectAccountStatus = onRequest(
     }
 
     try {
-      const userDoc = await db.collection("users").doc(uid).get();
-      const accountId: string = userDoc.data()?.stripeAccountId ?? "";
+      const userView = await readUserWithPrivate(uid);
+      const accountId: string =
+        (userView?.merged.stripeAccountId as string | undefined) ?? "";
 
       if (!accountId) {
         res.json({ status: "none" });
@@ -1226,12 +1621,6 @@ export const getConnectAccountStatus = onRequest(
           ? "active"
           : "restricted"
         : "pending";
-
-      // Sync status to Firestore
-      await db
-        .collection("users")
-        .doc(uid)
-        .update({ stripeAccountStatus: status });
 
       // Retrieve linked bank info from external accounts
       let bankName: string | undefined;
@@ -1250,18 +1639,23 @@ export const getConnectAccountStatus = onRequest(
         // Non-critical — bank info is nice-to-have
       }
 
-      // Sync status + bank info to Firestore
-      const update: Record<string, unknown> = {
-        stripeAccountStatus: status,
-      };
-      if (bankName && bankMask) {
-        update.linkedBank = {
-          institutionName: bankName,
-          bankName,
-          mask: bankMask,
-        };
-      }
-      await db.collection("users").doc(uid).update(update);
+      // stripeAccountStatus goes to userPrivate; linkedBank display info
+      // stays on users/{uid} because the wallet UI reads it directly.
+      const publicUpdate: Record<string, unknown> =
+        bankName && bankMask
+          ? {
+              linkedBank: {
+                institutionName: bankName,
+                bankName,
+                mask: bankMask,
+              },
+            }
+          : {};
+      await writeUserPrivate(
+        uid,
+        { stripeAccountStatus: status },
+        publicUpdate,
+      );
 
       res.json({
         status,
@@ -1379,6 +1773,16 @@ export const linkBankAccount = onRequest(
       sendError(res, 429, "Too many requests — try again later");
       return;
     }
+    if (
+      await checkIpRateLimit(
+        req,
+        "linkBankAccount",
+        IP_RATE_LIMITS.linkBankAccount,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
+      return;
+    }
 
     const { publicToken, accountId } = req.body as {
       publicToken: unknown;
@@ -1396,13 +1800,17 @@ export const linkBankAccount = onRequest(
     try {
       const plaid = getPlaid();
       const stripe = getStripe();
-      const userRef = db.collection("users").doc(uid);
-      const userDoc = await userRef.get();
-      const userData = userDoc.data() ?? {};
+      const userView = await readUserWithPrivate(uid);
+      if (!userView) {
+        sendError(res, 400, "User not found");
+        return;
+      }
+      const userData = userView.user;
+      const merged = userView.merged;
 
       // Idempotency: if user already has a linked bank, return existing data
-      if (userData.linkedBank && userData.stripeAccountId) {
-        const lb = userData.linkedBank as {
+      if (merged.linkedBank && merged.stripeAccountId) {
+        const lb = merged.linkedBank as {
           institutionName?: string;
           bankName?: string;
           mask?: string;
@@ -1488,12 +1896,14 @@ export const linkBankAccount = onRequest(
       }
 
       // 4. Create or get Stripe Express connected account
-      let stripeAccountId: string = userData.stripeAccountId ?? "";
+      let stripeAccountId: string =
+        (merged.stripeAccountId as string | undefined) ?? "";
       try {
         if (!stripeAccountId) {
           const validEmail =
-            typeof userData.email === "string" && userData.email.includes("@")
-              ? userData.email
+            typeof userData.email === "string" &&
+            (userData.email as string).includes("@")
+              ? (userData.email as string)
               : undefined;
 
           const account = await stripe.accounts.create({
@@ -1561,21 +1971,27 @@ export const linkBankAccount = onRequest(
         stripeAccountId,
       });
 
-      // 6. Store everything in Firestore (access_token server-side only)
-      await userRef.update({
-        stripeAccountId: stripeAccountId,
-        stripeAccountStatus: "active",
-        plaidAccessToken: accessToken,
-        plaidItemId: itemId,
-        plaidAccountId: accountId,
-        linkedBank: {
-          institutionName,
-          bankName,
-          mask: bankMask,
-          linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+      // 6. Persist. Sensitive fields (Plaid tokens, Stripe account ID/status)
+      // go to userPrivate; linkedBank display info stays on users so the
+      // wallet UI can show "Chase ****1234" without hitting userPrivate.
+      await writeUserPrivate(
+        uid,
+        {
+          stripeAccountId,
+          stripeAccountStatus: "active",
+          plaidAccessToken: accessToken,
+          plaidItemId: itemId,
+          plaidAccountId: accountId,
         },
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+        {
+          linkedBank: {
+            institutionName,
+            bankName,
+            mask: bankMask,
+            linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+        },
+      );
       payoutBreadcrumb("linkBankAccount", "firestore_committed", { uid });
 
       res.json({
@@ -1658,18 +2074,17 @@ export const unlinkBankAccount = onRequest(
 async function unlinkBankInternal(uid: string): Promise<void> {
   const stripe = getStripe();
   const plaid = getPlaid();
-  const userRef = db.collection("users").doc(uid);
-  const userSnap = await userRef.get();
-  if (!userSnap.exists) return;
-  const userData = userSnap.data() ?? {};
+  const userView = await readUserWithPrivate(uid);
+  if (!userView) return;
+  const merged = userView.merged;
 
   const stripeAccountId =
-    typeof userData.stripeAccountId === "string"
-      ? userData.stripeAccountId
+    typeof merged.stripeAccountId === "string"
+      ? (merged.stripeAccountId as string)
       : undefined;
   const plaidAccessToken =
-    typeof userData.plaidAccessToken === "string"
-      ? userData.plaidAccessToken
+    typeof merged.plaidAccessToken === "string"
+      ? (merged.plaidAccessToken as string)
       : undefined;
 
   // Detach all external accounts attached to the Stripe Connect account.
@@ -1698,24 +2113,62 @@ async function unlinkBankInternal(uid: string): Promise<void> {
   }
 
   // Invalidate Plaid access token so it cannot be reused. /item/remove is
-  // best-effort — if it fails, the token has at most a 30-day lifetime anyway.
+  // best-effort — if it fails because the user already revoked us via the
+  // bank's portal (INVALID_ACCESS_TOKEN / ITEM_LOGIN_REQUIRED) we log and
+  // proceed; the batch update below nulls the stored fields either way.
+  // The `plaidWebhook` CF handles the proactive case where revocation
+  // happens outside our app — this catch is the reactive fallback.
   if (plaidAccessToken) {
     try {
       await plaid.itemRemove({ access_token: plaidAccessToken });
       console.info(`unlinkBankInternal: plaid item removed for uid=${uid}`);
     } catch (err) {
-      console.warn("unlinkBankInternal: plaid.itemRemove failed:", err);
+      const code = (err as { error_code?: string; response?: { data?: { error_code?: string } } })?.response?.data?.error_code
+        ?? (err as { error_code?: string })?.error_code;
+      if (
+        code === "INVALID_ACCESS_TOKEN" ||
+        code === "ITEM_LOGIN_REQUIRED" ||
+        code === "ITEM_NOT_FOUND"
+      ) {
+        console.info(
+          `unlinkBankInternal: plaid item already revoked for uid=${uid} (${code})`,
+        );
+      } else {
+        console.warn("unlinkBankInternal: plaid.itemRemove failed:", err);
+      }
     }
   }
 
-  await userRef.update({
-    linkedBank: admin.firestore.FieldValue.delete(),
-    plaidAccessToken: admin.firestore.FieldValue.delete(),
-    plaidItemId: admin.firestore.FieldValue.delete(),
-    plaidAccountId: admin.firestore.FieldValue.delete(),
-    stripeAccountStatus: stripeAccountId ? "pending" : undefined,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  // Delete Plaid tokens from userPrivate; clear linkedBank from public users.
+  // stripeAccountStatus flips to "pending" so withdrawal is disabled until a
+  // new bank is attached.
+  const userRef = db.collection("users").doc(uid);
+  const privateRef = db.collection("userPrivate").doc(uid);
+  const batch = db.batch();
+  batch.set(
+    privateRef,
+    {
+      plaidAccessToken: admin.firestore.FieldValue.delete(),
+      plaidItemId: admin.firestore.FieldValue.delete(),
+      plaidAccountId: admin.firestore.FieldValue.delete(),
+      ...(stripeAccountId ? { stripeAccountStatus: "pending" } : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+  batch.set(
+    userRef,
+    {
+      linkedBank: admin.firestore.FieldValue.delete(),
+      // Clear legacy mirrors in case of unmigrated users.
+      plaidAccessToken: admin.firestore.FieldValue.delete(),
+      plaidItemId: admin.firestore.FieldValue.delete(),
+      plaidAccountId: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+  await batch.commit();
 }
 
 // ─── replaceBankAccount ─────────────────────────────────────────────────────
@@ -1774,17 +2227,21 @@ export const replaceBankAccount = onRequest(
 
     const plaid = getPlaid();
     const stripe = getStripe();
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    const userData = userSnap.data() ?? {};
+    const userView = await readUserWithPrivate(uid);
+    if (!userView) {
+      sendError(res, 400, "User not found");
+      return;
+    }
+    const userData = userView.user;
+    const merged = userView.merged;
 
     const oldStripeAccountId =
-      typeof userData.stripeAccountId === "string"
-        ? userData.stripeAccountId
+      typeof merged.stripeAccountId === "string"
+        ? (merged.stripeAccountId as string)
         : "";
     const oldPlaidAccessToken =
-      typeof userData.plaidAccessToken === "string"
-        ? userData.plaidAccessToken
+      typeof merged.plaidAccessToken === "string"
+        ? (merged.plaidAccessToken as string)
         : undefined;
 
     try {
@@ -1841,8 +2298,9 @@ export const replaceBankAccount = onRequest(
       let stripeAccountId = oldStripeAccountId;
       if (!stripeAccountId) {
         const validEmail =
-          typeof userData.email === "string" && userData.email.includes("@")
-            ? userData.email
+          typeof userData.email === "string" &&
+          (userData.email as string).includes("@")
+            ? (userData.email as string)
             : undefined;
         const account = await stripe.accounts.create({
           type: "express",
@@ -1886,28 +2344,47 @@ export const replaceBankAccount = onRequest(
         console.warn("replaceBankAccount: cleanup of old externals failed:", err);
       }
 
-      // 7. Update Firestore with new bank info.
-      await userRef.update({
-        stripeAccountId,
-        stripeAccountStatus: "active",
-        plaidAccessToken: newAccessToken,
-        plaidItemId: newItemId,
-        plaidAccountId: accountId,
-        linkedBank: {
-          institutionName,
-          bankName,
-          mask: bankMask,
-          linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+      // 7. Persist new bank. Sensitive fields → userPrivate; linkedBank
+      // display info stays on the public user doc.
+      await writeUserPrivate(
+        uid,
+        {
+          stripeAccountId,
+          stripeAccountStatus: "active",
+          plaidAccessToken: newAccessToken,
+          plaidItemId: newItemId,
+          plaidAccountId: accountId,
         },
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+        {
+          linkedBank: {
+            institutionName,
+            bankName,
+            mask: bankMask,
+            linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+        },
+      );
 
-      // 8. Invalidate the old Plaid item. Best-effort, post-commit.
+      // 8. Invalidate the old Plaid item. Best-effort, post-commit. If the
+      // old item was already revoked at the bank, log it as such — the new
+      // item is already attached so the user-facing flow succeeded.
       if (oldPlaidAccessToken && oldPlaidAccessToken !== newAccessToken) {
         try {
           await plaid.itemRemove({ access_token: oldPlaidAccessToken });
         } catch (err) {
-          console.warn("replaceBankAccount: old plaid.itemRemove failed:", err);
+          const code = (err as { error_code?: string; response?: { data?: { error_code?: string } } })?.response?.data?.error_code
+            ?? (err as { error_code?: string })?.error_code;
+          if (
+            code === "INVALID_ACCESS_TOKEN" ||
+            code === "ITEM_LOGIN_REQUIRED" ||
+            code === "ITEM_NOT_FOUND"
+          ) {
+            console.info(
+              `replaceBankAccount: old plaid item already revoked (${code})`,
+            );
+          } else {
+            console.warn("replaceBankAccount: old plaid.itemRemove failed:", err);
+          }
         }
       }
 
@@ -1922,6 +2399,313 @@ export const replaceBankAccount = onRequest(
       const message =
         err instanceof Error ? err.message : "Failed to replace bank";
       sendError(res, 500, message);
+    }
+  },
+);
+
+// ─── registerPushToken / removePushToken ───────────────────────────────────
+/**
+ * Adds a verified FCM token to the caller's `userPushTokens/{uid}` doc.
+ * Replaces the prior client-side arrayUnion on `users/{uid}.fcmTokens`, which
+ * was readable by any signed-in user and let an attacker copy a victim's
+ * tokens into their own doc to receive their pushes.
+ *
+ * Body: { token: string }
+ * Token must be 32–4096 ASCII chars (FCM tokens are URL-safe base64ish).
+ */
+export const registerPushToken = onRequest(
+  PUBLIC_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req);
+    } catch {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+
+    if (
+      await checkRateLimit(
+        uid,
+        "registerPushToken",
+        RATE_LIMITS.registerPushToken,
+      )
+    ) {
+      sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+
+    const { token } = req.body as { token: unknown };
+    if (
+      typeof token !== "string" ||
+      token.length < 32 ||
+      token.length > 4096 ||
+      !/^[\x20-\x7E]+$/.test(token)
+    ) {
+      sendError(res, 400, "Invalid token");
+      return;
+    }
+
+    try {
+      await db
+        .collection("userPushTokens")
+        .doc(uid)
+        .set(
+          {
+            tokens: admin.firestore.FieldValue.arrayUnion(token),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      res.json({ success: true });
+    } catch (err) {
+      console.error("registerPushToken error:", err);
+      sendError(res, 500, "Failed to register push token");
+    }
+  },
+);
+
+/**
+ * Removes an FCM token from the caller's `userPushTokens/{uid}` doc on
+ * logout / device unregister.
+ *
+ * Body: { token: string }
+ */
+export const removePushToken = onRequest(
+  PUBLIC_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req);
+    } catch {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+
+    if (
+      await checkRateLimit(uid, "removePushToken", RATE_LIMITS.removePushToken)
+    ) {
+      sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+
+    const { token } = req.body as { token: unknown };
+    if (typeof token !== "string" || token.length < 1 || token.length > 4096) {
+      sendError(res, 400, "Invalid token");
+      return;
+    }
+
+    try {
+      await db
+        .collection("userPushTokens")
+        .doc(uid)
+        .set(
+          {
+            tokens: admin.firestore.FieldValue.arrayRemove(token),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      res.json({ success: true });
+    } catch (err) {
+      console.error("removePushToken error:", err);
+      sendError(res, 500, "Failed to remove push token");
+    }
+  },
+);
+
+// ─── createSoloSession ──────────────────────────────────────────────────────
+/**
+ * Starts a solo session server-side. Replaces the client-side path that
+ * wrote directly to `sessions/{id}` and deducted from the local wallet
+ * mirror — that path was the C1 attack surface (an attacker could write
+ * any stakeAmount + endsAt and immediately complete for a payout).
+ *
+ * Body: { cadence: string, sessionId: string, useShortTimer?: boolean }
+ *   - cadence: one of CADENCES_SERVER keys
+ *   - sessionId: client-generated UUID (lets the client retry idempotently)
+ *   - useShortTimer: true selects demoDuration (for EXPO_PUBLIC_SHORT_TIMERS)
+ * Returns: { success, sessionId, startedAt, endsAt, stakeAmount, newBalance }
+ *
+ * Idempotent: if the session already exists for the same userId, returns the
+ * existing record without re-debiting the wallet. Lets the client retry on
+ * transient network failure.
+ *
+ * SECURITY: stake + duration derived from server CADENCES_SERVER table.
+ * Wallet debit + session write happen in one Firestore transaction.
+ */
+export const createSoloSession = onRequest(
+  PUBLIC_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
+      return;
+    }
+
+    if (
+      await checkRateLimit(
+        uid,
+        "createSoloSession",
+        RATE_LIMITS.createSoloSession,
+      )
+    ) {
+      sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+    if (
+      await checkIpRateLimit(
+        req,
+        "createSoloSession",
+        IP_RATE_LIMITS.createSoloSession,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
+      return;
+    }
+
+    const { cadence, sessionId, useShortTimer } = req.body as {
+      cadence: unknown;
+      sessionId: unknown;
+      useShortTimer?: unknown;
+    };
+
+    if (typeof cadence !== "string" || !CADENCES_SERVER[cadence]) {
+      sendError(res, 400, "Invalid cadence");
+      return;
+    }
+    if (
+      typeof sessionId !== "string" ||
+      sessionId.length < 8 ||
+      sessionId.length > 64 ||
+      !/^[A-Za-z0-9_-]+$/.test(sessionId)
+    ) {
+      sendError(res, 400, "Invalid sessionId");
+      return;
+    }
+
+    const entry = CADENCES_SERVER[cadence];
+    const demoMs = CADENCES_SERVER_DEMO_DURATION[cadence];
+    const useShort = useShortTimer === true && demoMs !== undefined;
+    const durationMs = useShort ? (demoMs as number) : entry.duration;
+    const stakeAmount = entry.stake;
+
+    const capCheck = await assertDailyStakeCap(uid, stakeAmount);
+    if (!capCheck.ok) {
+      sendError(res, 400, capCheck.message);
+      return;
+    }
+
+    try {
+      const walletRef = db.collection("wallets").doc(uid);
+      const sessionRef = db.collection("sessions").doc(sessionId);
+      const stakeTxnRef = db.collection("transactions").doc();
+      const startedAt = new Date();
+      const endsAt = new Date(startedAt.getTime() + durationMs);
+
+      const result = await db.runTransaction(async (txn) => {
+        const walletSnap = await txn.get(walletRef);
+        const walletData = walletSnap.data() ?? {};
+        if (walletData.frozen === true) {
+          throw new Error("Wallet frozen — contact support");
+        }
+        const currentBalance: number =
+          typeof walletData.balance === "number" ? walletData.balance : 0;
+
+        // Idempotent retry: if a session with this ID already exists for the
+        // same user, return it unchanged (no second debit). Prevents
+        // double-debit when the client retries on a transient network error.
+        const existing = await txn.get(sessionRef);
+        if (existing.exists) {
+          const ex = existing.data()!;
+          if (ex.userId !== uid) {
+            throw new Error("Session ID collision");
+          }
+          return {
+            sessionId,
+            startedAtMs:
+              ex.startedAt?.toMillis?.() ?? new Date(ex.startedAt).getTime(),
+            endsAtMs:
+              ex.endsAt?.toMillis?.() ?? new Date(ex.endsAt).getTime(),
+            stakeAmount: ex.stakeAmount,
+            newBalance: currentBalance,
+            idempotent: true,
+          };
+        }
+
+        if (currentBalance < stakeAmount) {
+          throw new Error("Insufficient balance to stake");
+        }
+
+        const newBalance = currentBalance - stakeAmount;
+        txn.update(walletRef, {
+          balance: newBalance,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        txn.set(sessionRef, {
+          userId: uid,
+          cadence,
+          stakeAmount,
+          potentialPayout: stakeAmount,
+          startedAt: admin.firestore.Timestamp.fromDate(startedAt),
+          endsAt: admin.firestore.Timestamp.fromDate(endsAt),
+          status: "active",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        txn.set(stakeTxnRef, {
+          userId: uid,
+          type: "stake",
+          amount: -stakeAmount,
+          description: "Solo session stake",
+          sessionId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return {
+          sessionId,
+          startedAtMs: startedAt.getTime(),
+          endsAtMs: endsAt.getTime(),
+          stakeAmount,
+          newBalance,
+          idempotent: false,
+        };
+      });
+
+      res.json({ success: true, ...result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      if (
+        message.includes("Insufficient balance") ||
+        message.includes("Wallet frozen") ||
+        message.includes("Session ID collision")
+      ) {
+        sendError(res, 400, message);
+      } else {
+        console.error("createSoloSession error:", err);
+        sendError(res, 500, "Failed to start session");
+      }
     }
   },
 );
@@ -1946,9 +2730,14 @@ export const handleSessionComplete = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -1995,7 +2784,7 @@ export const handleSessionComplete = onRequest(
           );
         }
 
-        // Verify timer: session must have ended (30s grace for clock skew)
+        // Verify timer: session must have ended (10s grace for clock skew)
         const endsAt = sessionData.endsAt?.toDate?.()
           ? sessionData.endsAt.toDate()
           : new Date(sessionData.endsAt);
@@ -2004,11 +2793,19 @@ export const handleSessionComplete = onRequest(
           throw new Error("Session has not ended yet");
         }
 
-        // Read stakeAmount from session doc — NEVER trust client-provided amount
-        const stakeAmount: number = sessionData.stakeAmount;
-        if (!stakeAmount || stakeAmount <= 0) {
-          throw new Error("Invalid stake amount on session");
-        }
+        // Derive stake from server-authoritative cadence table. Firestore rules
+        // only validate `stakeAmount` shape — an attacker can write any value.
+        // Same for endsAt: reconstruct the cadence window and reject mismatch
+        // to block "endsAt=1970 + stakeAmount=$1M" minting.
+        const stakeAmount = resolveCadenceStake(sessionData.cadence);
+        const startedAt = sessionData.startedAt?.toDate?.()
+          ? sessionData.startedAt.toDate()
+          : new Date(sessionData.startedAt);
+        assertEndsAtMatchesCadence(
+          sessionData.cadence,
+          startedAt.getTime(),
+          endsAt.getTime(),
+        );
 
         // Payout = stake (stickK model). User gets their stake back.
         const payout = stakeAmount;
@@ -2053,6 +2850,10 @@ export const handleSessionComplete = onRequest(
         console.warn("maybeAwardFinalsPromo (solo) failed:", err),
       );
 
+      // Server-driven reputation update. Replaces the client-side write that
+      // was blocked by the H2/M1 rule tightening.
+      await bumpReputationServerSide(uid, "completed");
+
       res.json({ newBalance, payout });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -2061,7 +2862,10 @@ export const handleSessionComplete = onRequest(
         message.includes("not found") ||
         message.includes("does not belong") ||
         message.includes("not active") ||
-        message.includes("not ended")
+        message.includes("not ended") ||
+        message.includes("Unknown cadence") ||
+        message.includes("missing cadence") ||
+        message.includes("does not match cadence")
       ) {
         sendError(res, 400, message);
       } else {
@@ -2093,9 +2897,14 @@ export const handleSessionForfeit = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -2147,7 +2956,11 @@ export const handleSessionForfeit = onRequest(
         const userData = userSnap.data() ?? {};
         const walletSnap = await txn.get(walletRef);
 
-        const stakeAmount: number = sessionData.stakeAmount;
+        // Derive stake from cadence (see C1 fix in handleSessionComplete).
+        // Forfeit credits the forgiveness refund + revenue line from this
+        // number, so trusting the doc would let an attacker forge a giant
+        // stake to drain the revenue ledger and inflate forgiveness.
+        const stakeAmount = resolveCadenceStake(sessionData.cadence);
 
         // First-surrender forgiveness: refund min(stake, cap) once per user.
         // Framed as a tutorial lesson — user sees the commitment mechanism work
@@ -2241,6 +3054,11 @@ export const handleSessionForfeit = onRequest(
         return { forgiven: refundedCents > 0, refundedCents };
       });
 
+      // Server-driven reputation: surrender counts as a missed commitment.
+      // Forgiveness still flips the counter — the score should reflect the
+      // user's actual track record even when we refund their first slip.
+      await bumpReputationServerSide(uid, "missed");
+
       res.json({
         success: true,
         forgiven: outcome.forgiven,
@@ -2251,7 +3069,9 @@ export const handleSessionForfeit = onRequest(
       if (
         message.includes("not found") ||
         message.includes("does not belong") ||
-        message.includes("not active")
+        message.includes("not active") ||
+        message.includes("Unknown cadence") ||
+        message.includes("missing cadence")
       ) {
         sendError(res, 400, message);
       } else {
@@ -2345,6 +3165,16 @@ export const requestWithdrawal = onRequest(
       sendError(res, 429, "Too many requests — try again later");
       return;
     }
+    if (
+      await checkIpRateLimit(
+        req,
+        "requestWithdrawal",
+        IP_RATE_LIMITS.requestWithdrawal,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
+      return;
+    }
 
     const { amount, method = "standard" } = req.body as {
       amount: unknown;
@@ -2400,7 +3230,11 @@ export const requestWithdrawal = onRequest(
       }
     } catch (limitErr) {
       console.error("Daily limit check failed:", limitErr);
-      // Fail open for now — rate limiting still protects against abuse
+      // Fail closed: if we can't verify the user is under the $25k/day cap,
+      // refuse the withdrawal. Per-call rate limiting is a separate guardrail
+      // but doesn't bound aggregate damage on a compromised account.
+      sendError(res, 503, "Withdrawal temporarily unavailable — try again shortly");
+      return;
     }
 
     try {
@@ -2408,7 +3242,16 @@ export const requestWithdrawal = onRequest(
 
       // Read balance from wallets collection (protected from client writes)
       const walletSnap = await walletRef.get();
-      if ((walletSnap.data()?.balance ?? 0) < amount) {
+      const walletPre = walletSnap.data() ?? {};
+
+      // Reconcile may have frozen the wallet on detected drift. Refuse to
+      // pay out until an operator clears the freeze flag.
+      if (walletPre.frozen === true) {
+        sendError(res, 403, "Wallet frozen for review — contact support");
+        return;
+      }
+
+      if ((walletPre.balance ?? 0) < amount) {
         sendError(res, 400, "Insufficient balance");
         return;
       }
@@ -2441,12 +3284,13 @@ export const requestWithdrawal = onRequest(
         return;
       }
 
-      // Stripe methods require a connected account
-      const userRef = db.collection("users").doc(uid);
-      const userSnap = await userRef.get();
-      const userData = userSnap.data() ?? {};
+      // Stripe methods require a connected account. Read account id/status
+      // from userPrivate (post-H1) — public users doc no longer mirrors them.
+      const userView = await readUserWithPrivate(uid);
+      const merged = userView?.merged ?? {};
 
-      const connectedAccountId: string = userData.stripeAccountId ?? "";
+      const connectedAccountId: string =
+        (merged.stripeAccountId as string | undefined) ?? "";
       if (!connectedAccountId) {
         // Restore balance since Stripe transfer can't proceed
         await db.runTransaction(async (txn) => {
@@ -2462,7 +3306,7 @@ export const requestWithdrawal = onRequest(
         );
         return;
       }
-      if (userData.stripeAccountStatus !== "active") {
+      if (merged.stripeAccountStatus !== "active") {
         // Restore balance since Stripe transfer can't proceed
         await db.runTransaction(async (txn) => {
           const snap = await txn.get(walletRef);
@@ -2620,9 +3464,14 @@ export const distributeGroupPayouts = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -2993,11 +3842,58 @@ export const unfollowUserFn = onRequest(
  * Configure webhook endpoint in Stripe dashboard.
  * Events handled: payment_intent.succeeded, account.updated
  */
+// Stripe's published webhook source IPs. The authoritative list is
+// https://stripe.com/files/ips/ips_webhooks.json — refresh quarterly. This
+// is belt-and-suspenders alongside HMAC signature verification: an attacker
+// who somehow obtained the signing secret still has to spoof a Stripe IP
+// (and Cloud Run terminates TLS so they can't, but the check is cheap).
+const STRIPE_WEBHOOK_IPS = new Set<string>([
+  "3.18.12.63",
+  "3.130.192.231",
+  "13.235.14.237",
+  "13.235.122.149",
+  "18.211.135.69",
+  "35.154.171.200",
+  "52.15.183.38",
+  "54.88.130.119",
+  "54.88.130.237",
+  "54.187.174.169",
+  "54.187.205.235",
+  "54.187.216.72",
+]);
+
+/**
+ * Returns the immediate-upstream client IP from the X-Forwarded-For chain
+ * Cloud Run injects. Cloud Run guarantees the rightmost entry is the GFE,
+ * so the leftmost-but-one is the actual client. We read the leftmost and
+ * tolerate proxies that report only one hop. Returns "" when unknown.
+ */
+function getCallerIp(req: Request): string {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) {
+    return xff.split(",")[0]?.trim() ?? "";
+  }
+  if (Array.isArray(xff) && xff.length > 0) {
+    return xff[0].split(",")[0]?.trim() ?? "";
+  }
+  return "";
+}
+
 export const stripeWebhook = onRequest(
   PUBLIC_STRIPE_WEBHOOK_OPTIONS,
   async (req, res) => {
     if (req.method !== "POST") {
       sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    // IP allowlist: reject anything not coming from a published Stripe IP.
+    // Skipped when the list yields nothing (e.g. local emulator) to keep dev
+    // flows working — production Cloud Run always sets X-Forwarded-For.
+    const callerIp = getCallerIp(req);
+    if (callerIp && !STRIPE_WEBHOOK_IPS.has(callerIp)) {
+      console.warn(`stripeWebhook rejected non-Stripe IP: ${callerIp}`);
+      sendError(res, 403, "Forbidden");
       return;
     }
 
@@ -3058,7 +3954,7 @@ export const stripeWebhook = onRequest(
         }
 
         case "account.updated": {
-          // Sync Stripe Connect account status
+          // Sync Stripe Connect account status to userPrivate.
           const account = event.data.object as Stripe.Account;
           const uid = account.metadata?.firebaseUid;
           if (isValidFirebaseUid(uid)) {
@@ -3067,10 +3963,7 @@ export const stripeWebhook = onRequest(
                 ? "active"
                 : "restricted"
               : "pending";
-            await db
-              .collection("users")
-              .doc(uid)
-              .update({ stripeAccountStatus: status });
+            await writeUserPrivate(uid, { stripeAccountStatus: status });
           }
           break;
         }
@@ -3079,6 +3972,282 @@ export const stripeWebhook = onRequest(
       res.json({ received: true });
     } catch (err) {
       console.error("Webhook handler error:", err);
+      sendError(res, 500, "Webhook handler failed");
+    }
+  },
+);
+
+// ─── plaidWebhook ──────────────────────────────────────────────────────────
+/**
+ * Plaid webhook receiver. Verifies the request via Plaid's JWT verification
+ * key (ES256) and reverse-looks up the affected user by `item_id` to clear
+ * stored Plaid tokens when the user revokes access at their bank's portal
+ * (events: ITEM_LOGIN_REQUIRED, USER_PERMISSION_REVOKED, PENDING_EXPIRATION,
+ * ERROR with item-fatal codes). Without this CF the stored access_token
+ * lingers and confuses subsequent unlink / replace flows.
+ *
+ * Webhook URL is configured in Plaid Dashboard → Team Settings → Webhooks.
+ * No client auth on this endpoint — security is the JWT signature plus the
+ * `request_body_sha256` claim which binds the JWT to this exact payload.
+ */
+type JwtHeader = { alg?: string; kid?: string };
+type JwtPlaidPayload = { iat?: number; request_body_sha256?: string };
+
+const plaidJwkCache = new Map<
+  string,
+  { jwk: Record<string, unknown>; fetchedAt: number }
+>();
+const PLAID_JWK_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function b64urlDecode(s: string): Buffer {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  return Buffer.from(b64, "base64");
+}
+
+/**
+ * Convert a 64-byte raw ECDSA-P256 signature (32-byte r || 32-byte s) to
+ * the ASN.1 DER encoding that Node's `crypto.verify` expects. ES256 JWTs
+ * carry the raw form; Node's verify only takes DER.
+ */
+function rawEcdsaToDer(raw: Buffer): Buffer {
+  if (raw.length !== 64) {
+    throw new Error("Invalid ES256 signature length");
+  }
+  const r = raw.slice(0, 32);
+  const s = raw.slice(32, 64);
+  const encInt = (buf: Buffer): Buffer => {
+    let i = 0;
+    while (i < buf.length - 1 && buf[i] === 0x00) i++;
+    let trimmed = buf.slice(i);
+    if (trimmed[0] & 0x80) trimmed = Buffer.concat([Buffer.from([0x00]), trimmed]);
+    return Buffer.concat([Buffer.from([0x02, trimmed.length]), trimmed]);
+  };
+  const rDer = encInt(r);
+  const sDer = encInt(s);
+  return Buffer.concat([
+    Buffer.from([0x30, rDer.length + sDer.length]),
+    rDer,
+    sDer,
+  ]);
+}
+
+/**
+ * Verifies a Plaid webhook JWT (header.payload.signature). Returns the
+ * decoded payload on success, throws on any failure. Combines signature
+ * verification, freshness check (5-minute window) and body-hash binding.
+ */
+async function verifyPlaidJwt(
+  jwt: string,
+  rawBody: Buffer,
+): Promise<JwtPlaidPayload> {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) throw new Error("Malformed JWT");
+
+  const header = JSON.parse(b64urlDecode(parts[0]).toString("utf8")) as JwtHeader;
+  if (header.alg !== "ES256") throw new Error("Unexpected JWT alg");
+  if (typeof header.kid !== "string") throw new Error("JWT missing kid");
+
+  // Fetch (and cache) the JWK for this kid.
+  let entry = plaidJwkCache.get(header.kid);
+  if (!entry || Date.now() - entry.fetchedAt > PLAID_JWK_TTL_MS) {
+    const plaid = getPlaid();
+    const resp = await plaid.webhookVerificationKeyGet({ key_id: header.kid });
+    entry = {
+      jwk: resp.data.key as unknown as Record<string, unknown>,
+      fetchedAt: Date.now(),
+    };
+    plaidJwkCache.set(header.kid, entry);
+  }
+
+  const pubKey = crypto.createPublicKey({
+    key: entry.jwk as crypto.JsonWebKey,
+    format: "jwk",
+  });
+  const sigRaw = b64urlDecode(parts[2]);
+  const sigDer = rawEcdsaToDer(sigRaw);
+  const verifier = crypto.createVerify("SHA256");
+  verifier.update(`${parts[0]}.${parts[1]}`);
+  if (!verifier.verify(pubKey, sigDer)) {
+    throw new Error("JWT signature invalid");
+  }
+
+  const payload = JSON.parse(
+    b64urlDecode(parts[1]).toString("utf8"),
+  ) as JwtPlaidPayload;
+
+  // Freshness: reject JWTs older than 5 minutes (replay protection).
+  if (typeof payload.iat !== "number" || Date.now() / 1000 - payload.iat > 300) {
+    throw new Error("JWT stale");
+  }
+
+  // Body integrity: the JWT pins the sha256 of the request body so an
+  // attacker can't reuse a captured JWT with a different payload.
+  const bodyHash = crypto.createHash("sha256").update(rawBody).digest("hex");
+  if (payload.request_body_sha256 !== bodyHash) {
+    throw new Error("JWT body hash mismatch");
+  }
+
+  return payload;
+}
+
+/**
+ * Webhook codes that indicate the Plaid item is effectively dead and we
+ * should drop our stored tokens. Other codes (HISTORICAL_UPDATE,
+ * DEFAULT_UPDATE, TRANSACTIONS_REMOVED, etc.) are no-ops for Niyah's
+ * payouts-only use case.
+ */
+const PLAID_ITEM_KILL_CODES = new Set<string>([
+  "ITEM_LOGIN_REQUIRED",
+  "USER_PERMISSION_REVOKED",
+  "PENDING_EXPIRATION",
+  "ERROR", // generic; the inner error.error_code may still be transient — see below
+]);
+
+const PLAID_ERROR_FATAL_CODES = new Set<string>([
+  "ITEM_LOGIN_REQUIRED",
+  "INVALID_ACCESS_TOKEN",
+  "ITEM_NOT_FOUND",
+  "USER_PERMISSION_REVOKED",
+]);
+
+export const plaidWebhook = onRequest(
+  PUBLIC_PLAID_WEBHOOK_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    const verificationHeader = req.headers["plaid-verification"];
+    const jwt = Array.isArray(verificationHeader)
+      ? verificationHeader[0]
+      : verificationHeader;
+    if (typeof jwt !== "string" || !jwt) {
+      sendError(res, 400, "Missing Plaid-Verification");
+      return;
+    }
+
+    const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
+    if (!rawBody) {
+      sendError(res, 400, "Missing raw body");
+      return;
+    }
+
+    try {
+      await verifyPlaidJwt(jwt, rawBody);
+    } catch (err) {
+      console.warn(
+        "plaidWebhook rejected: ",
+        err instanceof Error ? err.message : err,
+      );
+      sendError(res, 401, "Invalid Plaid signature");
+      return;
+    }
+
+    let event: {
+      webhook_type?: string;
+      webhook_code?: string;
+      item_id?: string;
+      error?: { error_code?: string };
+    };
+    try {
+      event = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      sendError(res, 400, "Invalid JSON body");
+      return;
+    }
+
+    try {
+      // Niyah only acts on ITEM-class events that signal a dead item.
+      if (event.webhook_type !== "ITEM") {
+        // Acknowledge silently; not our concern (TRANSACTIONS, AUTH, etc.).
+        res.json({ received: true });
+        return;
+      }
+      const code = event.webhook_code ?? "";
+      const innerCode = event.error?.error_code ?? "";
+
+      const shouldClear =
+        PLAID_ITEM_KILL_CODES.has(code) &&
+        (code !== "ERROR" || PLAID_ERROR_FATAL_CODES.has(innerCode));
+
+      if (!shouldClear) {
+        res.json({ received: true });
+        return;
+      }
+
+      if (!event.item_id) {
+        console.warn("plaidWebhook ITEM event missing item_id");
+        res.json({ received: true });
+        return;
+      }
+
+      // Reverse-lookup the affected user via the userPrivate single-field
+      // index on plaidItemId (Firestore auto-creates these indexes). Should
+      // match at most one user; the schema enforces 1:1 item-to-user.
+      const matches = await db
+        .collection("userPrivate")
+        .where("plaidItemId", "==", event.item_id)
+        .limit(1)
+        .get();
+
+      if (matches.empty) {
+        console.info(
+          `plaidWebhook: no user found for item_id=${event.item_id} (already cleared?)`,
+        );
+        res.json({ received: true });
+        return;
+      }
+
+      const uid = matches.docs[0].id;
+      console.info(
+        `plaidWebhook: clearing tokens for uid=${uid} due to ${code}/${innerCode}`,
+      );
+
+      // Null the Plaid fields + flip Stripe status back to pending so
+      // withdrawals halt until the user re-links. linkedBank display state
+      // on the public users doc is also cleared so the wallet UI prompts
+      // the re-link CTA.
+      const userRef = db.collection("users").doc(uid);
+      const privateRef = db.collection("userPrivate").doc(uid);
+      const batch = db.batch();
+      batch.set(
+        privateRef,
+        {
+          plaidAccessToken: admin.firestore.FieldValue.delete(),
+          plaidItemId: admin.firestore.FieldValue.delete(),
+          plaidAccountId: admin.firestore.FieldValue.delete(),
+          stripeAccountStatus: "pending",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      batch.set(
+        userRef,
+        {
+          linkedBank: admin.firestore.FieldValue.delete(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      await batch.commit();
+
+      // Best-effort push to nudge the user to re-link before their next
+      // withdrawal attempt fails. Push payload is generic — no Plaid error
+      // codes or tokens included.
+      sendPushToUser(
+        uid,
+        {
+          title: "Bank link expired",
+          body: "Re-link your bank to continue withdrawing.",
+        },
+        { type: "bank_link_expired" },
+      );
+
+      res.json({ received: true });
+    } catch (err) {
+      console.error("plaidWebhook handler error:", err);
       sendError(res, 500, "Webhook handler failed");
     }
   },
@@ -3283,6 +4452,16 @@ export const createGroupSession = onRequest(
       )
     ) {
       sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+    if (
+      await checkIpRateLimit(
+        req,
+        "createGroupSession",
+        IP_RATE_LIMITS.createGroupSession,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
       return;
     }
 
@@ -3526,9 +4705,14 @@ export const respondToGroupInvite = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -3540,6 +4724,16 @@ export const respondToGroupInvite = onRequest(
       )
     ) {
       sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+    if (
+      await checkIpRateLimit(
+        req,
+        "respondToGroupInvite",
+        IP_RATE_LIMITS.respondToGroupInvite,
+      )
+    ) {
+      sendError(res, 429, "Too many requests from your network — try again later");
       return;
     }
 
@@ -3555,20 +4749,23 @@ export const respondToGroupInvite = onRequest(
 
     try {
       const inviteRef = db.collection("groupInvites").doc(inviteId);
-      const inviteSnap = await inviteRef.get();
 
+      // Pre-fetch invite once outside the transaction so we can fail fast
+      // on the obvious non-owner / wrong-status cases without running a txn
+      // every time. The authoritative status check happens INSIDE the accept
+      // txn below — this pre-check is for response shape parity with the
+      // pre-fix behavior (404 vs 403 vs 400) and to source the sessionId
+      // for the session pre-fetch.
+      const inviteSnap = await inviteRef.get();
       if (!inviteSnap.exists) {
         sendError(res, 404, "Invite not found");
         return;
       }
-
       const inviteData = inviteSnap.data()!;
-
       if (inviteData.toUserId !== uid) {
         sendError(res, 403, "Invite does not belong to this user");
         return;
       }
-
       if (inviteData.status !== "pending") {
         sendError(res, 400, `Invite already ${inviteData.status}`);
         return;
@@ -3581,42 +4778,59 @@ export const respondToGroupInvite = onRequest(
       const sessionData = sessionSnap.data()!;
 
       if (accept) {
-        // Daily stake cap — blocks acceptance if total committed today would exceed cap.
+        // Daily stake cap (advisory pre-check). Queries can't run inside a
+        // Firestore transaction, so we evaluate here. The txn below is still
+        // the serialization point — two concurrent accepts will both pass
+        // this check but only one will win the txn race.
         const capCheck = await assertDailyStakeCap(uid, inviteData.stake);
         if (!capCheck.ok) {
           sendError(res, 400, capCheck.message);
           return;
         }
 
-        // Deduct stake from user's wallet
         const walletRef = db.collection("wallets").doc(uid);
         const stakeTxnRef = db.collection("transactions").doc();
 
+        // Move invite read + status check + wallet debit + invite update
+        // into a single transaction. Without this, two concurrent accepts
+        // (double-tap / network retry) both see status=pending in their
+        // outside-the-txn read, both debit the wallet, and the user pays
+        // 2× stake for 1 invite. The transaction's optimistic concurrency
+        // makes the second commit observe status=accepted on retry and abort.
         await db.runTransaction(async (txn) => {
+          const inviteSnapTxn = await txn.get(inviteRef);
+          if (!inviteSnapTxn.exists) {
+            throw new Error("Invite not found");
+          }
+          const inviteCur = inviteSnapTxn.data()!;
+          if (inviteCur.toUserId !== uid) {
+            throw new Error("Invite does not belong to this user");
+          }
+          if (inviteCur.status !== "pending") {
+            throw new Error(`Invite already ${inviteCur.status}`);
+          }
+
           const walletSnap = await txn.get(walletRef);
           const currentBalance: number = walletSnap.data()?.balance ?? 0;
-
-          if (currentBalance < inviteData.stake) {
+          if (currentBalance < inviteCur.stake) {
             throw new Error("Insufficient balance to stake");
           }
 
           txn.update(walletRef, {
-            balance: currentBalance - inviteData.stake,
+            balance: currentBalance - inviteCur.stake,
           });
           txn.set(stakeTxnRef, {
             userId: uid,
             type: "stake",
-            amount: -inviteData.stake,
+            amount: -inviteCur.stake,
             description: "Group session stake",
-            sessionId: inviteData.sessionId,
+            sessionId: inviteCur.sessionId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
-        });
-
-        // Update invite status
-        await inviteRef.update({
-          status: "accepted",
-          respondedAt: admin.firestore.FieldValue.serverTimestamp(),
+          txn.update(inviteRef, {
+            status: "accepted",
+            respondedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
         });
 
         // Update session participant
@@ -3764,7 +4978,12 @@ export const respondToGroupInvite = onRequest(
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      if (message.includes("Insufficient balance")) {
+      if (
+        message.includes("Insufficient balance") ||
+        message.includes("Invite already") ||
+        message.includes("does not belong") ||
+        message.includes("Invite not found")
+      ) {
         sendError(res, 400, message);
       } else {
         console.error("respondToGroupInvite error:", err);
@@ -3880,9 +5099,14 @@ export const startGroupSession = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -3990,9 +5214,14 @@ export const reportSessionStatus = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -4143,6 +5372,14 @@ export const reportSessionStatus = onRequest(
           shouldSettle: true,
         };
       });
+
+      // Server-driven reputation: increment the caller's score immediately
+      // after their report lands so the leaderboard and profile both reflect
+      // the latest outcome on the next read.
+      await bumpReputationServerSide(
+        uid,
+        action === "complete" ? "completed" : "missed",
+      );
 
       if (!outcome.sessionComplete) {
         // Notify other participants when someone gives up mid-session.
@@ -4298,9 +5535,14 @@ export const reportShieldViolation = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -4426,9 +5668,14 @@ export const cancelGroupSession = onRequest(
 
     let uid: string;
     try {
-      uid = await verifyAuth(req);
-    } catch {
-      sendError(res, 401, "Unauthorized");
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
       return;
     }
 
@@ -5234,64 +6481,228 @@ export const mergeDuplicateUsers = onRequest(
   },
 );
 
+// ─── migrateSensitiveFieldsToPrivate (admin-only) ──────────────────────────
+/**
+ * One-shot H1 migration. Walks `users/{uid}`, copies SENSITIVE_USER_FIELDS
+ * to `userPrivate/{uid}`, moves `fcmTokens` to `userPushTokens/{uid}`, then
+ * field-deletes the keys from the public user doc.
+ *
+ * Idempotent: re-running after success is a no-op because the source fields
+ * are already gone. Safe to invoke on the long tail in batches via repeated
+ * calls — each call processes up to `limit` users (default 500).
+ *
+ * Admin-only: caller must pass `x-admin-key: <ADMIN_API_KEY>` and the
+ * compareAdminKey constant-time check must pass. Body:
+ *   { dryRun?: boolean, limit?: number, cursor?: string }
+ *
+ * Returns `{ processed, migrated, nextCursor? }`. Pass `nextCursor` back as
+ * `cursor` to resume; null/undefined means done.
+ */
+export const migrateSensitiveFieldsToPrivate = onRequest(
+  PUBLIC_ADMIN_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+    const provided = req.headers["x-admin-key"];
+    const expected = ADMIN_API_KEY.value();
+    if (!compareAdminKey(provided, expected)) {
+      sendError(res, 403, "Forbidden");
+      return;
+    }
+
+    const { dryRun, limit, cursor } = req.body as {
+      dryRun?: unknown;
+      limit?: unknown;
+      cursor?: unknown;
+    };
+    const pageSize =
+      typeof limit === "number" && limit > 0 && limit <= 1000 ? limit : 500;
+    const isDry = dryRun === true;
+    const startCursor = typeof cursor === "string" ? cursor : null;
+
+    try {
+      let q = db
+        .collection("users")
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageSize);
+      if (startCursor) {
+        const startDoc = await db.collection("users").doc(startCursor).get();
+        if (startDoc.exists) q = q.startAfter(startDoc);
+      }
+      const snap = await q.get();
+
+      let migrated = 0;
+      let processed = 0;
+      let nextCursor: string | null = null;
+
+      for (const doc of snap.docs) {
+        processed += 1;
+        const data = doc.data() ?? {};
+
+        const privateFields: Record<string, unknown> = {};
+        const clearOnUser: Record<string, unknown> = {};
+
+        for (const key of SENSITIVE_USER_FIELDS) {
+          if (data[key] !== undefined) {
+            privateFields[key] = data[key];
+            clearOnUser[key] = admin.firestore.FieldValue.delete();
+          }
+        }
+
+        const fcmTokens = Array.isArray(data.fcmTokens)
+          ? (data.fcmTokens as string[])
+          : null;
+
+        if (
+          Object.keys(privateFields).length === 0 &&
+          (!fcmTokens || fcmTokens.length === 0)
+        ) {
+          continue;
+        }
+
+        if (isDry) {
+          migrated += 1;
+          continue;
+        }
+
+        const batch = db.batch();
+        if (Object.keys(privateFields).length > 0) {
+          batch.set(
+            db.collection("userPrivate").doc(doc.id),
+            {
+              ...privateFields,
+              migratedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+        if (fcmTokens && fcmTokens.length > 0) {
+          batch.set(
+            db.collection("userPushTokens").doc(doc.id),
+            {
+              tokens: admin.firestore.FieldValue.arrayUnion(...fcmTokens),
+              migratedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+          clearOnUser.fcmTokens = admin.firestore.FieldValue.delete();
+        }
+        if (Object.keys(clearOnUser).length > 0) {
+          batch.set(
+            doc.ref,
+            {
+              ...clearOnUser,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+        await batch.commit();
+        migrated += 1;
+      }
+
+      if (snap.size >= pageSize && snap.docs.length > 0) {
+        nextCursor = snap.docs[snap.docs.length - 1].id;
+      }
+
+      res.json({
+        processed,
+        migrated,
+        dryRun: isDry,
+        ...(nextCursor ? { nextCursor } : {}),
+      });
+    } catch (err) {
+      console.error("migrateSensitiveFieldsToPrivate error:", err);
+      sendError(res, 500, "Migration failed");
+    }
+  },
+);
+
 // ─── reconcileWalletBalances (nightly) ──────────────────────────────────────
 /**
  * Sums each user's transaction log and compares to `wallets/{uid}.balance`.
- * Drift > 0 cents writes a record to `walletAudits/{uid}_{date}` and logs
- * an error so Sentry surfaces it. The job does not auto-correct — operators
- * inspect the audit doc and decide whether to credit or refund.
+ * Drift > 0 cents writes a record to `walletAudits/{uid}_{date}` AND flips
+ * `wallets/{uid}.frozen = true` so `requestWithdrawal` short-circuits before
+ * any drift-tainted balance can leave the system. Operators inspect the audit
+ * doc, decide on credit/refund, and unfreeze via console.
  *
- * Reads are throttled in batches of 200 wallets per minute window so a large
- * user base doesn't fan out into thousands of parallel queries.
+ * Reads are paginated by document-id cursor (500 wallets/page) so the job
+ * processes the entire user base, not just the first 2000. The previous
+ * `.limit(2000)` silently truncated past the threshold.
  */
 export const reconcileWalletBalances = onSchedule(
   { schedule: "0 4 * * *", timeZone: "America/New_York", region: "us-central1" },
   async () => {
     const today = new Date();
     const dateId = today.toISOString().slice(0, 10);
-    const walletsSnap = await db.collection("wallets").limit(2000).get();
+    const pageSize = 500;
     let mismatchCount = 0;
     let processed = 0;
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
 
-    for (const walletDoc of walletsSnap.docs) {
-      const uid = walletDoc.id;
-      const stored = walletDoc.data() ?? {};
-      const storedBalance =
-        typeof stored.balance === "number" ? stored.balance : 0;
+    while (true) {
+      let q = db
+        .collection("wallets")
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const walletsSnap = await q.get();
+      if (walletsSnap.empty) break;
 
-      const txnSnap = await db
-        .collection("transactions")
-        .where("userId", "==", uid)
-        .get();
-      let summed = 0;
-      txnSnap.forEach((d) => {
-        const amount = d.data().amount;
-        if (typeof amount === "number") summed += amount;
-      });
+      for (const walletDoc of walletsSnap.docs) {
+        const uid = walletDoc.id;
+        const stored = walletDoc.data() ?? {};
+        const storedBalance =
+          typeof stored.balance === "number" ? stored.balance : 0;
 
-      processed += 1;
-      const delta = storedBalance - summed;
-      if (delta !== 0) {
-        mismatchCount += 1;
-        console.error(
-          `reconcileWalletBalances drift uid=${uid} stored=${storedBalance} summed=${summed} delta=${delta}`,
-        );
-        await db
-          .collection("walletAudits")
-          .doc(`${uid}_${dateId}`)
-          .set(
-            {
-              uid,
-              date: dateId,
-              storedBalance,
-              summedFromTransactions: summed,
-              delta,
-              transactionCount: txnSnap.size,
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true },
+        const txnSnap = await db
+          .collection("transactions")
+          .where("userId", "==", uid)
+          .get();
+        let summed = 0;
+        txnSnap.forEach((d) => {
+          const amount = d.data().amount;
+          if (typeof amount === "number") summed += amount;
+        });
+
+        processed += 1;
+        const delta = storedBalance - summed;
+        if (delta !== 0) {
+          mismatchCount += 1;
+          console.error(
+            `reconcileWalletBalances drift uid=${uid} stored=${storedBalance} summed=${summed} delta=${delta}`,
           );
+          await db
+            .collection("walletAudits")
+            .doc(`${uid}_${dateId}`)
+            .set(
+              {
+                uid,
+                date: dateId,
+                storedBalance,
+                summedFromTransactions: summed,
+                delta,
+                transactionCount: txnSnap.size,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true },
+            );
+          // Auto-freeze the wallet. Withdrawal CF refuses to proceed while
+          // frozen=true, bounding damage from a drift event (e.g. C1-style
+          // mint that slipped past pre-deploy checks) until an operator
+          // unfreezes via console after determining root cause.
+          await walletDoc.ref.update({
+            frozen: true,
+            frozenReason: "balance_drift",
+            frozenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
       }
+
+      lastDoc = walletsSnap.docs[walletsSnap.docs.length - 1];
+      if (walletsSnap.size < pageSize) break;
     }
 
     console.info(
@@ -5465,3 +6876,133 @@ async function mergeOne(
 
   return summary;
 }
+
+// ─── disableBillingOnBudgetExceeded (opt-in Pub/Sub trigger) ───────────────
+/**
+ * GCP budget kill-switch. Subscribes to the Pub/Sub topic that a Cloud
+ * Billing budget alert publishes to when actual spend crosses a threshold.
+ * When `costAmount` exceeds `BILLING_KILL_RATIO * budgetAmount` (default 2x)
+ * AND the env flag is armed, this CF calls the Cloud Billing REST API to
+ * detach the billing account from the project — killing the live app but
+ * bounding financial blast radius from a runaway loop or compromise.
+ *
+ * **Disarmed by default.** Set `BILLING_KILL_SWITCH_ENABLED=true` to arm.
+ * The user must also:
+ *   1. Create a budget in GCP Billing → Budgets & Alerts → Pub/Sub topic
+ *      "billing-alerts" (or whatever topic name they configure here).
+ *   2. Grant the Cloud Functions runtime service account
+ *      (PROJECT_NUMBER-compute@developer.gserviceaccount.com or the
+ *      explicit functions SA) the `roles/billing.projectManager` role on
+ *      the BILLING ACCOUNT (not the project) so it can call
+ *      `cloudbilling.projects.updateBillingInfo`.
+ *
+ * Without those manual steps this CF logs and does nothing — safe to
+ * deploy alongside everything else.
+ */
+const BILLING_KILL_SWITCH_TOPIC =
+  process.env.BILLING_KILL_SWITCH_TOPIC ?? "billing-alerts";
+const BILLING_KILL_SWITCH_ENABLED =
+  process.env.BILLING_KILL_SWITCH_ENABLED === "true";
+const BILLING_KILL_RATIO = (() => {
+  const raw = process.env.BILLING_KILL_RATIO;
+  const parsed = raw ? Number.parseFloat(raw) : 2.0;
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : 2.0;
+})();
+
+interface BudgetNotification {
+  budgetDisplayName?: string;
+  alertThresholdExceeded?: number;
+  costAmount?: number;
+  costIntervalStart?: string;
+  budgetAmount?: number;
+  budgetAmountType?: string;
+  currencyCode?: string;
+}
+
+async function getMetadataAccessToken(): Promise<string> {
+  // Cloud Run metadata server — issues short-lived tokens for the runtime SA.
+  const res = await fetch(
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+    { headers: { "Metadata-Flavor": "Google" } },
+  );
+  if (!res.ok) {
+    throw new Error(`metadata server token fetch failed: ${res.status}`);
+  }
+  const json = (await res.json()) as { access_token?: string };
+  if (!json.access_token) throw new Error("metadata server returned no token");
+  return json.access_token;
+}
+
+async function detachBillingFromProject(projectId: string): Promise<void> {
+  const token = await getMetadataAccessToken();
+  const res = await fetch(
+    `https://cloudbilling.googleapis.com/v1/projects/${projectId}/billingInfo`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      // Empty billingAccountName detaches → disables billing → kills running services.
+      body: JSON.stringify({ billingAccountName: "" }),
+    },
+  );
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`detachBilling failed: ${res.status} ${txt}`);
+  }
+}
+
+export const disableBillingOnBudgetExceeded = onMessagePublished(
+  {
+    topic: BILLING_KILL_SWITCH_TOPIC,
+    region: "us-central1",
+  },
+  async (event) => {
+    let notification: BudgetNotification = {};
+    try {
+      notification = (event.data.message.json ?? {}) as BudgetNotification;
+    } catch (err) {
+      console.warn("budget-kill-switch: failed to parse Pub/Sub payload", err);
+      return;
+    }
+
+    const { costAmount, budgetAmount, budgetDisplayName } = notification;
+    if (typeof costAmount !== "number" || typeof budgetAmount !== "number") {
+      console.info(
+        `budget-kill-switch: ignoring non-actual notification (${budgetDisplayName ?? "?"})`,
+      );
+      return;
+    }
+
+    const ratio = costAmount / Math.max(budgetAmount, 0.01);
+    console.info(
+      `budget-kill-switch: cost=${costAmount} budget=${budgetAmount} ratio=${ratio.toFixed(2)} armed=${BILLING_KILL_SWITCH_ENABLED}`,
+    );
+
+    if (ratio < BILLING_KILL_RATIO) return;
+
+    if (!BILLING_KILL_SWITCH_ENABLED) {
+      console.warn(
+        `budget-kill-switch: WOULD detach billing (ratio ${ratio.toFixed(2)} >= ${BILLING_KILL_RATIO}) — armed=false, doing nothing`,
+      );
+      return;
+    }
+
+    const projectId =
+      process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
+    if (!projectId) {
+      console.error("budget-kill-switch: GCLOUD_PROJECT not set");
+      return;
+    }
+
+    try {
+      await detachBillingFromProject(projectId);
+      console.error(
+        `budget-kill-switch: DETACHED billing on ${projectId} due to runaway spend (ratio ${ratio.toFixed(2)}). Manual re-enable required.`,
+      );
+    } catch (err) {
+      console.error("budget-kill-switch: detach failed", err);
+    }
+  },
+);

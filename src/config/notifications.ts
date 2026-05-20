@@ -23,13 +23,9 @@ import {
 } from "@react-native-firebase/messaging";
 import { getAuth } from "@react-native-firebase/auth";
 import {
-  getFirestore,
-  doc,
-  setDoc,
-  serverTimestamp,
-  arrayUnion,
-  arrayRemove,
-} from "@react-native-firebase/firestore";
+  registerPushToken as cloudRegisterPushToken,
+  removePushToken as cloudRemovePushToken,
+} from "./functions";
 import { Platform } from "react-native";
 import { router, type RelativePathString } from "expo-router";
 import notifee, {
@@ -52,8 +48,6 @@ async function ensureNotifeeChannel(): Promise<void> {
   });
   notifeeChannelCreated = true;
 }
-
-const db = getFirestore();
 
 const getMessagingInstance = () => getMessaging();
 
@@ -96,7 +90,12 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 // ─── Token Management ───────────────────────────────────────────────────────
 
-/** Register the current device's FCM token in the user's Firestore doc. */
+/**
+ * Register the current device's FCM token via the registerPushToken CF.
+ * The CF writes to the server-only `userPushTokens/{uid}` collection (which
+ * is unreadable from clients). The legacy `users.fcmTokens` field is left
+ * untouched in old user docs until `migrateSensitiveFieldsToPrivate` runs.
+ */
 export async function registerFCMToken(): Promise<void> {
   try {
     const user = getAuth().currentUser;
@@ -108,16 +107,7 @@ export async function registerFCMToken(): Promise<void> {
       return;
     }
 
-    // Store token in user doc (array of tokens for multi-device support)
-    await setDoc(
-      doc(db, "users", user.uid),
-      {
-        fcmTokens: arrayUnion(token),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-
+    await cloudRegisterPushToken(token);
     logger.info("FCM token registered");
   } catch (error) {
     if (Platform.OS === "ios" && isMissingAPNSTokenError(error)) {
@@ -129,21 +119,13 @@ export async function registerFCMToken(): Promise<void> {
   }
 }
 
-/** Remove the current device's FCM token on logout. */
-export async function removeFCMToken(uid: string): Promise<void> {
+/** Remove the current device's FCM token via the removePushToken CF. */
+export async function removeFCMToken(_uid: string): Promise<void> {
   try {
     const token = await getCurrentFCMToken();
     if (!token) return;
 
-    await setDoc(
-      doc(db, "users", uid),
-      {
-        fcmTokens: arrayRemove(token),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-
+    await cloudRemovePushToken(token);
     logger.info("FCM token removed");
   } catch (error) {
     if (Platform.OS === "ios" && isMissingAPNSTokenError(error)) {
@@ -155,22 +137,18 @@ export async function removeFCMToken(uid: string): Promise<void> {
   }
 }
 
-/** Listen for token refreshes and update Firestore. */
+/** Listen for token refreshes and update via CF. */
 export function onTokenRefresh(): () => void {
   return subscribeToTokenRefresh(getMessagingInstance(), async (newToken) => {
     const user = getAuth().currentUser;
     if (!user) return;
 
-    await setDoc(
-      doc(db, "users", user.uid),
-      {
-        fcmTokens: arrayUnion(newToken),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    logger.info("FCM token refreshed");
+    try {
+      await cloudRegisterPushToken(newToken);
+      logger.info("FCM token refreshed");
+    } catch (err) {
+      logger.error("FCM token refresh registration failed:", err);
+    }
   });
 }
 
