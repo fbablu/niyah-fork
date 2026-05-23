@@ -1,5 +1,7 @@
 # Security Deploy Checklist — 2026-05-19
 
+> **Current execution status (updated 2026-05-23):** see [`may-23-resume.md`](./may-23-resume.md). This file is the reference / instructions; the resume doc tracks what's actually been done so far.
+
 Everything in the codebase is shipped on the `security` branch. This doc lists what's left for **you** to do — by hand in a dashboard or via CLI — to fully activate the protections.
 
 Items are ordered by deploy criticality. ✅ = ready to do now. ⏸ = wait until after first paying users / specific signal.
