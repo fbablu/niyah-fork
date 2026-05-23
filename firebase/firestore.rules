@@ -19,37 +19,115 @@ service cloud.firestore {
       // tamper-resistant fields written only by Cloud Functions:
       //   - legal acceptance (acceptLegalTerms CF)
       //   - KYC / Stripe account fields (createConnectAccount + linkBankAccount CFs)
+      //   - stripeCustomerId — server-issued; forging another user's customer
+      //     id would expose their saved payment methods via PaymentSheet.
       //   - forgiveness + promo flags (handleSessionForfeit, maybeAwardFinalsPromo)
       //   - phone / email — locked after initial create to block account-merge
       //     phone-squat: an attacker setting phone=victim's-number would
       //     otherwise be queueable as a merge target. Mutation goes through a
       //     Cloud Function that re-verifies via OTP or email link.
       //   - mergedInto / mergedAt — written exclusively by mergeDuplicateUsers
+      //   - top-level stat fields (completedSessions, totalSessions,
+      //     currentStreak, longestStreak, totalEarnings) — server-authoritative
+      //     and read by withdrawal-eligibility gate. Client display sync uses
+      //     the nested `stats` map instead, which stays writable.
+      //   - reputation — public social-proof signal; forgery would let users
+      //     claim levels they haven't earned.
+      //   - referredByUid / referralAwardedAt — written only by awardReferral.
       allow write: if request.auth != null
         && request.auth.uid == uid
+        && (!('firstName' in request.resource.data.keys())
+            || (request.resource.data.firstName is string
+                && request.resource.data.firstName.size() <= 50))
+        && (!('lastName' in request.resource.data.keys())
+            || (request.resource.data.lastName is string
+                && request.resource.data.lastName.size() <= 50))
+        && (!('displayName' in request.resource.data.keys())
+            || (request.resource.data.displayName is string
+                && request.resource.data.displayName.size() <= 100))
+        && (!('name' in request.resource.data.keys())
+            || (request.resource.data.name is string
+                && request.resource.data.name.size() <= 120))
         && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
                 'legalAcceptanceVersion', 'legalAcceptedAt',
                 'stripeAccountId', 'stripeAccountStatus', 'stripeKycProvidedAt',
+                'stripeCustomerId',
                 'legalFirstName', 'legalLastName',
                 'linkedBank', 'plaidAccessToken', 'plaidItemId', 'plaidAccountId',
                 'firstSurrenderForgiven', 'firstSurrenderForgivenAt',
                 'finalsPromoAwarded', 'finalsPromoAwardedAt',
                 'phone', 'email',
-                'mergedInto', 'mergedAt'
+                'mergedInto', 'mergedAt',
+                'completedSessions', 'totalSessions',
+                'currentStreak', 'longestStreak', 'totalEarnings',
+                'reputation',
+                'referredByUid', 'referralAwardedAt'
               ]);
 
-      // Initial profile creation (no existing doc — resource is null)
+      // Initial profile creation (no existing doc — resource is null).
+      // `reputation` is intentionally allowed here because saveUserProfile
+      // seeds the default reputation object (score:50, level:sapling, …) on
+      // first sign-up. Post-create reputation writes are blocked above.
+      // Length caps on display strings prevent storage/bandwidth abuse — a
+      // user otherwise could write a megabyte-long displayName that bloats
+      // every cross-user read (contact discovery, partner lookup).
       allow create: if request.auth != null
         && request.auth.uid == uid
+        && (!('firstName' in request.resource.data.keys())
+            || (request.resource.data.firstName is string
+                && request.resource.data.firstName.size() <= 50))
+        && (!('lastName' in request.resource.data.keys())
+            || (request.resource.data.lastName is string
+                && request.resource.data.lastName.size() <= 50))
+        && (!('displayName' in request.resource.data.keys())
+            || (request.resource.data.displayName is string
+                && request.resource.data.displayName.size() <= 100))
+        && (!('name' in request.resource.data.keys())
+            || (request.resource.data.name is string
+                && request.resource.data.name.size() <= 120))
         && !request.resource.data.keys().hasAny([
              'legalAcceptanceVersion', 'legalAcceptedAt',
              'stripeAccountId', 'stripeAccountStatus', 'stripeKycProvidedAt',
+             'stripeCustomerId',
              'legalFirstName', 'legalLastName',
              'linkedBank', 'plaidAccessToken', 'plaidItemId', 'plaidAccountId',
              'firstSurrenderForgiven', 'firstSurrenderForgivenAt',
-             'finalsPromoAwarded', 'finalsPromoAwardedAt'
+             'finalsPromoAwarded', 'finalsPromoAwardedAt',
+             'completedSessions', 'totalSessions',
+             'currentStreak', 'longestStreak', 'totalEarnings',
+             'referredByUid', 'referralAwardedAt'
            ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // userPrivate/{uid}
+    // -------------------------------------------------------------------------
+    // Owner-readable, server-only-writable mirror of sensitive fields that
+    // were historically on users/{uid} where every signed-in user could read
+    // them. Plaid access tokens, Stripe Connect account ID, Stripe customer
+    // ID, KYC name fields, legal acceptance metadata all live here now.
+    //
+    // Writes happen exclusively via Cloud Functions using the admin SDK
+    // (linkBankAccount, createConnectAccount, acceptLegalTerms,
+    // migrateSensitiveFieldsToPrivate, etc.) so the rule denies all client
+    // writes. Owner reads are allowed so the UI can show bank-link state and
+    // legal-acceptance status without round-tripping through a CF.
+    match /userPrivate/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // userPushTokens/{uid}
+    // -------------------------------------------------------------------------
+    // FCM device tokens. Previously stored as a `fcmTokens` array on
+    // users/{uid} which was readable by any signed-in user — a defense-in-
+    // depth violation. Moved to a dedicated collection with neither read nor
+    // write permitted to clients. The `registerPushToken` CF arrayUnions a
+    // verified token; `sendPushToUser`/`sendPushToUsers` read via admin SDK.
+    match /userPushTokens/{uid} {
+      allow read, write: if false;
     }
 
     // -------------------------------------------------------------------------
@@ -95,36 +173,32 @@ service cloud.firestore {
     // -------------------------------------------------------------------------
     // sessions/{sessionId}
     // -------------------------------------------------------------------------
-    // Session documents track solo focus sessions. Written client-side by
-    // sessionStore (writeSession, updateSession) and server-side by Cloud
-    // Functions (handleSessionComplete, handleSessionForfeit — admin SDK).
+    // Session documents track solo focus sessions. Created exclusively by the
+    // `createSoloSession` Cloud Function (admin SDK) which atomically debits
+    // the wallet and writes the doc — client-side create is denied so an
+    // attacker cannot mint a session with a forged stakeAmount/endsAt and
+    // immediately complete it for an arbitrary payout.
     //
-    // Owner can read and create sessions. Updates are restricted to status
-    // transitions only (complete/surrender). Cloud Functions bypass these
-    // rules via admin SDK for authoritative balance mutations.
+    // Owner can update their own session for status transitions (complete /
+    // surrender) so the UI can mark a finished session before the next CF
+    // call lands. handleSessionComplete / handleSessionForfeit use admin SDK
+    // for authoritative balance mutations.
     match /sessions/{sessionId} {
       // Owner can read their own sessions
       allow read: if request.auth != null
         && resource.data.userId == request.auth.uid;
 
-      // Owner can create sessions (userId must match auth, status must be active).
-      // Enforce types on financial fields to prevent type-confusion attacks.
-      allow create: if request.auth != null
-        && request.resource.data.userId is string
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.status is string
-        && request.resource.data.status == 'active'
-        && request.resource.data.stakeAmount is number
-        && request.resource.data.stakeAmount > 0;
+      // Server-only create. Use createSoloSession Cloud Function.
+      allow create: if false;
 
       // Owner can update their own sessions — restricted to status transition
-      // fields only. Financial fields (stakeAmount, potentialPayout, endsAt)
-      // are immutable after creation. Cloud Functions use admin SDK for
+      // fields only. Financial fields (stakeAmount, potentialPayout, endsAt,
+      // cadence) remain immutable. Cloud Functions use admin SDK for
       // authoritative balance mutations and can write any field.
       allow update: if request.auth != null
         && resource.data.userId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'completedAt', 'updatedAt']);
+             .hasOnly(['status', 'completedAt', 'updatedAt', 'violationCount']);
 
       // No client-side deletes
       allow delete: if false;

@@ -33,6 +33,17 @@ jest.mock("../../../config/screentime", () => ({
 jest.mock("../../../config/functions", () => ({
   handleSessionComplete: jest.fn(),
   handleSessionForfeit: jest.fn(),
+  createSoloSession: jest
+    .fn()
+    .mockImplementation(async (_cadence: string, sessionId: string) => ({
+      success: true,
+      sessionId,
+      startedAtMs: Date.now(),
+      endsAtMs: Date.now() + 60_000,
+      stakeAmount: 0,
+      newBalance: 0,
+      idempotent: false,
+    })),
 }));
 
 jest.mock("../../../utils/analytics", () => ({
@@ -97,7 +108,7 @@ describe("sessionStore — first-surrender forgiveness", () => {
       refundedCents: 500,
     });
 
-    useSessionStore.getState().startSession("hour");
+    await useSessionStore.getState().startSession("hour");
     const stake = CADENCES.hour.stake;
     const afterStake = useWalletStore.getState().balance;
     expect(afterStake).toBe(INITIAL_BALANCE - stake);
@@ -119,7 +130,7 @@ describe("sessionStore — first-surrender forgiveness", () => {
       forgiven: false,
     });
 
-    useSessionStore.getState().startSession("hour");
+    await useSessionStore.getState().startSession("hour");
     const stake = CADENCES.hour.stake;
     useSessionStore.getState().surrenderSession();
     await new Promise<void>((resolve) => setImmediate(() => resolve()));
@@ -133,7 +144,7 @@ describe("sessionStore — first-surrender forgiveness", () => {
       .mocked(handleSessionForfeit)
       .mockRejectedValue(new Error("network down"));
 
-    useSessionStore.getState().startSession("hour");
+    await useSessionStore.getState().startSession("hour");
     useSessionStore.getState().surrenderSession();
     await new Promise<void>((resolve) => setImmediate(() => resolve()));
 
@@ -147,12 +158,12 @@ describe("sessionStore — first-surrender forgiveness", () => {
       forgiven: true,
       refundedCents: 500,
     });
-    useSessionStore.getState().startSession("hour");
+    await useSessionStore.getState().startSession("hour");
     useSessionStore.getState().surrenderSession();
     await new Promise<void>((resolve) => setImmediate(() => resolve()));
     expect(useSessionStore.getState().lastForgivenCents).toBe(500);
 
-    useSessionStore.getState().startSession("focus");
+    await useSessionStore.getState().startSession("focus");
     expect(useSessionStore.getState().lastForgivenCents).toBeNull();
   });
 });

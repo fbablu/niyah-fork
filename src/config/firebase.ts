@@ -338,10 +338,24 @@ export const saveUserProfile = async (
   }
 };
 
+/**
+ * Returns the merged view of the caller's own public + private user data.
+ * Owner-readable userPrivate/{uid} contains H1-migrated sensitive fields
+ * (Stripe / Plaid / KYC names); fetching both keeps existing buildUser
+ * callers working without each one knowing about the split.
+ */
 export const fetchUserProfile = async (
   uid: string,
 ): Promise<Record<string, unknown> | null> => {
-  return getUserDoc(uid);
+  const [publicSnap, privateSnap] = await Promise.all([
+    getDoc(doc(db, COLLECTIONS.USERS, uid)),
+    getDoc(doc(db, "userPrivate", uid)),
+  ]);
+  if (!publicSnap.exists) return null;
+  const pub = (publicSnap.data() ?? {}) as Record<string, unknown>;
+  const privData = privateSnap.data();
+  const priv = (privData ?? {}) as Record<string, unknown>;
+  return { __id: publicSnap.id, ...pub, ...priv } as Record<string, unknown>;
 };
 
 /**

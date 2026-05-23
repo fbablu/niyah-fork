@@ -9,12 +9,16 @@
  * instance in beforeEach so every call to getMessaging() returns it.
  */
 
+jest.mock("../../../config/functions", () => ({
+  registerPushToken: jest.fn().mockResolvedValue({ success: true }),
+  removePushToken: jest.fn().mockResolvedValue({ success: true }),
+}));
+
 import {
   getMessaging,
   AuthorizationStatus,
 } from "@react-native-firebase/messaging";
 import { getAuth } from "@react-native-firebase/auth";
-import { setDoc } from "@react-native-firebase/firestore";
 import { Platform } from "react-native";
 import { router } from "expo-router";
 
@@ -29,6 +33,10 @@ import {
   setupNotificationOpenHandler,
   initializeNotifications,
 } from "../../../config/notifications";
+import {
+  registerPushToken as cloudRegisterPushToken,
+  removePushToken as cloudRemovePushToken,
+} from "../../../config/functions";
 
 // Shared mock instance — getMessaging() always returns this same object.
 const sharedInstance: Record<string, jest.Mock> = {
@@ -124,10 +132,10 @@ describe("notifications", () => {
       await registerFCMToken();
 
       expect(sharedInstance.getToken).not.toHaveBeenCalled();
-      expect(setDoc).not.toHaveBeenCalled();
+      expect(cloudRegisterPushToken).not.toHaveBeenCalled();
     });
 
-    it("writes token on iOS", async () => {
+    it("registers token on iOS via registerPushToken CF", async () => {
       Platform.OS = "ios" as typeof Platform.OS;
       (getAuth as jest.Mock).mockReturnValue({
         currentUser: { uid: "user-123" },
@@ -139,16 +147,10 @@ describe("notifications", () => {
 
       expect(sharedInstance.getAPNSToken).toHaveBeenCalled();
       expect(sharedInstance.getToken).toHaveBeenCalled();
-      expect(setDoc).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          fcmTokens: expect.objectContaining({ __type: "arrayUnion" }),
-        }),
-        { merge: true },
-      );
+      expect(cloudRegisterPushToken).toHaveBeenCalledWith("ios-fcm-token");
     });
 
-    it("writes token without registerDevice on Android", async () => {
+    it("registers token on Android without registerDevice", async () => {
       Platform.OS = "android" as typeof Platform.OS;
       (getAuth as jest.Mock).mockReturnValue({
         currentUser: { uid: "user-456" },
@@ -161,7 +163,7 @@ describe("notifications", () => {
       expect(
         sharedInstance.registerDeviceForRemoteMessages,
       ).not.toHaveBeenCalled();
-      expect(setDoc).toHaveBeenCalled();
+      expect(cloudRegisterPushToken).toHaveBeenCalledWith("android-fcm-token");
     });
 
     it("no-ops on iOS when APNS token is unavailable", async () => {
@@ -174,7 +176,7 @@ describe("notifications", () => {
       await registerFCMToken();
 
       expect(sharedInstance.getToken).not.toHaveBeenCalled();
-      expect(setDoc).not.toHaveBeenCalled();
+      expect(cloudRegisterPushToken).not.toHaveBeenCalled();
     });
 
     it("no-ops when getToken returns null", async () => {
@@ -185,7 +187,7 @@ describe("notifications", () => {
 
       await registerFCMToken();
 
-      expect(setDoc).not.toHaveBeenCalled();
+      expect(cloudRegisterPushToken).not.toHaveBeenCalled();
     });
 
     it("catches and swallows errors", async () => {
@@ -201,21 +203,12 @@ describe("notifications", () => {
   // ─── removeFCMToken ─────────────────────────────────────────────────────────
 
   describe("removeFCMToken", () => {
-    it("writes arrayRemove to user doc", async () => {
+    it("calls removePushToken CF with the device token", async () => {
       sharedInstance.getToken.mockResolvedValue("device-token");
 
       await removeFCMToken("user-123");
 
-      expect(setDoc).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          fcmTokens: expect.objectContaining({
-            __type: "arrayRemove",
-            items: ["device-token"],
-          }),
-        }),
-        { merge: true },
-      );
+      expect(cloudRemovePushToken).toHaveBeenCalledWith("device-token");
     });
 
     it("no-ops when getToken returns null", async () => {
@@ -223,7 +216,7 @@ describe("notifications", () => {
 
       await removeFCMToken("user-123");
 
-      expect(setDoc).not.toHaveBeenCalled();
+      expect(cloudRemovePushToken).not.toHaveBeenCalled();
     });
 
     it("catches and swallows errors", async () => {

@@ -33,6 +33,17 @@ jest.mock("../../../config/screentime", () => ({
 jest.mock("../../../config/functions", () => ({
   handleSessionComplete: jest.fn().mockResolvedValue(undefined),
   handleSessionForfeit: jest.fn().mockResolvedValue(undefined),
+  createSoloSession: jest
+    .fn()
+    .mockImplementation(async (_cadence: string, sessionId: string) => ({
+      success: true,
+      sessionId,
+      startedAtMs: Date.now(),
+      endsAtMs: Date.now() + 60_000,
+      stakeAmount: 0,
+      newBalance: 0,
+      idempotent: false,
+    })),
 }));
 
 jest.mock("../../../utils/analytics", () => ({
@@ -74,21 +85,21 @@ describe("sessionStore — daily stake cap", () => {
     } as never);
   });
 
-  it("allows a session within the cap", () => {
+  it("allows a session within the cap", async () => {
     // focus cadence stakes $2 (200 cents), well under $10 cap
-    expect(() =>
+    await expect(
       useSessionStore.getState().startSession("focus"),
-    ).not.toThrow();
+    ).resolves.not.toThrow();
   });
 
-  it("blocks a single session that exceeds the cap", () => {
+  it("blocks a single session that exceeds the cap", async () => {
     // weekly cadence stakes $25 (2500 cents), above $10 cap
-    expect(() => useSessionStore.getState().startSession("weekly")).toThrow(
-      /Daily stake cap reached/,
-    );
+    await expect(
+      useSessionStore.getState().startSession("weekly"),
+    ).rejects.toThrow(/Daily stake cap reached/);
   });
 
-  it("blocks the second session when cumulative stake would exceed cap", () => {
+  it("blocks the second session when cumulative stake would exceed cap", async () => {
     // Simulate a prior session today by seeding history
     useSessionStore.setState({
       sessionHistory: [
@@ -106,10 +117,12 @@ describe("sessionStore — daily stake cap", () => {
       ],
     });
     // Next session: hour ($5) — 5 + 5 = 10, right at cap, allowed
-    expect(() => useSessionStore.getState().startSession("hour")).not.toThrow();
+    await expect(
+      useSessionStore.getState().startSession("hour"),
+    ).resolves.not.toThrow();
   });
 
-  it("blocks when cumulative would just exceed cap", () => {
+  it("blocks when cumulative would just exceed cap", async () => {
     // Prior $5 session today; next $6 would exceed $10 cap
     useSessionStore.setState({
       sessionHistory: [
@@ -127,12 +140,12 @@ describe("sessionStore — daily stake cap", () => {
       ],
     });
     // hour = $5 (500 cents). 600 + 500 = 1100 > 1000 cap
-    expect(() => useSessionStore.getState().startSession("hour")).toThrow(
-      /Daily stake cap reached/,
-    );
+    await expect(
+      useSessionStore.getState().startSession("hour"),
+    ).rejects.toThrow(/Daily stake cap reached/);
   });
 
-  it("ignores sessions from previous days", () => {
+  it("ignores sessions from previous days", async () => {
     // Simulate a session from yesterday — should not count
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -152,6 +165,8 @@ describe("sessionStore — daily stake cap", () => {
       ],
     });
     // New $5 hour session today is fine despite yesterday's $25 stake
-    expect(() => useSessionStore.getState().startSession("hour")).not.toThrow();
+    await expect(
+      useSessionStore.getState().startSession("hour"),
+    ).resolves.not.toThrow();
   });
 });

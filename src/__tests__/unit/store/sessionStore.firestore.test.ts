@@ -41,6 +41,17 @@ jest.mock("../../../config/functions", () => ({
     Promise.resolve({ newBalance: 5000, payout: 500 }),
   ),
   handleSessionForfeit: jest.fn(() => Promise.resolve({ success: true })),
+  createSoloSession: jest
+    .fn()
+    .mockImplementation(async (_cadence: string, sessionId: string) => ({
+      success: true,
+      sessionId,
+      startedAtMs: Date.now(),
+      endsAtMs: Date.now() + 60_000,
+      stakeAmount: 0,
+      newBalance: 0,
+      idempotent: false,
+    })),
 }));
 
 import { useSessionStore } from "../../../store/sessionStore";
@@ -103,48 +114,47 @@ describe("sessionStore — Firestore persistence (DEMO_MODE=false)", () => {
     jest.clearAllMocks();
   });
 
-  // ─── writeSession (startSession) ──────────────────────────────────────────
+  // ─── createSoloSession (startSession) ─────────────────────────────────────
+  // C1 Phase 2: client no longer writes session docs directly in prod —
+  // createSoloSession CF debits the wallet and writes the doc atomically.
+  // writeSession is only invoked in DEMO_MODE (this test runs with DEMO_MODE=false).
 
-  describe("startSession — writeSession", () => {
-    it("calls writeSession with correct args on start", async () => {
-      useSessionStore.getState().startSession("daily");
-      await flush();
+  describe("startSession — createSoloSession", () => {
+    it("calls createSoloSession with cadence and sessionId on start", async () => {
+      await useSessionStore.getState().startSession("daily");
 
-      const session = useSessionStore.getState().sessionHistory.length
-        ? null
-        : useSessionStore.getState().currentSession;
-
-      expect(writeSession).toHaveBeenCalledTimes(1);
-      expect(writeSession).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          userId: "firestore-test-user",
-          cadence: "daily",
-          stakeAmount: CADENCES.daily.stake,
-          potentialPayout: CADENCES.daily.stake,
-          status: "active",
-          startedAt: expect.any(Date),
-          endsAt: expect.any(Date),
-        }),
-      );
-
-      // Session should still be active in local state
+      const session = useSessionStore.getState().currentSession;
       expect(session).not.toBeNull();
+
+      const { createSoloSession } = jest.requireMock(
+        "../../../config/functions",
+      ) as { createSoloSession: jest.Mock };
+      expect(createSoloSession).toHaveBeenCalledTimes(1);
+      expect(createSoloSession).toHaveBeenCalledWith(
+        "daily",
+        expect.any(String),
+        expect.any(Boolean),
+      );
+      // writeSession path is DEMO-only — must NOT fire in prod mode.
+      expect(writeSession).not.toHaveBeenCalled();
     });
 
-    it("local state is correct even if writeSession fails", async () => {
-      jest
-        .mocked(writeSession)
-        .mockRejectedValueOnce(new Error("Firestore offline"));
+    it("rejects startSession when createSoloSession fails", async () => {
+      const { createSoloSession } = jest.requireMock(
+        "../../../config/functions",
+      ) as { createSoloSession: jest.Mock };
+      createSoloSession.mockRejectedValueOnce(
+        new Error("Insufficient balance"),
+      );
 
-      useSessionStore.getState().startSession("daily");
-      await flush();
+      await expect(
+        useSessionStore.getState().startSession("daily"),
+      ).rejects.toThrow("Insufficient balance");
 
-      // Fire-and-forget: local state unaffected
+      // No local session left half-started after a CF rejection.
       const state = useSessionStore.getState();
-      expect(state.currentSession).not.toBeNull();
-      expect(state.currentSession!.status).toBe("active");
-      expect(state.isBlocking).toBe(true);
+      expect(state.currentSession).toBeNull();
+      expect(state.isBlocking).toBe(false);
     });
   });
 
@@ -156,7 +166,7 @@ describe("sessionStore — Firestore persistence (DEMO_MODE=false)", () => {
     // raced the CF read and triggered "Session is not active (current status:
     // surrendered)" 400s. See sessionStore.surrenderSession.
     it("does not call updateSession when surrendering in prod mode", async () => {
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       useSessionStore.getState().surrenderSession();
       await flush();
 
@@ -173,7 +183,7 @@ describe("sessionStore — Firestore persistence (DEMO_MODE=false)", () => {
 
   describe("completeSession — updateSession", () => {
     it("calls updateSession with 'completed' status and payout", async () => {
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       const session = useSessionStore.getState().currentSession!;
 
       useSessionStore.getState().completeSession();
@@ -257,7 +267,7 @@ describe("sessionStore — Firestore persistence (DEMO_MODE=false)", () => {
 
     it("no-ops when a session is already in memory", async () => {
       // Put a session in memory first
-      useSessionStore.getState().startSession("daily");
+      await useSessionStore.getState().startSession("daily");
       jest.clearAllMocks();
 
       await useSessionStore.getState().recoverActiveSession("user-123");

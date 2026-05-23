@@ -114,6 +114,34 @@ export async function verifyAndCreditDeposit(
 
 // ─── Session functions ───────────────────────────────────────────────────────
 
+export interface CreateSoloSessionResult {
+  success: boolean;
+  sessionId: string;
+  startedAtMs: number;
+  endsAtMs: number;
+  stakeAmount: number;
+  newBalance: number;
+  idempotent: boolean;
+}
+
+/**
+ * Starts a solo session server-side. The CF debits the wallet and writes the
+ * session doc atomically; the client never touches the wallet collection or
+ * the sessions collection directly anymore. Pass a client-generated
+ * sessionId so retries on transient network failure are idempotent.
+ */
+export async function createSoloSession(
+  cadence: string,
+  sessionId: string,
+  useShortTimer: boolean,
+): Promise<CreateSoloSessionResult> {
+  return callFunction<CreateSoloSessionResult>("createSoloSession", {
+    cadence,
+    sessionId,
+    useShortTimer,
+  });
+}
+
 /**
  * Completes a session server-side. The Cloud Function reads the stakeAmount
  * from the session doc, validates ownership, timer, and status.
@@ -486,4 +514,25 @@ export async function reportShieldViolation(
     "reportShieldViolation",
     { sessionId },
   );
+}
+
+// ─── Push token registration ────────────────────────────────────────────────
+
+/**
+ * Registers an FCM token in the server-only userPushTokens collection.
+ * Replaces the prior client-side arrayUnion on users.fcmTokens, which was
+ * readable by every signed-in user. Idempotent — safe to call on every
+ * device refresh.
+ */
+export async function registerPushToken(
+  token: string,
+): Promise<{ success: boolean }> {
+  return callFunction<{ success: boolean }>("registerPushToken", { token });
+}
+
+/** Removes an FCM token from the server-only userPushTokens collection. */
+export async function removePushToken(
+  token: string,
+): Promise<{ success: boolean }> {
+  return callFunction<{ success: boolean }>("removePushToken", { token });
 }

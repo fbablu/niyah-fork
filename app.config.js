@@ -42,11 +42,25 @@ module.exports = {
         process.env.GOOGLE_SERVICE_INFO_PLIST ||
         "./firebase/GoogleService-Info.plist",
       usesAppleSignIn: true,
-      associatedDomains: [`applinks:${firebaseProjectId}.firebaseapp.com`],
+      // Universal links: primary is niyah.live so branded URLs (email magic
+      // links, share-to-app, future deep links) resolve into the app. The
+      // *.firebaseapp.com entry stays as a fallback for the Firebase Auth
+      // continuation URL used by sendSignInLinkToEmail until that flow is
+      // migrated to a niyah.live action handler.
+      associatedDomains: [
+        "applinks:niyah.live",
+        `applinks:${firebaseProjectId}.firebaseapp.com`,
+      ],
       entitlements: {
         "com.apple.developer.family-controls": true,
         "com.apple.security.application-groups": ["group.com.niyah.app"],
-        "aps-environment": "production",
+        // Default production so TestFlight + App Store get production APNs.
+        // Set EXPO_PUBLIC_APNS_ENV=development for sandbox-APNs dev-client
+        // builds when testing pre-prod push payloads.
+        "aps-environment":
+          process.env.EXPO_PUBLIC_APNS_ENV === "development"
+            ? "development"
+            : "production",
       },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
@@ -134,6 +148,18 @@ module.exports = {
       "./plugins/withFirebaseStaticFrameworks",
       "./plugins/withResourceBundleSigning",
       "@bacons/apple-targets",
+      // Sentry config plugin: wires source-map upload into the Xcode +
+      // Gradle build phases via sentry-cli. SENTRY_AUTH_TOKEN must be set
+      // in the EAS build env (eas secret:create) and at build time locally.
+      // organization + project come from the Sentry project URL.
+      [
+        "@sentry/react-native/expo",
+        {
+          url: "https://sentry.io/",
+          organization: process.env.SENTRY_ORG ?? "niyah",
+          project: process.env.SENTRY_PROJECT ?? "niyah-mobile",
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,

@@ -398,17 +398,15 @@ describe("Session Flow Integration Tests", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should not allow starting session while one is active", () => {
-      act(() => {
-        useSessionStore.getState().startSession("daily");
+    it("should not allow starting session while one is active", async () => {
+      await act(async () => {
+        await useSessionStore.getState().startSession("daily");
       });
 
-      // Try to start another — should throw
-      expect(() => {
-        act(() => {
-          useSessionStore.getState().startSession("weekly");
-        });
-      }).toThrow("A session is already active");
+      // Try to start another — should reject
+      await expect(
+        useSessionStore.getState().startSession("weekly"),
+      ).rejects.toThrow("A session is already active");
 
       // Original session should be unchanged
       const sessionAfter = useSessionStore.getState().currentSession;
@@ -464,8 +462,8 @@ describe("Session Flow Integration Tests", () => {
 
       // Rapid session cycles
       for (let i = 0; i < 10; i++) {
-        act(() => {
-          useSessionStore.getState().startSession("daily");
+        await act(async () => {
+          await useSessionStore.getState().startSession("daily");
         });
         act(() => {
           useSessionStore.getState().completeSession();
