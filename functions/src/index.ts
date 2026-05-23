@@ -385,6 +385,19 @@ const DAILY_STAKE_CAP_CENTS: number = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 2500;
 })();
 
+// Per-request deposit ceiling (cents). Server-side equivalent of a Stripe
+// Radar "block amount > $X" rule — kept here to avoid the $0.05/screen cost
+// of Radar for Fraud Teams. Stolen-card fraud typically tests with a small
+// charge then escalates; capping deposits at $500 means a stolen card can't
+// be used to drain a victim's available balance in one shot. Legit users
+// can still top up multiple times across days. Override via env if needed.
+const MAX_DEPOSIT_CENTS: number = (() => {
+  const raw = process.env.MAX_DEPOSIT_CENTS;
+  if (!raw) return 50000;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 50000;
+})();
+
 // Server-authoritative cadence table. Mirrors src/constants/config.ts CADENCES.
 // Used by handleSessionComplete / handleSessionForfeit to reconstruct stake +
 // duration from the session's cadence field, ignoring client-supplied
@@ -1036,8 +1049,9 @@ export const createPaymentIntent = onRequest(
       sendError(res, 400, "Amount must be an integer");
       return;
     }
-    if (amount < 100 || amount > 1000000) {
-      sendError(res, 400, "Amount must be between $1 and $10,000");
+    if (amount < 100 || amount > MAX_DEPOSIT_CENTS) {
+      const maxDollars = Math.floor(MAX_DEPOSIT_CENTS / 100);
+      sendError(res, 400, `Amount must be between $1 and $${maxDollars}`);
       return;
     }
 
