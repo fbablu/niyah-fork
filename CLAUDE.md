@@ -105,36 +105,23 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 
 ## Current Phase
 
-**Final Sprint — Demo Day April 15, 2026** (live phone demo, real Stripe payments)
+**Launch — App Store submission, targeting live by ~NYC arrival (early June 2026).** Real Stripe/Plaid money paths. The April 15 demo and the April–May campus finals launch already shipped. **Live status + the full phased next-steps plan are in [docs/may-23-resume.md](docs/may-23-resume.md) — read that first in a new session.**
 
-Completed:
+Shipped to `launch` (pushed, NOT yet deployed as of 2026-05-25):
 
-- Phone SMS OTP auth + Screen Time onboarding flow
-- One-tap quick-block screen
-- Contact-based friend discovery (enhanced)
-- Shield branding update (custom Niyah shield UI)
-- Shield surrender desync bug fixed (flag + deep link + JS listener pattern)
-- Group session Cloud Functions (create, invite, accept, start, complete, cancel, timeout)
-- FCM push notifications (9 types: group invite, accept, decline, ready, start, surrender, complete, violation, cancel)
-- Plaid bank linking + legal acceptance Cloud Functions
-- FamilyControls Distribution entitlement approved (main app)
-- Stripe live mode business account ready
-- Plaid production access approved
-- Niyah, Inc. incorporated with EIN
-- Landing page at niyah.live
-- Dead UI removed (legacy recurring sessions, schedule/calendar/report links)
+- In-app account deletion (`deleteAccount` CF + Profile UI) — App Store 5.1.1(v)
+- In-app Stripe bank management + `niyah.live/stripe/return` bounce → `niyah://stripe-return`
+- `requestWithdrawal` balance-integrity fix; `mergeOne` pagination; withdrawal eligibility gate removed
+- Plaid per-Item webhook URL; de-gamble copy ("Won"→"Earned", invite reframed)
 
-Key remaining work (5 days):
+Key remaining (see may-23-resume.md for the phased plan):
 
-- Switch to live Stripe/Plaid keys + deploy Cloud Functions
-- E2E test all demo flows with real money
-- Group session testing on multiple devices
-- TestFlight build + team distribution
-- Submit FamilyControls Distribution for 3 extension App IDs
+- **Deploy:** `firebase deploy --only firestore:rules,functions` + publish landing bounce (merge `launch`→`main`)
+- Live Stripe/Plaid keys; Apple APNs + `pnpm build:production`; App Store Connect listing (privacy labels, account-deletion disclosure) → submit
+- Keep `APP_CHECK_ENFORCED=false` until App Check Metrics ≥99% verified
+- FamilyControls Distribution already approved for all 5 extensions
 
-Cut for post-demo: schedule blocking, calendar integration, DeviceActivityReport, threshold nudges.
-
-Full plan: [docs/sprint-april15.md](docs/sprint-april15.md) | Roadmap: [docs/roadmap.md](docs/roadmap.md)
+Roadmap: [docs/roadmap.md](docs/roadmap.md)
 
 ## Demo Mode
 

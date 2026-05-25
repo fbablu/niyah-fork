@@ -2,11 +2,13 @@
 
 **Single source of truth for "where the security deploy + launch is right now."** Read this first in a new session, then jump back into the work.
 
-- **Today:** Sat 2026-05-23, 1pm CT
-- **App Store live target:** Tue 2026-05-26 (submit by Mon 2026-05-25 EOD for 1–2 day Apple review)
-- **Departure for Boston Tech Week:** Thu 2026-05-28 (shifted from May 26 → 2 extra days of runway before the trip)
-- **Repo:** `fbablu/niyah-fork` (security branch open as PR #1, not merged; main untouched until merge)
-- **Reference checklist:** [security-deploy-checklist.md](./security-deploy-checklist.md). This doc tracks what's actually done.
+> **Updated 2026-05-25.** Original anchor was Sat 2026-05-23; sections dated May 23/24 are kept as reference but the current state lives in "Where things stand" below.
+
+- **Today:** Sun 2026-05-25
+- **App Store live target:** **moved to ~NYC arrival (~Mon 2026-06-01).** The hard "live by May 26" deadline is **dropped** — still actively building. Submit a few days before NYC for the 1–2 day Apple review.
+- **Trip:** Depart Thu 2026-05-28 (Eid). Boston 5/29–30 light-touch (few events). Wedding 5/31 Quincy. **NYC ~6/01–6/07 is the focus** — build, marketing, investors. See [[techweek-trip-2026]] memory.
+- **Repo:** working branch `launch` (pushed to `origin/launch`); `main` untouched.
+- **Reference checklist:** [security-deploy-checklist.md](./security-deploy-checklist.md).
 
 ---
 
@@ -25,14 +27,23 @@
 | 6 — Sentry source maps | ⬜ Todo | `eas secret:create SENTRY_AUTH_TOKEN` |
 | 7 — Post-paying-users | ⏸ Deferred | Rate limit tuning, quarterly rotations, monthly audits |
 
-**Uncommitted in working tree (security branch):**
-- `functions/src/index.ts` — `MAX_DEPOSIT_CENTS` server-side deposit cap (already deployed, not yet committed)
-- `.gitignore` — `functions/.env*` line added
-- `package.json` + `pnpm-lock.yaml` — `react-native-keyboard-controller` 1.21.7 → 1.21.8 + Expo lock churn from `pnpm install`
-- New file `docs/qa.md` (in-progress manual QA notes)
-- New file `docs/may-23-resume.md` (this file)
+## Where things stand (updated 2026-05-25)
 
-→ Commit before resuming work tomorrow so the deploy-checklist updates aren't lost.
+**Shipped to `launch` (pushed, but NOT yet deployed):**
+- **Launch payments hardening:** `deleteAccount` CF; in-app Stripe bank management (`createStripeLoginLink` + `niyah.live/stripe/return` bounce → `niyah://stripe-return` deep-link handler); `requestWithdrawal` balance-integrity fix (no minting / no reconcile drift); `mergeOne` pagination + mid-merge markers; withdrawal **eligibility gate removed** (limits now $10 min / $10k per-txn / $25k daily + KYC); Plaid per-Item webhook URL.
+- **In-app Account deletion** (Profile → Delete Account, hold-to-confirm) wired to `deleteAccount` — App Store **5.1.1(v)** gate. Re-auth = sign-out-then-retry (works for all providers; satisfies the CF's `auth_time<=600s` gate).
+- **De-gamble copy:** dashboard "Won"→"Earned"; invite SMS reframed; dead `YOUR_CODE` TestFlight link removed.
+- notifee test-mock completed (clean `pnpm test` output).
+- New server-only `deletions/{uid}` Firestore rule.
+
+**⚠️ DEPLOY THESE FIRST — nothing above is live yet:**
+1. `firebase deploy --only firestore:rules`
+2. `firebase deploy --only functions`
+3. **Publish landing bounce:** merge `launch`→`main` *or* GitHub → Actions → "Deploy Landing Page" → Run workflow. Else `niyah.live/stripe/return` 404s and both the bank round-trip and Stripe onboarding-return break.
+4. Verify secrets: `firebase functions:secrets:access STRIPE_SECRET_KEY PLAID_CLIENT_ID PLAID_SECRET`
+5. Rebuild dev/production client to pick up the new Delete Account screen + copy.
+
+Then work the phased plan at the bottom of this doc, using the "Open in Stripe / Plaid / Apple / Sentry" reference sections below. **Those console statuses were last touched May 23 — re-verify against live state before trusting them.**
 
 ---
 
@@ -124,11 +135,11 @@ Goal: `fardeen@niyah.live` becomes primary; `fardeeneb@gmail.com` stays as break
 
 | Day | Goal |
 | --- | ---- |
-| Sun May 24 | Email migration + Stripe/Plaid/Apple/Sentry done (above). Commit the uncommitted security files. |
-| Mon May 25 | **E2E real-money smoke test:** $1 deposit → solo stake → complete → payout. **Submit App Store build EOD** with metadata, screenshots, privacy nutrition label. |
-| Tue May 26 | Original ship target — likely "In Review" with Apple |
-| Wed May 27 | Buffer / approval / respond to Apple if rejected |
-| Thu May 28 | **Departure for Boston.** App Store should be live before wheels up. |
+| Sun May 25 | Code shipped to `launch`. **Deploy** rules + functions + landing (see "DEPLOY THESE FIRST"). Re-verify Stripe/Plaid/Apple/Sentry console state. |
+| Mon–Tue May 26–27 | Live keys (Stripe + Plaid prod), Apple (APNs + `pnpm build:production`), App Store Connect listing (privacy labels, account-deletion disclosure, ToS/Privacy URLs). **E2E real-money smoke:** $1 deposit → stake → complete → payout; test Delete Account on a throwaway. |
+| Wed May 28 | Eid + depart. **Submit App Store build** by now for the 1–2 day review. |
+| Thu–Sat May 29–31 | Boston (light) + wedding 5/31. Respond to Apple if rejected. |
+| ~Mon Jun 1 | **Target: App Store live as you land in NYC.** |
 
 ---
 
@@ -155,6 +166,19 @@ If the resume is later in the week (Mon/Tue/Wed), say "Read docs/may-23-resume.m
 
 ---
 
-## Your "other plan" placeholder
+## Phased manual-task plan (captured 2026-05-25)
 
-Fardeen mentioned in the May 23 1pm session that he has a separate next-steps plan to discuss in a new session beyond this checklist. **That plan is not captured here yet** — bring it up explicitly in the next session and update this doc (or create a sibling) once the scope is clear.
+The "separate next-steps plan" is now this phased launch sequence:
+
+- **Phase A — Deploy (today):** rules + functions + landing bounce. See "DEPLOY THESE FIRST" above.
+- **Phase B — Live keys / consoles:** Stripe live keys + webhook + uncheck payout-schedule + 1099; Plaid production + ITEM webhook. See "Open in Stripe" / "Open in Plaid".
+- **Phase C — Apple + build + submit:** APNs key + 2FA; `pnpm build:production`; App Store Connect listing (Productivity category, ToS/Privacy URLs, **App Privacy labels**, **account-deletion disclosure**, age rating, export compliance); submit. See "Open in Apple Developer Portal" / "Open in Sentry / EAS".
+- **Phase D — Post-submit:** keep `APP_CHECK_ENFORCED=false` until App Check Metrics ≥99% verified, then flip. Monitor `deletions.refundShortfallCents` > 0, withdrawal txns `sent_with_warning`, Plaid webhook deliveries.
+- **Phase E — Post-launch (NYC+):** custom in-app KYC ([[project_custom_kyc]]); revisit the removed withdrawal eligibility gate if cash-out fraud appears.
+
+⚠️ **#1 App Review risk:** real-money stake→payout framing. Lead with the commitment-contract precedent (stickK / Beeminder), Productivity category, zero "bet/wager/win" copy. Decide the framing before you submit.
+
+### Code blockers still open (my end, not console)
+- Functions runtime audit not yet run — it's npm-based: `cd functions && npm audit` before deploy (stripe / plaid / firebase-admin are the money-path deps that matter).
+- Root `pnpm audit`: 13 advisories, **all build/CLI tooling** (`@bacons/apple-targets`, `eas-cli`, `expo`>metro) — none ship. Defer; optional `pnpm.overrides` post-launch.
+- Delete Account re-auth is sign-out-then-retry (functional, slightly clunky). Smoother inline/resume flow is a post-launch polish if wanted.
