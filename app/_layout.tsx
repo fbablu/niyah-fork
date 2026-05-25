@@ -13,6 +13,7 @@ import { useAuthStore } from "../src/store/authStore";
 import { useFeatureFlagsStore } from "../src/store/featureFlagsStore";
 import { ErrorBoundary, StatusBannerHost } from "../src/components";
 import { isEmailSignInLink } from "../src/config/firebase";
+import { getConnectAccountStatus } from "../src/config/functions";
 import { DEMO_MODE, PENDING_REFERRAL_KEY } from "../src/constants/config";
 import { logger } from "../src/utils/logger";
 import { initializeSslPinning } from "../src/config/sslPinning";
@@ -88,7 +89,7 @@ if (Platform.OS === "ios" && BaseFontFamily) {
 export default function RootLayout() {
   const Colors = useColors();
   const theme = useThemeStore((s) => s.theme);
-  const { completeEmailLink } = useAuthStore();
+  const { completeEmailLink, updateUser } = useAuthStore();
 
   // Initialize SSL certificate pinning (no-op in __DEV__ mode)
   useEffect(() => {
@@ -138,6 +139,32 @@ export default function RootLayout() {
       // screen is visible so the listener is mounted.
       if (url.includes("surrender")) {
         logger.info("Surrender deep link received");
+        return;
+      }
+
+      // Stripe Connect onboarding/update bounce. The web page at
+      // niyah.live/stripe/return redirects here once Stripe finishes
+      // (Stripe rejects custom-scheme return_urls, so the HTTPS bounce
+      // is the only viable round-trip). Refresh Connect status so the
+      // withdraw screen reflects the just-completed change.
+      if (url.includes("stripe-return")) {
+        try {
+          const status = await getConnectAccountStatus();
+          updateUser({
+            stripeAccountStatus:
+              status.status === "none" ? undefined : status.status,
+            linkedBank:
+              status.bankName && status.bankMask
+                ? {
+                    institutionName: status.bankName,
+                    bankName: status.bankName,
+                    mask: status.bankMask,
+                  }
+                : undefined,
+          });
+        } catch (err) {
+          logger.warn("Stripe return: status refresh failed:", err);
+        }
         return;
       }
 

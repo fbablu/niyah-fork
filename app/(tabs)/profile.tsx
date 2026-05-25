@@ -38,7 +38,11 @@ import { useWalletStore } from "../../src/store/walletStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
 import { formatMoney } from "../../src/utils/format";
-import { unlinkBankAccount } from "../../src/config/functions";
+import { Linking } from "react-native";
+import {
+  unlinkBankAccount,
+  createStripeLoginLink,
+} from "../../src/config/functions";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
 import {
   ProfileHeader,
@@ -70,27 +74,36 @@ function ProfileScreenInner() {
 
   const handleManageBank = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const replaceAction = () => {
-      router.push("/session/bank-setup?replace=true");
+    const updateAction = async () => {
+      try {
+        const { url } = await createStripeLoginLink();
+        await Linking.openURL(url);
+      } catch (err) {
+        logger.error("createStripeLoginLink failed:", err);
+        StatusBanner.show({
+          severity: "error",
+          message: getFunctionErrorMessage(err, "Please try again."),
+        });
+      }
     };
     const removeAction = () => setRemoveBankModalVisible(true);
 
     if (Platform.OS === "ios") {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ["Cancel", "Replace bank", "Remove bank"],
+          options: ["Cancel", "Update Bank with Stripe", "Remove bank"],
           cancelButtonIndex: 0,
           destructiveButtonIndex: 2,
           title: "Manage linked bank",
         },
         (idx) => {
-          if (idx === 1) replaceAction();
+          if (idx === 1) updateAction();
           else if (idx === 2) removeAction();
         },
       );
     } else {
       Alert.alert("Manage linked bank", undefined, [
-        { text: "Replace bank", onPress: replaceAction },
+        { text: "Update Bank with Stripe", onPress: updateAction },
         { text: "Remove bank", style: "destructive", onPress: removeAction },
         { text: "Cancel", style: "cancel" },
       ]);
@@ -102,10 +115,7 @@ function ProfileScreenInner() {
     setBankActionLoading(true);
     try {
       await unlinkBankAccount();
-      updateUser({
-        linkedBank: undefined,
-        stripeAccountStatus: "pending",
-      });
+      updateUser({ linkedBank: undefined });
       StatusBanner.show({
         severity: "success",
         message: "Bank removed. Add a new one any time from Withdraw.",

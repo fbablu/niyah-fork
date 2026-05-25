@@ -337,6 +337,18 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // deletions/{uid}
+    // -------------------------------------------------------------------------
+    // Audit log + held-earnings record produced by the `deleteAccount` Cloud
+    // Function. Server-only writes (admin SDK bypasses these rules). No
+    // client access — the doc is operator-only forensic state, never read
+    // by the app (the calling user's account is gone the moment the row
+    // lands).
+    match /deletions/{uid} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // Default deny
     // -------------------------------------------------------------------------
     // Any collection not explicitly matched above is denied by default.

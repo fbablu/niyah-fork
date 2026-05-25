@@ -19,7 +19,7 @@
 | 2 — GCP / Firebase | ✅ Done | Budget alert, Pub/Sub kill switch armed, PITR + daily backups on, Auth settings (email enum protect, authorized domains stripped to `niyah.live` + project domains + `localhost`, anonymous off, phone quota lowered, SMS region US-only), IAM cleaned (Owner + break-glass only) |
 | 2.5 — App Check | 🟡 Audit mode | reCAPTCHA Enterprise key created, App Attest + DeviceCheck wired. Currently `APP_CHECK_ENFORCED=false`. **Don't flip until Firebase Console → App Check → Metrics shows ≥99% verified traffic** or you'll lock yourself out. |
 | 3 — Stripe | 🟡 Mostly done | 2FA required, webhook URL + events (`payment_intent.succeeded`, `payment_intent.payment_failed`, `account.updated`) subscribed, `MAX_DEPOSIT_CENTS=50000` deployed in `createPaymentIntent` (server-side Radar replacement). **Remaining: see "Open in Stripe" below.** |
-| 3.5 — Stripe 1099 wizard | ⏸ Paused | Stopped at Business Information step. Resume after email/phone migration. |
+| 3.5 — Stripe 1099 wizard | ⏸ Paused | Stopped at Business Information step. Resume after email/phone migration. Optional: CPA review of TPSO/Third-party network toggles before final submit. |
 | 4 — Plaid | ⬜ Todo | Webhook URL not set, ITEM events not subscribed |
 | 5 — Apple Dev Portal | ⬜ Todo | APNs Auth Key, 2FA across all team Apple IDs, role audit |
 | 6 — Sentry source maps | ⬜ Todo | `eas secret:create SENTRY_AUTH_TOKEN` |
@@ -110,7 +110,7 @@ Goal: `fardeen@niyah.live` becomes primary; `fardeeneb@gmail.com` stays as break
 9. Uncheck "Allow accounts to manage payout schedule" (Connect → Settings).
 10. Delete old test Connect accounts.
 11. Resume 1099 wizard → Business Information (legal name = Niyah, Inc.; EIN; new phone; address; email = fardeen@niyah.live) → State filing → Delivery preferences → Summary.
-12. **VAIL gate before submitting:** confirm 1099 settings (Exclude fees, TPSO, Third party network) with Mark/Cat. Don't click Submit on the 1099 setup until they confirm.
+12. **Optional CPA review** before final Submit: confirm 1099 settings (Exclude fees, TPSO, Third-party network). Defensible defaults for a P2P facilitator C-corp: all three ON. Settings are editable through Jan 2027 — first 1099-K cycle.
 
 ### Block 4 — Plaid + Apple + Sentry (~30 min)
 

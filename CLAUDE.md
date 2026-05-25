@@ -152,5 +152,4 @@ Full analysis: [docs/legal.md](docs/legal.md)
 
 ## Contacts
 
-- **Legal**: VAIL (Mark & Cat), Dr. White
 - **Technical**: 40AU (Logan & Andrew)

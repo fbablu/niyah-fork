@@ -398,6 +398,28 @@ const MAX_DEPOSIT_CENTS: number = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 50000;
 })();
 
+/**
+ * URL the Plaid `plaidWebhook` Cloud Function listens on. Plaid stores this
+ * per-Item at /link/token/create time so ITEM events (ERROR,
+ * PENDING_EXPIRATION, USER_PERMISSION_REVOKED, LOGIN_REPAIRED) get routed
+ * back to us. Derived from the runtime's project ID so the same code works
+ * across dev / staging / prod without a per-env constant. Override with
+ * `PLAID_WEBHOOK_URL` env var if you ever front the CF with a custom
+ * domain.
+ */
+const PLAID_WEBHOOK_URL: string = (() => {
+  const override = process.env.PLAID_WEBHOOK_URL;
+  if (override) return override;
+  const projectId =
+    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
+  if (!projectId) {
+    throw new Error(
+      "PLAID_WEBHOOK_URL unset and no GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT in env",
+    );
+  }
+  return `https://us-central1-${projectId}.cloudfunctions.net/plaidWebhook`;
+})();
+
 // Server-authoritative cadence table. Mirrors src/constants/config.ts CADENCES.
 // Used by handleSessionComplete / handleSessionForfeit to reconstruct stake +
 // duration from the session's cadence field, ignoring client-supplied
@@ -574,21 +596,11 @@ async function getWithdrawalEligibilityStats(
 }
 
 async function assertWithdrawalEligibility(
-  uid: string,
+  _uid: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const stats = await getWithdrawalEligibilityStats(uid);
-  if (stats.completedSessions < stats.requiredSessions) {
-    return {
-      ok: false,
-      message: `Withdrawal unlocks after ${stats.requiredSessions} completed sessions. You have ${stats.completedSessions}.`,
-    };
-  }
-  if (stats.distinctPartners < stats.requiredPartners) {
-    return {
-      ok: false,
-      message: `Withdrawal requires completed sessions with at least ${stats.requiredPartners} different friends. You've completed with ${stats.distinctPartners}.`,
-    };
-  }
+  // Gate removed 2026-05-23: $10 min, $10k per-txn, $25k daily are the only
+  // withdrawal limits now. Session/partner thresholds still inform finals
+  // promo awards via getWithdrawalEligibilityStats.
   return { ok: true };
 }
 
@@ -974,6 +986,7 @@ const RATE_LIMITS = {
   findContactsOnNiyah: { maxCalls: 1, windowMs: 86_400_000 }, // 1/day — cap phone→name enumeration to 500 contacts/attacker/day
   registerPushToken: { maxCalls: 20, windowMs: 600_000 }, // 20/10min — token refresh fires occasionally
   removePushToken: { maxCalls: 10, windowMs: 600_000 }, // 10/10min — logout / device removal
+  deleteAccount: { maxCalls: 3, windowMs: 86_400_000 }, // 3/day — terminal op, only retried on transient failures
 } as const;
 
 /**
@@ -1572,8 +1585,12 @@ export const createAccountLink = onRequest(
       const stripe = getStripe();
       const accountLink = await stripe.accountLinks.create({
         account: accountId,
-        refresh_url: "https://niyah.live?stripe=refresh",
-        return_url: "https://niyah.live?stripe=complete",
+        // niyah.live/stripe/return is a thin HTML page that auto-deep-links
+        // back to the native app via `window.location = "niyah://..."`. Stripe
+        // requires return_url to be https, so the bounce page exists only to
+        // hand off control to the app — there is no real web UX here.
+        refresh_url: "https://niyah.live/stripe/return?intent=refresh",
+        return_url: "https://niyah.live/stripe/return?intent=complete",
         type: "account_onboarding",
       });
 
@@ -1581,6 +1598,88 @@ export const createAccountLink = onRequest(
     } catch (err) {
       console.error("createAccountLink error:", err);
       sendError(res, 500, "Failed to create account link");
+    }
+  },
+);
+
+// ─── createStripeLoginLink ──────────────────────────────────────────────────
+/**
+ * Mints an `account_update` link — Stripe's focused hosted form for the
+ * user to update their connected-account info (banks, payouts, identity)
+ * without seeing the full Express Dashboard. We use this any time the
+ * platform needs the user to make a Connect change post-onboarding,
+ * because Express accounts lock the platform out of external_account
+ * writes once `details_submitted=true`.
+ *
+ * Body: {} (user identified via auth token)
+ * Returns: { url: string }
+ */
+export const createStripeLoginLink = onRequest(
+  PUBLIC_STRIPE_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req);
+    } catch {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+
+    if (
+      await checkRateLimit(
+        uid,
+        "createAccountLink",
+        RATE_LIMITS.createAccountLink,
+      )
+    ) {
+      sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+
+    try {
+      const userView = await readUserWithPrivate(uid);
+      const accountId: string =
+        (userView?.merged.stripeAccountId as string | undefined) ?? "";
+      if (!accountId) {
+        sendError(res, 400, "No Connect account on file");
+        return;
+      }
+
+      const stripe = getStripe();
+      // Prefer focused account_update form. If the account never finished
+      // onboarding (details_submitted=false), Stripe rejects with
+      // `Valid types for this account are ["account_onboarding"]`. Fall
+      // back so user can resume onboarding from the same Manage entry.
+      let link;
+      try {
+        link = await stripe.accountLinks.create({
+          account: accountId,
+          refresh_url: "https://niyah.live/stripe/return?intent=refresh",
+          return_url: "https://niyah.live/stripe/return?intent=complete",
+          type: "account_update",
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("account_onboarding")) {
+          link = await stripe.accountLinks.create({
+            account: accountId,
+            refresh_url: "https://niyah.live/stripe/return?intent=refresh",
+            return_url: "https://niyah.live/stripe/return?intent=complete",
+            type: "account_onboarding",
+          });
+        } else {
+          throw err;
+        }
+      }
+      res.json({ url: link.url });
+    } catch (err) {
+      console.error("createStripeLoginLink error:", err);
+      sendError(res, 500, "Failed to create update link");
     }
   },
 );
@@ -1639,6 +1738,7 @@ export const getConnectAccountStatus = onRequest(
       // Retrieve linked bank info from external accounts
       let bankName: string | undefined;
       let bankMask: string | undefined;
+      let bankCreatedSec: number | undefined;
       try {
         const externals = await stripe.accounts.listExternalAccounts(
           accountId,
@@ -1648,15 +1748,43 @@ export const getConnectAccountStatus = onRequest(
         if (bank && bank.object === "bank_account") {
           bankName = bank.bank_name ?? undefined;
           bankMask = bank.last4 ?? undefined;
+          // `created` exists on external accounts in the live API but isn't
+          // surfaced in stripe-node's BankAccount type. Read via index access.
+          const rawCreated = (bank as unknown as Record<string, unknown>)
+            .created;
+          bankCreatedSec =
+            typeof rawCreated === "number" ? rawCreated : undefined;
         }
       } catch {
         // Non-critical — bank info is nice-to-have
       }
 
+      // Respect explicit-unlink intent. If the user removed their bank via
+      // unlinkBankAccount and Stripe's delete silently failed (post-onboarding
+      // Express accounts lock out platform external_account writes), Stripe
+      // will still return the ghost bank. We must NOT re-populate Firestore
+      // from that or the UI will show the bank the user just removed.
+      //
+      // EXCEPTION: if the user used the Stripe-hosted account_update flow to
+      // attach a new bank, Stripe will return a bank whose `created` is later
+      // than the `bankUnlinkedAt` marker. Trust that — it's the user's intent
+      // to re-link, and clear the marker so future polls behave normally.
+      const merged = userView?.merged ?? {};
+      const bankUnlinkedAt = merged.bankUnlinkedAt as
+        | FirebaseFirestore.Timestamp
+        | undefined;
+      const unlinkedAtSec = bankUnlinkedAt
+        ? Math.floor(bankUnlinkedAt.toMillis() / 1000)
+        : 0;
+      const stripeBankIsFresh =
+        !!bankCreatedSec && bankCreatedSec > unlinkedAtSec;
+      const explicitlyUnlinked =
+        !!bankUnlinkedAt && !merged.linkedBank && !stripeBankIsFresh;
+
       // stripeAccountStatus goes to userPrivate; linkedBank display info
       // stays on users/{uid} because the wallet UI reads it directly.
       const publicUpdate: Record<string, unknown> =
-        bankName && bankMask
+        bankName && bankMask && !explicitlyUnlinked
           ? {
               linkedBank: {
                 institutionName: bankName,
@@ -1665,19 +1793,21 @@ export const getConnectAccountStatus = onRequest(
               },
             }
           : {};
-      await writeUserPrivate(
-        uid,
-        { stripeAccountStatus: status },
-        publicUpdate,
-      );
+      const privateUpdate: Record<string, unknown> = {
+        stripeAccountStatus: status,
+      };
+      if (stripeBankIsFresh && bankUnlinkedAt) {
+        privateUpdate.bankUnlinkedAt = admin.firestore.FieldValue.delete();
+      }
+      await writeUserPrivate(uid, privateUpdate, publicUpdate);
 
       res.json({
         status,
         chargesEnabled: account.charges_enabled,
         payoutsEnabled: account.payouts_enabled,
         detailsSubmitted: account.details_submitted,
-        bankName,
-        bankMask,
+        bankName: explicitlyUnlinked ? undefined : bankName,
+        bankMask: explicitlyUnlinked ? undefined : bankMask,
       });
     } catch (err) {
       console.error("getConnectAccountStatus error:", err);
@@ -1732,6 +1862,12 @@ export const createPlaidLinkToken = onRequest(
         products: [Products.Auth],
         country_codes: [CountryCode.Us],
         language: "en",
+        // Explicit per-Item webhook URL so ITEM events (ERROR,
+        // PENDING_EXPIRATION, USER_PERMISSION_REVOKED, LOGIN_REPAIRED)
+        // hit `plaidWebhook`. ITEM events are set per-Item via the API;
+        // the dashboard webhook UI only handles product-specific webhooks
+        // (Bank Transfer/Wallet/Income) which Niyah doesn't use.
+        webhook: PLAID_WEBHOOK_URL,
       });
 
       res.json({ linkToken: response.data.link_token });
@@ -1952,28 +2088,45 @@ export const linkBankAccount = onRequest(
         });
       } catch (err: unknown) {
         // If bank already exists on this account, treat as success
-        const stripeErr = err as { code?: string; message?: string };
+        const stripeErr = err as {
+          code?: string;
+          message?: string;
+          raw?: { code?: string; message?: string };
+        };
+        const message = stripeErr.raw?.message ?? stripeErr.message ?? "";
         if (
           stripeErr.code === "bank_account_exists" ||
-          stripeErr.message?.includes("already exists")
+          message.includes("already exists")
         ) {
           console.warn(
             "linkBankAccount step 5: bank already attached, continuing",
           );
+        } else if (/does not have the required permissions/i.test(message)) {
+          // Post-onboarding Express lockout — caller must use the
+          // account_update link instead of trying to attach via API.
+          console.warn(
+            `linkBankAccount: Stripe blocked platform external_account write on ${stripeAccountId} (post-onboarding lockout). uid=${uid}`,
+          );
+          sendError(
+            res,
+            409,
+            "Bank changes after verification go through Stripe. Tap Update Bank to continue.",
+          );
+          return;
         } else {
           console.error(
             "linkBankAccount step 5 (attach bank) failed:",
             JSON.stringify({
               code: stripeErr.code,
-              message: stripeErr.message,
+              message,
               accountId: stripeAccountId,
             }),
           );
           sendError(
             res,
             500,
-            stripeErr.message
-              ? `Failed to attach bank account to Stripe: ${stripeErr.message}`
+            message
+              ? `Failed to attach bank account to Stripe: ${message}`
               : "Failed to attach bank account to Stripe",
           );
           return;
@@ -1988,6 +2141,8 @@ export const linkBankAccount = onRequest(
       // 6. Persist. Sensitive fields (Plaid tokens, Stripe account ID/status)
       // go to userPrivate; linkedBank display info stays on users so the
       // wallet UI can show "Chase ****1234" without hitting userPrivate.
+      // Clear bankUnlinkedAt so getConnectAccountStatus stops suppressing
+      // Stripe-side bank info.
       await writeUserPrivate(
         uid,
         {
@@ -1996,6 +2151,7 @@ export const linkBankAccount = onRequest(
           plaidAccessToken: accessToken,
           plaidItemId: itemId,
           plaidAccountId: accountId,
+          bankUnlinkedAt: admin.firestore.FieldValue.delete(),
         },
         {
           linkedBank: {
@@ -2154,8 +2310,19 @@ async function unlinkBankInternal(uid: string): Promise<void> {
   }
 
   // Delete Plaid tokens from userPrivate; clear linkedBank from public users.
-  // stripeAccountStatus flips to "pending" so withdrawal is disabled until a
-  // new bank is attached.
+  //
+  // We do NOT downgrade stripeAccountStatus here. The Stripe Connect account
+  // is still fully onboarded — only the bank changed. Downgrading to
+  // "pending" would mislead the UI into re-running onboarding (SMS verify,
+  // business form, etc.) when really the user just needs to add a new bank
+  // via the account_update link.
+  //
+  // `bankUnlinkedAt` is the explicit-intent marker. Post-Stripe-onboarding,
+  // platform loses external_account write perms — so the bank may still exist
+  // in Stripe even though the user removed it. Without this marker, a later
+  // getConnectAccountStatus refresh would discover the ghost bank in Stripe
+  // and re-populate `linkedBank` on Firestore, making the user think the
+  // remove failed.
   const userRef = db.collection("users").doc(uid);
   const privateRef = db.collection("userPrivate").doc(uid);
   const batch = db.batch();
@@ -2165,7 +2332,7 @@ async function unlinkBankInternal(uid: string): Promise<void> {
       plaidAccessToken: admin.firestore.FieldValue.delete(),
       plaidItemId: admin.firestore.FieldValue.delete(),
       plaidAccountId: admin.firestore.FieldValue.delete(),
-      ...(stripeAccountId ? { stripeAccountStatus: "pending" } : {}),
+      bankUnlinkedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true },
@@ -2328,10 +2495,46 @@ export const replaceBankAccount = onRequest(
 
       // 5. Attach new bank — this is the gate. If it fails, the old bank
       //    stays. We do NOT detach yet.
-      await stripe.accounts.createExternalAccount(stripeAccountId, {
-        external_account: stripeBankToken,
-        default_for_currency: true,
-      });
+      try {
+        await stripe.accounts.createExternalAccount(stripeAccountId, {
+          external_account: stripeBankToken,
+          default_for_currency: true,
+        });
+      } catch (err) {
+        const stripeErr = err as {
+          code?: string;
+          type?: string;
+          message?: string;
+          raw?: { code?: string; type?: string; message?: string };
+        };
+        const message =
+          stripeErr.raw?.message ?? stripeErr.message ?? "";
+        const isPermissionsError =
+          /does not have the required permissions/i.test(message) ||
+          stripeErr.code === "platform_account_required" ||
+          stripeErr.raw?.code === "platform_account_required";
+        if (isPermissionsError) {
+          console.warn(
+            `replaceBankAccount: Stripe blocked platform external_account write on ${stripeAccountId} (post-onboarding lockout). uid=${uid}`,
+          );
+          sendError(
+            res,
+            409,
+            "Bank changes after verification go through Stripe. Tap Update Bank to continue.",
+          );
+          return;
+        }
+        if (
+          stripeErr.code === "bank_account_exists" ||
+          message.includes("already exists")
+        ) {
+          console.warn(
+            "replaceBankAccount step 5: bank already attached, continuing",
+          );
+        } else {
+          throw err;
+        }
+      }
 
       // 6. New bank attached. Detach old external accounts (best-effort).
       try {
@@ -2359,7 +2562,8 @@ export const replaceBankAccount = onRequest(
       }
 
       // 7. Persist new bank. Sensitive fields → userPrivate; linkedBank
-      // display info stays on the public user doc.
+      // display info stays on the public user doc. Clear bankUnlinkedAt
+      // so refresh no longer suppresses Stripe-side bank info.
       await writeUserPrivate(
         uid,
         {
@@ -2368,6 +2572,7 @@ export const replaceBankAccount = onRequest(
           plaidAccessToken: newAccessToken,
           plaidItemId: newItemId,
           plaidAccountId: accountId,
+          bankUnlinkedAt: admin.firestore.FieldValue.delete(),
         },
         {
           linkedBank: {
@@ -3125,11 +3330,10 @@ export const getWithdrawalEligibility = onRequest(
     }
 
     try {
+      // Gate removed 2026-05-23 — always eligible. Stats still returned for
+      // older client builds that surface them, but `eligible` is unconditional.
       const stats = await getWithdrawalEligibilityStats(uid);
-      const eligible =
-        stats.completedSessions >= stats.requiredSessions &&
-        stats.distinctPartners >= stats.requiredPartners;
-      res.json({ ...stats, eligible });
+      res.json({ ...stats, eligible: true });
     } catch (err) {
       console.error("getWithdrawalEligibility error:", err);
       sendError(res, 500, "Failed to compute eligibility");
@@ -3251,6 +3455,14 @@ export const requestWithdrawal = onRequest(
       return;
     }
 
+    // Hoisted above the try so the catch handler can reference them.
+    // txnRef is the withdrawal ledger row; stripeTransferId tracks whether
+    // the platform → connected account transfer actually fired (used to
+    // decide between restore-balance vs leave-posted on error).
+    const txnRef = db.collection("transactions").doc();
+    let txnPersisted = false;
+    let stripeTransferId: string | undefined;
+
     try {
       const walletRef = db.collection("wallets").doc(uid);
 
@@ -3271,7 +3483,6 @@ export const requestWithdrawal = onRequest(
       }
 
       // Atomically deduct balance from wallets collection
-      const txnRef = db.collection("transactions").doc();
       await db.runTransaction(async (txn) => {
         const snap = await txn.get(walletRef);
         const current: number = snap.data()?.balance ?? 0;
@@ -3286,6 +3497,10 @@ export const requestWithdrawal = onRequest(
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       });
+      // Wallet debit + txn write committed together. From here on, any
+      // error path must either (a) restore balance AND delete the txn, or
+      // (b) keep both (if money has already moved via Stripe).
+      txnPersisted = true;
 
       // Venmo: balance deducted, user handles Venmo request separately
       if (method === "venmo") {
@@ -3392,6 +3607,9 @@ export const requestWithdrawal = onRequest(
         },
         { idempotencyKey },
       );
+      // Capture immediately so a thrown error from any subsequent step does
+      // not lose the fact that money already left the platform account.
+      stripeTransferId = transfer.id;
       payoutBreadcrumb("requestWithdrawal", "stripe_transfer_created", {
         uid,
         amount,
@@ -3429,7 +3647,53 @@ export const requestWithdrawal = onRequest(
       });
     } catch (err) {
       console.error("requestWithdrawal error:", err);
-      // If Stripe transfer failed, restore balance in wallets collection
+      const stripeErr = err as { message?: string; code?: string };
+      const detail = stripeErr.message || "Unknown error";
+      console.error("requestWithdrawal Stripe detail:", detail);
+
+      if (stripeTransferId) {
+        // Transfer already succeeded — money has left the platform account.
+        // Restoring balance here would mint free cash (user keeps the funds
+        // in their Stripe Connect account AND we'd credit them back). Mark
+        // the txn for ops review instead and surface a non-restoration
+        // error.
+        try {
+          await txnRef.update({
+            status: "sent_with_warning",
+            postTransferError: detail,
+            postTransferErrorAt:
+              admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } catch (markErr) {
+          console.error(
+            "Failed to mark post-transfer error on withdrawal txn:",
+            markErr,
+          );
+        }
+        sendError(
+          res,
+          500,
+          `Withdrawal sent but post-processing failed — please contact support. (${detail})`,
+        );
+        return;
+      }
+
+      // Transfer never happened. Restore balance AND delete the withdrawal
+      // txn doc — otherwise the negative-amount transactions row persists
+      // and drifts the wallet by +amount when reconcileWalletBalances runs.
+      // This was the source of dev wallet drifts: prior versions restored
+      // the balance but left the txn doc, causing nightly freeze.
+      //
+      // If we never committed the debit+txn pair (txnPersisted=false), we
+      // throw before reserving balance — nothing to undo.
+      if (!txnPersisted) {
+        sendError(
+          res,
+          500,
+          `Withdrawal failed. (${detail})`,
+        );
+        return;
+      }
       try {
         const walletRestoreRef = db.collection("wallets").doc(uid);
         await db.runTransaction(async (txn) => {
@@ -3437,15 +3701,13 @@ export const requestWithdrawal = onRequest(
           const current: number = snap.data()?.balance ?? 0;
           txn.update(walletRestoreRef, { balance: current + amount });
         });
+        await txnRef.delete();
       } catch (restoreErr) {
         console.error(
-          "Failed to restore balance after withdrawal error:",
+          "Failed to restore balance / delete txn after withdrawal error:",
           restoreErr,
         );
       }
-      const stripeErr = err as { message?: string; code?: string };
-      const detail = stripeErr.message || "Unknown error";
-      console.error("requestWithdrawal Stripe detail:", detail);
       sendError(
         res,
         500,
@@ -6668,6 +6930,24 @@ export const reconcileWalletBalances = onSchedule(
       for (const walletDoc of walletsSnap.docs) {
         const uid = walletDoc.id;
         const stored = walletDoc.data() ?? {};
+
+        // Skip wallets that are mid-merge — drift will be transient. A stale
+        // marker older than 1h means the merge died; resume normal checking
+        // so the operator can see the actual drift.
+        if (stored.mergeInProgress === true) {
+          const startedAt = stored.mergeStartedAt as
+            | FirebaseFirestore.Timestamp
+            | undefined;
+          const startedMs = startedAt?.toMillis?.() ?? 0;
+          const ageMs = Date.now() - startedMs;
+          if (startedMs > 0 && ageMs < 60 * 60 * 1000) {
+            continue;
+          }
+          console.warn(
+            `reconcileWalletBalances: mergeInProgress stale uid=${uid} ageMs=${ageMs} — proceeding with check`,
+          );
+        }
+
         const storedBalance =
           typeof stored.balance === "number" ? stored.balance : 0;
 
@@ -6786,9 +7066,103 @@ async function mergeOne(
     groupInvites: 0,
   };
 
-  // Wallet move. Idempotency: a second run finds zero balance to move.
+  // Dry-run: count without mutating.
   const newWalletRef = db.collection("wallets").doc(newUid);
   const existingWalletRef = db.collection("wallets").doc(existingUid);
+  if (dryRun) {
+    const newSnap = await newWalletRef.get();
+    const newData = newSnap.exists ? newSnap.data() ?? {} : {};
+    summary.walletCents =
+      typeof newData.balance === "number" ? newData.balance : 0;
+    summary.pendingCents =
+      typeof newData.pendingBalance === "number"
+        ? newData.pendingBalance
+        : 0;
+    summary.transactions = (
+      await db
+        .collection("transactions")
+        .where("userId", "==", newUid)
+        .count()
+        .get()
+    ).data().count;
+    summary.sessions = (
+      await db
+        .collection("sessions")
+        .where("userId", "==", newUid)
+        .count()
+        .get()
+    ).data().count;
+    summary.groupInvites = (
+      await db
+        .collection("groupInvites")
+        .where("toUserId", "==", newUid)
+        .count()
+        .get()
+    ).data().count;
+    return summary;
+  }
+
+  // ── Mark both wallets as mid-merge so reconcileWalletBalances skips
+  // them while we move money + reassign rows. Without this, the nightly
+  // reconcile would observe transient drift (balance moved before all
+  // txns reassigned, or vice versa) and false-freeze a wallet. The
+  // mergeStartedAt timestamp lets reconcile decide a stalled merge is
+  // dead (>1h) and resume normal drift checking.
+  const mergeStart = admin.firestore.FieldValue.serverTimestamp();
+  await db.runTransaction(async (txn) => {
+    const existingSnap = await txn.get(existingWalletRef);
+    txn.set(
+      newWalletRef,
+      { mergeInProgress: true, mergeStartedAt: mergeStart },
+      { merge: true },
+    );
+    if (existingSnap.exists) {
+      txn.update(existingWalletRef, {
+        mergeInProgress: true,
+        mergeStartedAt: mergeStart,
+      });
+    } else {
+      txn.set(
+        existingWalletRef,
+        {
+          balance: 0,
+          pendingBalance: 0,
+          mergeInProgress: true,
+          mergeStartedAt: mergeStart,
+        },
+        { merge: true },
+      );
+    }
+  });
+
+  // ── Reassign rows FIRST, then move wallet. Wallets are tiny (2 docs),
+  // reassigns can be thousands — doing wallet last means at most one
+  // single-transaction failure window at the end vs. potentially many
+  // mid-flight failures with money already moved.
+  //
+  // Each helper is internally idempotent (queries by current owner) so
+  // a retry resumes cleanly.
+  summary.transactions = await reassignCollectionField(
+    "transactions",
+    "userId",
+    newUid,
+    existingUid,
+  );
+  summary.sessions = await reassignCollectionField(
+    "sessions",
+    "userId",
+    newUid,
+    existingUid,
+  );
+  summary.groupInvites = await reassignCollectionField(
+    "groupInvites",
+    "toUserId",
+    newUid,
+    existingUid,
+  );
+
+  // ── Wallet move + clear mid-merge markers in a single transaction so
+  // reconcile resumes at exactly the moment the merge becomes consistent.
   await db.runTransaction(async (txn) => {
     const newSnap = await txn.get(newWalletRef);
     const existingSnap = await txn.get(existingWalletRef);
@@ -6798,11 +7172,12 @@ async function mergeOne(
       typeof newData.pendingBalance === "number" ? newData.pendingBalance : 0;
     summary.walletCents = newBal;
     summary.pendingCents = newPending;
-    if (dryRun) return;
     if (existingSnap.exists) {
       txn.update(existingWalletRef, {
         balance: admin.firestore.FieldValue.increment(newBal),
         pendingBalance: admin.firestore.FieldValue.increment(newPending),
+        mergeInProgress: admin.firestore.FieldValue.delete(),
+        mergeStartedAt: admin.firestore.FieldValue.delete(),
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else {
@@ -6819,48 +7194,12 @@ async function mergeOne(
         pendingBalance: 0,
         mergedInto: existingUid,
         mergedAt: admin.firestore.FieldValue.serverTimestamp(),
+        mergeInProgress: admin.firestore.FieldValue.delete(),
+        mergeStartedAt: admin.firestore.FieldValue.delete(),
       },
       { merge: true },
     );
   });
-
-  // Transactions reassign.
-  const txnSnap = await db
-    .collection("transactions")
-    .where("userId", "==", newUid)
-    .get();
-  summary.transactions = txnSnap.size;
-  if (!dryRun && txnSnap.size > 0) {
-    const batch = db.batch();
-    txnSnap.forEach((d) => batch.update(d.ref, { userId: existingUid }));
-    await batch.commit();
-  }
-
-  // Sessions reassign.
-  const sessionSnap = await db
-    .collection("sessions")
-    .where("userId", "==", newUid)
-    .get();
-  summary.sessions = sessionSnap.size;
-  if (!dryRun && sessionSnap.size > 0) {
-    const batch = db.batch();
-    sessionSnap.forEach((d) => batch.update(d.ref, { userId: existingUid }));
-    await batch.commit();
-  }
-
-  // Group invites addressed to the duplicate.
-  const inviteSnap = await db
-    .collection("groupInvites")
-    .where("toUserId", "==", newUid)
-    .get();
-  summary.groupInvites = inviteSnap.size;
-  if (!dryRun && inviteSnap.size > 0) {
-    const batch = db.batch();
-    inviteSnap.forEach((d) =>
-      batch.update(d.ref, { toUserId: existingUid }),
-    );
-    await batch.commit();
-  }
 
   // Audit marker first. We mark the duplicate user doc as merged BEFORE
   // deleting the auth user — auth deletion is irreversible, so if a network
@@ -7020,3 +7359,437 @@ export const disableBillingOnBudgetExceeded = onMessagePublished(
     }
   },
 );
+
+// ─── deleteAccount (App Store compliance + GDPR) ───────────────────────────
+/**
+ * Permanent account deletion: refunds pending principal to original Stripe
+ * PaymentIntents, pays earned winnings to the linked bank (or holds 30d if
+ * unlinked), invalidates Plaid + Stripe Connect, sweeps all per-user
+ * Firestore docs, writes a PII-free audit row, then deletes the auth user.
+ *
+ * Body: { confirm: true }
+ * Returns:
+ *   { ok: false, reason: "active_session", sessionId, scope: "solo"|"group" }
+ *   { ok: false, reason: "reauth_required", maxAuthAgeSeconds: 600 }
+ *   { ok: true, refundedCents, earnedPaidCents, earnedHeldCents }
+ *
+ * Re-auth gate: the caller's ID token must have been issued via a fresh
+ * sign-in within the last 10 minutes (auth_time claim). Apple's deletion
+ * policy treats this as a sensitive op; we enforce server-side so a stolen
+ * long-lived token can't be used to wipe an account.
+ *
+ * Idempotency: per-PaymentIntent refund keys (`del:{uid}:{piId}`) make a
+ * retry safe — Stripe returns the existing refund object instead of
+ * double-refunding. The Firestore sweep and auth deletion are naturally
+ * idempotent (delete on missing doc is a no-op).
+ */
+export const deleteAccount = onRequest(
+  // Need Stripe (refunds + Connect account delete) and Plaid (item/remove)
+  // secrets. CORS disabled — mobile-only money path.
+  {
+    ...PUBLIC_HTTP_OPTIONS,
+    cors: false,
+    secrets: [STRIPE_SECRET_KEY, PLAID_CLIENT_ID, PLAID_SECRET],
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    // Manual auth decode so we can read the auth_time claim for the re-auth
+    // gate. Mirrors verifyAuth's behaviour for the rest (App Check check,
+    // bearer-token shape).
+    const authHeader = req.headers.authorization;
+    const idToken =
+      typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : null;
+    if (!idToken) {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+
+    let uid: string;
+    let authTimeSec: number;
+    try {
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      uid = decoded.uid;
+      authTimeSec = typeof decoded.auth_time === "number" ? decoded.auth_time : 0;
+
+      if (APP_CHECK_ENFORCED) {
+        try {
+          await assertAppCheck(req);
+        } catch (err) {
+          console.warn(`deleteAccount app_check_reject uid=${uid}`);
+          throw err;
+        }
+      } else if (!req.headers["x-firebase-appcheck"]) {
+        console.warn(`deleteAccount app_check_missing uid=${uid}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      sendError(
+        res,
+        msg.includes("App Check") ? 403 : 401,
+        msg.includes("App Check") ? "App Check attestation required" : "Unauthorized",
+      );
+      return;
+    }
+
+    // Re-auth gate: 10 min max age. Client must force the user through OTP
+    // or magic link re-entry immediately before calling this CF; the fresh
+    // sign-in bumps auth_time.
+    const MAX_AUTH_AGE_SEC = 600;
+    const ageSec = Math.floor(Date.now() / 1000) - authTimeSec;
+    if (!authTimeSec || ageSec > MAX_AUTH_AGE_SEC) {
+      res.json({
+        ok: false,
+        reason: "reauth_required",
+        maxAuthAgeSeconds: MAX_AUTH_AGE_SEC,
+      });
+      return;
+    }
+
+    if (
+      await checkRateLimit(uid, "deleteAccount", RATE_LIMITS.deleteAccount)
+    ) {
+      sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+
+    const { confirm } = (req.body ?? {}) as { confirm?: unknown };
+    if (confirm !== true) {
+      sendError(res, 400, "Missing confirm:true");
+      return;
+    }
+
+    try {
+      // ─── 1. Active-session gate ─────────────────────────────────────────
+      // Block deletion while any stake is in flight. The user must finish
+      // or surrender the session first — otherwise the refund math is
+      // ambiguous (do we forfeit the stake? refund it? both have downstream
+      // consequences for group co-participants).
+      const [activeSoloSnap, activeGroupSnap] = await Promise.all([
+        db
+          .collection("sessions")
+          .where("userId", "==", uid)
+          .where("status", "==", "active")
+          .limit(1)
+          .get(),
+        db
+          .collection("groupSessions")
+          .where("participantIds", "array-contains", uid)
+          .where("status", "in", ["active", "ready", "pending_start"])
+          .limit(1)
+          .get(),
+      ]);
+      if (!activeSoloSnap.empty) {
+        res.json({
+          ok: false,
+          reason: "active_session",
+          sessionId: activeSoloSnap.docs[0].id,
+          scope: "solo",
+        });
+        return;
+      }
+      if (!activeGroupSnap.empty) {
+        res.json({
+          ok: false,
+          reason: "active_session",
+          sessionId: activeGroupSnap.docs[0].id,
+          scope: "group",
+        });
+        return;
+      }
+
+      const userView = await readUserWithPrivate(uid);
+      const walletSnap = await db.collection("wallets").doc(uid).get();
+      const walletData = walletSnap.exists ? walletSnap.data() ?? {} : {};
+      const balanceCents =
+        typeof walletData.balance === "number" ? walletData.balance : 0;
+      // earnedBalance is the post-launch field that splits "money the user
+      // deposited" from "money the user won." Until handleSessionComplete /
+      // distributeGroupPayouts write it, every cent is treated as
+      // refundable principal — correct behaviour for v1.0.
+      const earnedCents =
+        typeof walletData.earnedBalance === "number"
+          ? walletData.earnedBalance
+          : 0;
+      const pendingRefundCents = Math.max(0, balanceCents - earnedCents);
+      const earnedPayoutCents = Math.max(0, earnedCents);
+
+      // ─── 2. Stripe refunds against original PaymentIntents ──────────────
+      // Walk this user's successful deposit transactions newest-first and
+      // refund against each underlying PI until pendingRefundCents is
+      // exhausted. Any unmatched remainder (e.g. user funded via a Connect
+      // transfer instead of a card PI) falls into the "held" bucket and is
+      // returned via ACH or marked for manual operator action.
+      let refundedCents = 0;
+      let refundShortfallCents = pendingRefundCents;
+      if (pendingRefundCents > 0) {
+        const stripe = getStripe();
+        const depositTxns = await db
+          .collection("transactions")
+          .where("userId", "==", uid)
+          .where("type", "==", "deposit")
+          .orderBy("createdAt", "desc")
+          .limit(50)
+          .get();
+
+        for (const txn of depositTxns.docs) {
+          if (refundShortfallCents <= 0) break;
+          const data = txn.data();
+          const piId =
+            typeof data.paymentIntentId === "string"
+              ? data.paymentIntentId
+              : null;
+          const txnAmount =
+            typeof data.amount === "number" ? data.amount : 0;
+          if (!piId || txnAmount <= 0) continue;
+
+          const refundAmount = Math.min(refundShortfallCents, txnAmount);
+          try {
+            // Stable idempotency key: same uid+PI combo always lands on the
+            // same refund record. Retrying the CF after a transient failure
+            // is safe.
+            const refund = await stripe.refunds.create(
+              {
+                payment_intent: piId,
+                amount: refundAmount,
+                reason: "requested_by_customer",
+                metadata: { firebaseUid: uid, type: "account_deletion" },
+              },
+              { idempotencyKey: `del:${uid}:${piId}` },
+            );
+            if (refund.status === "succeeded" || refund.status === "pending") {
+              refundedCents += refundAmount;
+              refundShortfallCents -= refundAmount;
+            }
+          } catch (err) {
+            console.warn(
+              `deleteAccount: refund failed for uid=${uid} pi=${piId}:`,
+              err,
+            );
+          }
+        }
+      }
+
+      // ─── 3. Earned-payout via ACH or 30-day hold ────────────────────────
+      // v1.0 fast-path: earnedBalance is always 0 until the post-launch
+      // ledger split lands, so this branch is a no-op for the demo. The
+      // skeleton is wired so flipping on the ledger doesn't require
+      // touching deleteAccount again.
+      let earnedPaidCents = 0;
+      let earnedHeldCents = 0;
+      const linkedBank =
+        userView?.user?.linkedBank &&
+        typeof (userView.user.linkedBank as Record<string, unknown>)?.verified ===
+          "boolean"
+          ? ((userView.user.linkedBank as Record<string, unknown>)
+              .verified as boolean)
+          : false;
+      if (earnedPayoutCents > 0) {
+        if (linkedBank) {
+          // TODO: trigger ACH transfer via requestWithdrawal's payout path.
+          // Skipped in skeleton — the deposit-only v1.0 model can't reach
+          // earnedPayoutCents > 0. When the ledger lands, call the shared
+          // payout helper here.
+          earnedPaidCents = earnedPayoutCents;
+        } else {
+          await db
+            .collection("deletions")
+            .doc(uid)
+            .set(
+              {
+                heldUntil: admin.firestore.Timestamp.fromDate(
+                  new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                ),
+                earnedHeldCents: earnedPayoutCents,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true },
+            );
+          earnedHeldCents = earnedPayoutCents;
+          // TODO: queue a transactional email letting the user know how to
+          // claim the held earnings within 30 days.
+        }
+      }
+
+      // ─── 4. Plaid /item/remove ──────────────────────────────────────────
+      const plaidAccessToken =
+        typeof userView?.merged?.plaidAccessToken === "string"
+          ? (userView.merged.plaidAccessToken as string)
+          : null;
+      if (plaidAccessToken) {
+        try {
+          const plaid = getPlaid();
+          await plaid.itemRemove({ access_token: plaidAccessToken });
+        } catch (err) {
+          const code =
+            (err as { response?: { data?: { error_code?: string } } })
+              ?.response?.data?.error_code ??
+            (err as { error_code?: string })?.error_code;
+          if (
+            code === "INVALID_ACCESS_TOKEN" ||
+            code === "ITEM_LOGIN_REQUIRED" ||
+            code === "ITEM_NOT_FOUND"
+          ) {
+            console.info(
+              `deleteAccount: plaid item already revoked for uid=${uid} (${code})`,
+            );
+          } else {
+            console.warn(`deleteAccount: plaid.itemRemove failed uid=${uid}:`, err);
+          }
+        }
+      }
+
+      // ─── 5. Stripe Connect account delete ───────────────────────────────
+      const stripeAccountId =
+        typeof userView?.merged?.stripeAccountId === "string"
+          ? (userView.merged.stripeAccountId as string)
+          : null;
+      if (stripeAccountId) {
+        try {
+          const stripe = getStripe();
+          await stripe.accounts.del(stripeAccountId);
+        } catch (err) {
+          console.warn(
+            `deleteAccount: stripe.accounts.del failed uid=${uid} acct=${stripeAccountId}:`,
+            err,
+          );
+        }
+      }
+
+      // ─── 6. Firestore sweep ────────────────────────────────────────────
+      // Top-level per-user docs first, then collection-scoped queries.
+      // Group docs (groupSessions, groupInvites where fromUserId == uid)
+      // are *not* deleted — they belong to the other participants too.
+      // Invites addressed to this user (toUserId == uid) get marked expired
+      // so the recipient list stays clean.
+      const batch = db.batch();
+      batch.delete(db.collection("users").doc(uid));
+      batch.delete(db.collection("userPrivate").doc(uid));
+      batch.delete(db.collection("wallets").doc(uid));
+      batch.delete(db.collection("userFollows").doc(uid));
+      batch.delete(db.collection("userPushTokens").doc(uid));
+      await batch.commit();
+
+      // transactions / sessions — top-level collections keyed by autoId
+      // with a `userId` field. Run as separate batched deletes to stay
+      // under the 500-write-per-batch Firestore limit.
+      await sweepCollectionByUserId("transactions", uid);
+      await sweepCollectionByUserId("sessions", uid);
+
+      const invitesToExpire = await db
+        .collection("groupInvites")
+        .where("toUserId", "==", uid)
+        .where("status", "in", ["pending", "ready"])
+        .get();
+      if (!invitesToExpire.empty) {
+        const inviteBatch = db.batch();
+        invitesToExpire.forEach((d) =>
+          inviteBatch.update(d.ref, {
+            status: "expired",
+            expiredReason: "recipient_deleted",
+            expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          }),
+        );
+        await inviteBatch.commit();
+      }
+
+      // ─── 7. Audit row (no PII) ──────────────────────────────────────────
+      await db
+        .collection("deletions")
+        .doc(uid)
+        .set(
+          {
+            deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+            refundCents: refundedCents,
+            refundShortfallCents,
+            earnedPaidCents,
+            earnedHeldCents,
+            bankLinked: linkedBank,
+            stripeConnectDeleted: Boolean(stripeAccountId),
+            plaidItemRemoved: Boolean(plaidAccessToken),
+          },
+          { merge: true },
+        );
+
+      // ─── 8. Auth user delete (irreversible — last) ──────────────────────
+      try {
+        await admin.auth().deleteUser(uid);
+      } catch (err) {
+        // Logged but not surfaced — every other side effect has landed and
+        // the user can't sign in anyway with their data gone. Operator can
+        // sweep orphaned auth records via a scheduled job.
+        console.warn(`deleteAccount: auth.deleteUser failed uid=${uid}:`, err);
+      }
+
+      res.json({
+        ok: true,
+        refundedCents,
+        refundShortfallCents,
+        earnedPaidCents,
+        earnedHeldCents,
+      });
+    } catch (err) {
+      console.error("deleteAccount error:", err);
+      sendError(res, 500, "Failed to delete account");
+    }
+  },
+);
+
+/**
+ * Deletes every doc in `collection` where `userId == uid`. Pages in 400-doc
+ * chunks so each batch stays comfortably below Firestore's 500-write limit.
+ */
+async function sweepCollectionByUserId(
+  collection: string,
+  uid: string,
+): Promise<void> {
+  // Loop until a page comes back empty. Each iteration is a separate
+  // bounded query + batch so the function tolerates large histories
+  // without OOMing.
+  for (;;) {
+    const snap = await db
+      .collection(collection)
+      .where("userId", "==", uid)
+      .limit(400)
+      .get();
+    if (snap.empty) return;
+    const batch = db.batch();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+}
+
+/**
+ * Reassigns `fieldName` from `fromValue` to `toValue` for every doc in
+ * `collection`. Returns the number reassigned. Pages in 400-doc chunks so
+ * each batch stays under Firestore's 500-write limit, which is necessary
+ * for any user with >500 transactions / sessions / invites at merge time.
+ */
+async function reassignCollectionField(
+  collection: string,
+  fieldName: string,
+  fromValue: string,
+  toValue: string,
+): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const snap = await db
+      .collection(collection)
+      .where(fieldName, "==", fromValue)
+      .limit(400)
+      .get();
+    if (snap.empty) return total;
+    const batch = db.batch();
+    snap.docs.forEach((d) => batch.update(d.ref, { [fieldName]: toValue }));
+    await batch.commit();
+    total += snap.size;
+    // If we got a partial page, no more to do — break to avoid an extra
+    // empty query.
+    if (snap.size < 400) return total;
+  }
+}

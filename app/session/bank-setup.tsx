@@ -150,7 +150,20 @@ function BankSetupScreenInner() {
         onExit: (exit: LinkExit) => {
           if (!isMountedRef.current) return;
           setIsConnecting(false);
-          if (exit.error) {
+          // exit.error is sometimes returned as an object with empty string
+          // fields when the user taps X to dismiss — treat that as a cancel,
+          // not an error. A real failure has at least one populated field.
+          const e = exit.error;
+          const hasRealError =
+            !!e &&
+            !!(
+              (e.errorCode && e.errorCode.length > 0) ||
+              (e.errorType && e.errorType.length > 0) ||
+              (e.errorMessage && e.errorMessage.length > 0) ||
+              (e.displayMessage && e.displayMessage.length > 0) ||
+              (e.errorDisplayMessage && e.errorDisplayMessage.length > 0)
+            );
+          if (hasRealError) {
             logger.error("Plaid Link error:", exit.error);
             Alert.alert(
               "Connection Error",

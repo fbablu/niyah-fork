@@ -214,6 +214,15 @@ export async function createAccountLink(): Promise<{ url: string }> {
   return callFunction<{ url: string }>("createAccountLink", {});
 }
 
+/**
+ * Mints a Stripe Express Dashboard login link. Used when the platform can
+ * no longer manage the user's bank (post-onboarding external_account
+ * lockout) — the user updates payouts directly in Stripe's hosted UI.
+ */
+export async function createStripeLoginLink(): Promise<{ url: string }> {
+  return callFunction<{ url: string }>("createStripeLoginLink", {});
+}
+
 export async function getConnectAccountStatus(): Promise<{
   status: "none" | "pending" | "active" | "restricted";
   chargesEnabled?: boolean;

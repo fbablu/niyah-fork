@@ -14,6 +14,8 @@ import {
   ActivityIndicator,
   Linking,
   AppState,
+  ActionSheetIOS,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import {
@@ -41,8 +43,8 @@ import {
   requestWithdrawal,
   createAccountLink,
   getConnectAccountStatus,
-  getWithdrawalEligibility,
-  type WithdrawalEligibility,
+  createStripeLoginLink,
+  unlinkBankAccount,
 } from "../../src/config/functions";
 import { logger } from "../../src/utils/logger";
 import { logEvent } from "../../src/utils/analytics";
@@ -73,9 +75,6 @@ function WithdrawScreenInner() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
-  const [eligibility, setEligibility] = useState<WithdrawalEligibility | null>(
-    null,
-  );
 
   // Guard against setState after unmount + double navigation, which crashes
   // "every other time" when Stripe modal dismiss races with React unmount.
@@ -86,23 +85,6 @@ function WithdrawScreenInner() {
     hasNavigatedBackRef.current = false;
     return () => {
       isMountedRef.current = false;
-    };
-  }, []);
-
-  // Fetch withdrawal eligibility (campus-launch friend-session gate) so the UI
-  // can show progress before the user even taps Continue.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const stats = await getWithdrawalEligibility();
-        if (!cancelled && isMountedRef.current) setEligibility(stats);
-      } catch (err) {
-        logger.warn("getWithdrawalEligibility failed:", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
     };
   }, []);
 
@@ -201,7 +183,14 @@ function WithdrawScreenInner() {
     setIsSettingUp(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const { url } = await createAccountLink();
+      // If onboarding is done but the user removed their bank (or never
+      // attached one post-onboarding), Stripe locks the platform out of
+      // external_account writes — Plaid Link would just hit a 409. Send
+      // the user to the focused account_update form instead.
+      const { url } =
+        stripeStatus === "active"
+          ? await createStripeLoginLink()
+          : await createAccountLink();
       await Linking.openURL(url);
     } catch (err) {
       logger.error("handleSetupStripe error:", err);
@@ -252,6 +241,68 @@ function WithdrawScreenInner() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setStep("method");
   };
+
+  const handleManageBank = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const updateAction = async () => {
+      try {
+        const { url } = await createStripeLoginLink();
+        await Linking.openURL(url);
+      } catch (err) {
+        logger.error("createStripeLoginLink failed:", err);
+        Alert.alert(
+          "Could not start update",
+          getFunctionErrorMessage(err, "Please try again."),
+        );
+      }
+    };
+    const removeAction = () => {
+      Alert.alert(
+        "Remove linked bank?",
+        "Withdrawals will be disabled until you connect a new one. Balance and history stay intact.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await unlinkBankAccount();
+                updateUser({ linkedBank: undefined });
+              } catch (err) {
+                logger.error("unlinkBankAccount failed:", err);
+                Alert.alert(
+                  "Could not remove bank",
+                  getFunctionErrorMessage(err, "Please try again."),
+                );
+              }
+            },
+          },
+        ],
+      );
+    };
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Cancel", "Update Bank with Stripe", "Remove bank"],
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 2,
+          title: "Manage linked bank",
+        },
+        (idx) => {
+          if (idx === 1) updateAction();
+          else if (idx === 2) removeAction();
+        },
+      );
+    } else {
+      Alert.alert("Manage linked bank", undefined, [
+        { text: "Update Bank with Stripe", onPress: updateAction },
+        { text: "Remove bank", style: "destructive", onPress: removeAction },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    }
+  }, [updateUser]);
 
   const handleStripeWithdraw = async () => {
     setIsLoading(true);
@@ -331,6 +382,13 @@ function WithdrawScreenInner() {
                   Account ending in {linkedBank.mask}
                 </Text>
               </View>
+              <Pressable
+                onPress={handleManageBank}
+                style={styles.bankManageButton}
+                hitSlop={10}
+              >
+                <Text style={styles.bankManageText}>Manage</Text>
+              </Pressable>
             </View>
 
             <Text style={styles.sectionLabel}>Select transfer speed</Text>
@@ -525,42 +583,17 @@ function WithdrawScreenInner() {
           title={
             withdrawalsPaused
               ? "Withdrawals paused"
-              : eligibility && !eligibility.eligible
-                ? "Complete more sessions to unlock"
-                : isValidAmount
-                  ? "Continue"
-                  : "Enter amount (min $10)"
+              : isValidAmount
+                ? "Continue"
+                : "Enter amount (min $10)"
           }
           onPress={handleContinue}
-          disabled={
-            !isValidAmount ||
-            withdrawalsPaused ||
-            (eligibility ? !eligibility.eligible : false)
-          }
+          disabled={!isValidAmount || withdrawalsPaused}
           size="large"
         />
         {withdrawalsPaused && (
           <Text style={styles.errorText}>
             Withdrawals are temporarily paused. Try again soon.
-          </Text>
-        )}
-        {eligibility && !eligibility.eligible && !withdrawalsPaused && (
-          <Text style={styles.errorText}>
-            {`Complete ${Math.max(
-              0,
-              eligibility.requiredSessions - eligibility.completedSessions,
-            )} more session${
-              eligibility.requiredSessions - eligibility.completedSessions === 1
-                ? ""
-                : "s"
-            } and play with ${Math.max(
-              0,
-              eligibility.requiredPartners - eligibility.distinctPartners,
-            )} more friend${
-              eligibility.requiredPartners - eligibility.distinctPartners === 1
-                ? ""
-                : "s"
-            } to unlock withdrawal.`}
           </Text>
         )}
       </View>
@@ -669,6 +702,15 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.bodySmall,
       color: Colors.textSecondary,
       ...Font.regular,
+    },
+    bankManageButton: {
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: Spacing.xs,
+    },
+    bankManageText: {
+      fontSize: Typography.labelMedium,
+      ...Font.semibold,
+      color: Colors.primary,
     },
 
     // ── Section label ──

@@ -67,13 +67,10 @@ Niyah is not a gambling, gaming, lottery, or betting service.
 
 ## Outstanding Legal Actions
 
-- [ ] Schedule legal consultation with VAIL (Mark & Cat) and/or Dr. White
 - [ ] Confirm pool mode strategy (escrow vs. charity vs. forfeit-to-company)
-- [ ] Review commitment contract framing with legal advisor
 - [ ] Terms of Service and Privacy Policy
 - [ ] Commitment contract disclaimer in app
 
 ## Contacts
 
-- **Legal guidance**: VAIL (Mark & Cat), Dr. White
 - **Technical consulting**: 40AU (Logan & Andrew)
