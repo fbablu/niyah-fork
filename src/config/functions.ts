@@ -223,6 +223,33 @@ export async function createStripeLoginLink(): Promise<{ url: string }> {
   return callFunction<{ url: string }>("createStripeLoginLink", {});
 }
 
+export type DeleteAccountResult =
+  | {
+      ok: true;
+      refundedCents: number;
+      refundShortfallCents: number;
+      earnedPaidCents: number;
+      earnedHeldCents: number;
+    }
+  | {
+      ok: false;
+      reason: "active_session";
+      sessionId: string;
+      scope: "solo" | "group";
+    }
+  | { ok: false; reason: "reauth_required"; maxAuthAgeSeconds: number };
+
+/**
+ * Permanently deletes the caller's account: refunds deposited balance to the
+ * original PaymentIntents, revokes Plaid + Stripe Connect, sweeps Firestore,
+ * and deletes the auth user. The CF requires a fresh sign-in (auth_time within
+ * 10 min) and no active session; both come back as `ok:false` results (HTTP
+ * 200) so the UI can guide the user instead of treating them as errors.
+ */
+export async function deleteAccount(): Promise<DeleteAccountResult> {
+  return callFunction<DeleteAccountResult>("deleteAccount", { confirm: true });
+}
+
 export async function getConnectAccountStatus(): Promise<{
   status: "none" | "pending" | "active" | "restricted";
   chargesEnabled?: boolean;

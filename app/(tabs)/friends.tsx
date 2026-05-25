@@ -823,7 +823,7 @@ function FriendsScreenInner() {
     (contact: { name: string; phone?: string }) => {
       if (!contact.phone) return;
       const body = encodeURIComponent(
-        `Hey ${contact.name.split(" ")[0]}! Join me on Niyah — we stake real money on focus sessions and pocket the split when we win.\n\niOS (TestFlight beta): https://testflight.apple.com/join/YOUR_CODE\nWeb: https://niyah.live`,
+        `Hey ${contact.name.split(" ")[0]}! Join me on Niyah — we stake real money on focus sessions and earn it back by staying focused.\n\nhttps://niyah.live`,
       );
       // iOS sms: URL scheme opens iMessage with pre-filled body
       Linking.openURL(`sms:${contact.phone}&body=${body}`);

@@ -914,7 +914,7 @@ function DashboardScreenInner() {
                           <>
                             <Text style={styles.activityEarned}>
                               {inbound
-                                ? `Won ${formatMoney(inbound.amount)}`
+                                ? `Earned ${formatMoney(inbound.amount)}`
                                 : isSolo
                                   ? `${formatMoney(me?.stakeAmount ?? session.stakePerParticipant)} returned`
                                   : "Stake kept"}

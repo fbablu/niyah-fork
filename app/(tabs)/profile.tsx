@@ -42,6 +42,7 @@ import { Linking } from "react-native";
 import {
   unlinkBankAccount,
   createStripeLoginLink,
+  deleteAccount,
 } from "../../src/config/functions";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
 import {
@@ -71,6 +72,8 @@ function ProfileScreenInner() {
   const [legalModalVisible, setLegalModalVisible] = useState(false);
   const [removeBankModalVisible, setRemoveBankModalVisible] = useState(false);
   const [bankActionLoading, setBankActionLoading] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const handleManageBank = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -152,6 +155,71 @@ function ProfileScreenInner() {
         },
       },
     ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setDeleteModalVisible(true);
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (deleteLoading) return;
+    setDeleteLoading(true);
+    try {
+      const result = await deleteAccount();
+      if (result.ok) {
+        setDeleteModalVisible(false);
+        StatusBanner.show({
+          severity: "success",
+          message:
+            "Account deleted. Any deposited balance is being refunded to your original payment method.",
+        });
+        await logout();
+        router.replace("/(auth)/welcome");
+        return;
+      }
+      // CF returns ok:false (HTTP 200) for the two recoverable cases so we can
+      // guide the user rather than surface a raw error.
+      setDeleteModalVisible(false);
+      if (result.reason === "active_session") {
+        Alert.alert(
+          "Finish your session first",
+          "You have a focus session in progress. Complete or surrender it, then delete your account.",
+        );
+      } else if (result.reason === "reauth_required") {
+        Alert.alert(
+          "Confirm it's you",
+          "For your security, sign in again and then delete your account.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Sign in again",
+              style: "destructive",
+              onPress: async () => {
+                try {
+                  await logout();
+                } catch (error) {
+                  logger.error("Logout before re-auth failed:", error);
+                }
+                router.replace("/(auth)/welcome");
+              },
+            },
+          ],
+        );
+      }
+    } catch (err) {
+      logger.error("deleteAccount failed:", err);
+      setDeleteModalVisible(false);
+      StatusBanner.show({
+        severity: "error",
+        message: getFunctionErrorMessage(
+          err,
+          "Could not delete account. Please try again.",
+        ),
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
@@ -299,6 +367,10 @@ function ProfileScreenInner() {
             <Pressable onPress={handleLogout} style={styles.settingRow}>
               <Text style={styles.settingLabelDestructive}>Sign Out</Text>
             </Pressable>
+            <View style={styles.settingDivider} />
+            <Pressable onPress={handleDeleteAccount} style={styles.settingRow}>
+              <Text style={styles.settingLabelDestructive}>Delete Account</Text>
+            </Pressable>
           </Card>
         </View>
 
@@ -310,6 +382,16 @@ function ProfileScreenInner() {
           cancelLabel="Keep bank"
           onCancel={() => setRemoveBankModalVisible(false)}
           onConfirm={handleRemoveBankConfirmed}
+        />
+
+        <HoldToConfirmModal
+          visible={deleteModalVisible}
+          title="Delete your account?"
+          body="This permanently deletes your account and data. Any deposited balance is refunded to your original payment method. This cannot be undone."
+          holdLabel={deleteLoading ? "Deleting…" : "Hold to delete account"}
+          cancelLabel="Keep my account"
+          onCancel={() => setDeleteModalVisible(false)}
+          onConfirm={handleDeleteConfirmed}
         />
 
         {/* Read-only legal modal */}
@@ -473,6 +555,11 @@ const makeStyles = (Colors: ThemeColors) =>
       alignItems: "center",
       paddingVertical: Spacing.md,
       paddingHorizontal: Spacing.lg,
+    },
+    settingDivider: {
+      height: 1,
+      backgroundColor: Colors.border,
+      marginHorizontal: Spacing.lg,
     },
     settingLabel: {
       fontSize: Typography.bodyMedium,

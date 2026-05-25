@@ -481,9 +481,12 @@ jest.mock("@notifee/react-native", () => ({
     createChannel: jest.fn().mockResolvedValue("niyah-default"),
     onForegroundEvent: jest.fn(() => () => {}),
     onBackgroundEvent: jest.fn(),
+    createTriggerNotification: jest.fn().mockResolvedValue(undefined),
+    cancelTriggerNotification: jest.fn().mockResolvedValue(undefined),
   },
   AndroidImportance: { HIGH: 4, DEFAULT: 3 },
   EventType: { PRESS: 1, DELIVERED: 3, DISMISSED: 0 },
+  TriggerType: { TIMESTAMP: 0, INTERVAL: 1 },
 }));
 
 // ============================================================================
