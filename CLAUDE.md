@@ -105,7 +105,7 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 
 ## Current Phase
 
-**Launch — App Store submission, targeting live by ~NYC arrival (early June 2026).** Real Stripe/Plaid money paths. The April 15 demo and the April–May campus finals launch already shipped. **Live status + the full phased next-steps plan are in [docs/may-23-resume.md](docs/may-23-resume.md) — read that first in a new session.**
+**Launch — App Store submission, targeting live by ~NYC arrival (early June 2026).** Real Stripe/Plaid money paths. The April 15 demo and the April–May campus finals launch already shipped. **Live status + the full phased next-steps plan are in [docs/may-26-resume.md](docs/may-26-resume.md) — read that first in a new session.**
 
 Shipped to `launch` (pushed, NOT yet deployed as of 2026-05-25):
 
@@ -114,7 +114,7 @@ Shipped to `launch` (pushed, NOT yet deployed as of 2026-05-25):
 - `requestWithdrawal` balance-integrity fix; `mergeOne` pagination; withdrawal eligibility gate removed
 - Plaid per-Item webhook URL; de-gamble copy ("Won"→"Earned", invite reframed)
 
-Key remaining (see may-23-resume.md for the phased plan):
+Key remaining (see may-26-resume.md for the phased plan):
 
 - **Deploy:** `firebase deploy --only firestore:rules,functions` + publish landing bounce (merge `launch`→`main`)
 - Live Stripe/Plaid keys; Apple APNs + `pnpm build:production`; App Store Connect listing (privacy labels, account-deletion disclosure) → submit
