@@ -150,6 +150,10 @@ export interface Transaction {
     | "stake"
     | "payout"
     | "forfeit"
+    | "forgiveness"
+    | "refund"
+    | "bonus"
+    | "credit"
     | "settlement_paid"
     | "settlement_received";
   amount: number; // in cents (positive for credit, negative for debit)
@@ -158,6 +162,36 @@ export interface Transaction {
   duoSessionId?: string;
   partnerId?: string; // For settlement transactions
   createdAt: Date;
+}
+
+/**
+ * Wallet ledger (Firestore `wallets/{uid}`). Server-owned: clients may only
+ * create a zero-balance wallet; all mutations go through Cloud Functions.
+ *
+ * INVARIANT: balance === depositedBalance + earnedBalance + bonusBalance +
+ * creditBalance, and balance === signed sum of the user's `transactions`.
+ * The nightly reconcile job freezes any wallet that violates this.
+ *
+ * Buckets partition the balance by source so withdrawal/deletion treat funds
+ * differently:
+ *   depositedBalance  card money — always withdrawable; refunds to source card
+ *   earnedBalance     completion surplus / winnings — withdrawable after the engagement gate
+ *   bonusBalance      promo + forgiveness giveaways — withdrawable after the gate; stakeable
+ *   creditBalance     dev/manual/test credit — NEVER withdrawable, never refundable, always forfeited
+ *
+ * withdrawableBalance is DERIVED, never stored:
+ *   depositedBalance + (gateMet ? earnedBalance + bonusBalance : 0)
+ */
+export interface Wallet {
+  balance: number; // cents — canonical total (= sum of the four buckets)
+  pendingBalance: number; // cents — in-flight (e.g. processing withdrawals)
+  depositedBalance: number; // cents
+  earnedBalance: number; // cents
+  bonusBalance: number; // cents
+  creditBalance: number; // cents
+  frozen?: boolean;
+  frozenReason?: string;
+  lastUpdated?: Date;
 }
 
 // ─── Group Session (N-person generalization of DuoSession) ──────────────────

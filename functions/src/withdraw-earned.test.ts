@@ -130,10 +130,10 @@ test("solo session: surrender does not credit a payout", () => {
   assert.equal(wallet.summedFromEntries(), wallet.balance);
 });
 
-test("group session payouts: completers split pool equally", () => {
-  // $20 stake × 3 participants = $60 pool. One surrenders. $30 each to the
-  // two completers (already covered in security.test.ts but pinned here
-  // because withdrawal accounting depends on it).
+test("group session payouts: each completer gets their own stake back (no pool)", () => {
+  // $20 individual stake × 3 participants. One surrenders (forfeits $20 to the
+  // house). The two completers each get their OWN $20 back — NOT a $30 pool
+  // share. Pinned here because withdrawal accounting depends on it.
   const payouts = calculateGroupSessionPayouts(
     ["alice", "bob", "cara"],
     {
@@ -143,9 +143,10 @@ test("group session payouts: completers split pool equally", () => {
     },
     2000,
   );
-  assert.deepEqual(payouts, { alice: 3000, bob: 0, cara: 3000 });
+  assert.deepEqual(payouts, { alice: 2000, bob: 0, cara: 2000 });
   const total = Object.values(payouts).reduce((a, b) => a + b, 0);
-  // Total payout to completers ≤ total pool; Niyah retains any rounding.
+  // Completers only ever get their own stakes back; total paid ≤ total staked,
+  // and forfeited stakes are retained by the house (never redistributed).
   assert.ok(total <= 2000 * 3);
 });
 
@@ -156,7 +157,8 @@ test("group payout → wallet credit → withdraw preserves invariant", () => {
   // Stake into 3-person group: −$20.
   wallet.stake(2000, "grp-1");
 
-  // Group settles, user wins as one of two completers → $30 share.
+  // Group settles. Individual stakes: this completer gets their OWN $20 back,
+  // not a share of the forfeiter's stake.
   const payouts = calculateGroupSessionPayouts(
     ["me", "other-a", "other-b"],
     { me: { completed: true }, "other-a": { completed: true }, "other-b": { completed: false } },
@@ -165,12 +167,12 @@ test("group payout → wallet credit → withdraw preserves invariant", () => {
   const myPayout = buildStoredPayouts(["me", "other-a", "other-b"], payouts).find(
     (p) => p.userId === "me",
   )?.amount;
-  assert.equal(myPayout, 3000);
+  assert.equal(myPayout, 2000);
   wallet.payout(myPayout!, "grp-1");
-  assert.equal(wallet.balance, 3000); // started $20, staked $20, won $30 → $30
+  assert.equal(wallet.balance, 2000); // $20 in, staked $20, own $20 back → $20
 
-  // Withdraw earned $30.
-  wallet.withdraw(3000);
+  // Withdraw the returned stake.
+  wallet.withdraw(2000);
   assert.equal(wallet.balance, 0);
   assert.equal(wallet.summedFromEntries(), wallet.balance);
 });

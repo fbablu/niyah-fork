@@ -147,7 +147,14 @@ service cloud.firestore {
         && request.resource.data.balance is number
         && request.resource.data.balance == 0
         && request.resource.data.pendingBalance is number
-        && request.resource.data.pendingBalance == 0;
+        && request.resource.data.pendingBalance == 0
+        // Bucket fields must start at zero if the client sets them at all,
+        // otherwise a client could mint nonzero withdrawable buckets on create
+        // (the buckets are summed into withdrawable funds server-side).
+        && (!('depositedBalance' in request.resource.data) || request.resource.data.depositedBalance == 0)
+        && (!('earnedBalance' in request.resource.data) || request.resource.data.earnedBalance == 0)
+        && (!('bonusBalance' in request.resource.data) || request.resource.data.bonusBalance == 0)
+        && (!('creditBalance' in request.resource.data) || request.resource.data.creditBalance == 0);
 
       // No client-side updates or deletes — handled exclusively by Cloud Functions.
       allow update, delete: if false;

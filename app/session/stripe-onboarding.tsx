@@ -180,8 +180,8 @@ function StripeOnboardingScreenInner() {
           <Text style={styles.statusEmoji}>✓</Text>
           <Text style={styles.statusTitle}>Payouts Enabled</Text>
           <Text style={styles.statusDescription}>
-            Your account is verified. Winnings will be deposited directly to
-            your bank.
+            Your account is verified. Payouts will be deposited directly to your
+            bank.
           </Text>
           <Button
             title="Done"
@@ -237,8 +237,8 @@ function StripeOnboardingScreenInner() {
       <View style={styles.center}>
         <Text style={styles.hero}>Enable Payouts</Text>
         <Text style={styles.subtitle}>
-          Set up your payout account to receive winnings directly to your bank.
-          Powered by Stripe — the same payment infrastructure used by Amazon and
+          Set up your payout account to cash out directly to your bank. Powered
+          by Stripe — the same payment infrastructure used by Amazon and
           Shopify.
         </Text>
 

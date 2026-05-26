@@ -69,3 +69,4 @@ expo-env.d.ts
 # @end expo-cli
 
 functions/.env*
+docs/misc/

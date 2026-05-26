@@ -12,6 +12,14 @@ import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onMessagePublished } from "firebase-functions/v2/pubsub";
 import { defineSecret } from "firebase-functions/params";
+import {
+  readBucketsOrInit,
+  drawDown,
+  toComposition,
+  readComposition,
+  sumComposition,
+  STAKE_DRAW_ORDER,
+} from "./wallet";
 import Stripe from "stripe";
 import {
   PlaidApi,
@@ -556,6 +564,33 @@ const WITHDRAWAL_MIN_DISTINCT_PARTNERS: number = (() => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
 })();
 
+// Solo completion reward. 1.0 = stickK behavior (stake returned, no surplus) —
+// the launch default, so this ships dormant. Set >1 to reward completion with
+// house-funded surplus routed to the gated `earned` bucket. Clamped to
+// [1.0, 2.0]; the cumulative earned-surplus cap (Step 7) MUST be live before
+// this is set above 1.0 or post-gate solo grinding can extract house money.
+const SOLO_PAYOUT_MULTIPLIER: number = (() => {
+  const raw = process.env.SOLO_PAYOUT_MULTIPLIER;
+  const parsed = raw ? parseFloat(raw) : 1.0;
+  return Number.isFinite(parsed) && parsed >= 1.0 && parsed <= 2.0
+    ? parsed
+    : 1.0;
+})();
+
+// States that prohibit real-money skill gaming — withdrawals to a Stripe
+// Connect account whose KYC address is in one of these states are refused.
+// FL + HI by default; env-tunable so counsel can add states (e.g. NY) without
+// a code change. Empty string disables the gate.
+const WITHDRAWAL_EXCLUDED_STATES: Set<string> = (() => {
+  const raw = process.env.WITHDRAWAL_EXCLUDED_STATES ?? "FL,HI";
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
+  );
+})();
+
 export interface WithdrawalEligibilityStats {
   completedSessions: number;
   distinctPartners: number;
@@ -622,11 +657,17 @@ async function recordGroupSessionPayout(
 
     const walletSnap = await txn.get(walletRef);
     const currentBalance: number = walletSnap.data()?.balance ?? 0;
+    const currentDeposited: number = walletSnap.data()?.depositedBalance ?? 0;
     const nextBalance = currentBalance + payout.amount;
 
     if (walletSnap.exists) {
       txn.update(walletRef, {
         balance: nextBalance,
+        // De-pooled group payout is individual stake-back. Until the group
+        // completion multiplier/promo land (post-pilot), the returned amount is
+        // the user's own principal -> deposited bucket (withdrawable). When the
+        // multiplier is enabled, split surplus -> earnedBalance here.
+        depositedBalance: currentDeposited + payout.amount,
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else {
@@ -635,6 +676,7 @@ async function recordGroupSessionPayout(
         {
           balance: nextBalance,
           pendingBalance: 0,
+          depositedBalance: currentDeposited + payout.amount,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -656,9 +698,8 @@ async function recordGroupSessionPayout(
 async function settleGroupSessionPayouts(
   sessionId: string,
   payouts: Array<{ userId: string; amount: number }>,
-  initiatorUid: string,
+  _initiatorUid: string,
 ): Promise<string[]> {
-  const stripe = getStripe();
   const sessionRef = db.collection("groupSessions").doc(sessionId);
   const transferIds: string[] = [];
   const failedRecipients: string[] = [];
@@ -669,42 +710,13 @@ async function settleGroupSessionPayouts(
     }
 
     try {
-      // Read stripeAccountId from userPrivate first (post-H1), legacy
-      // top-level field on users as fallback for unmigrated recipients.
-      const [recipientPriv, recipientDoc] = await Promise.all([
-        db.collection("userPrivate").doc(payout.userId).get(),
-        db.collection("users").doc(payout.userId).get(),
-      ]);
-      const connectAccountId: string =
-        (recipientPriv.data()?.stripeAccountId as string | undefined) ??
-        (recipientDoc.data()?.stripeAccountId as string | undefined) ??
-        "";
-
-      let stripeTransferId: string | undefined;
-
-      if (connectAccountId) {
-        const transfer = await stripe.transfers.create(
-          {
-            amount: payout.amount,
-            currency: "usd",
-            destination: connectAccountId,
-            metadata: {
-              sessionId,
-              recipientUid: payout.userId,
-              initiatorUid,
-              type: "group_session_payout",
-            },
-          },
-          {
-            idempotencyKey: `group_session_payout:${sessionId}:${payout.userId}:${payout.amount}`,
-          },
-        );
-
-        stripeTransferId = transfer.id;
-        transferIds.push(transfer.id);
-      }
-
-      await recordGroupSessionPayout(sessionId, payout, stripeTransferId);
+      // Group winnings credit the in-app wallet (same model as solo); the user
+      // cashes out later via requestWithdrawal, which performs the single
+      // Stripe Connect transfer. The previous settlement-time transfer here was
+      // redundant with that withdrawal-time transfer — a recipient who already
+      // had a connected account got paid twice (cash now + withdrawable
+      // balance). Removed so group payout == solo payout: wallet credit only.
+      await recordGroupSessionPayout(sessionId, payout);
     } catch (err) {
       console.error(
         `Failed to settle payout for session=${sessionId}, user=${payout.userId}:`,
@@ -1225,11 +1237,15 @@ export const verifyAndCreditDeposit = onRequest(
       const newBalance = await db.runTransaction(async (txn) => {
         const walletSnap = await txn.get(walletRef);
         const current: number = walletSnap.data()?.balance ?? 0;
+        const currentDeposited: number =
+          walletSnap.data()?.depositedBalance ?? 0;
         const updated = current + amount;
 
         if (walletSnap.exists) {
           txn.update(walletRef, {
             balance: updated,
+            // Card deposits are always-withdrawable principal (refund-to-source).
+            depositedBalance: currentDeposited + amount,
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           });
         } else {
@@ -1238,6 +1254,7 @@ export const verifyAndCreditDeposit = onRequest(
             {
               balance: updated,
               pendingBalance: 0,
+              depositedBalance: currentDeposited + amount,
               lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
             },
             { merge: true },
@@ -2878,9 +2895,19 @@ export const createSoloSession = onRequest(
           throw new Error("Insufficient balance to stake");
         }
 
+        // Bucket-aware debit: draw the stake from the user's own money first,
+        // then promo, then winnings (never credit). Record the composition on
+        // the session + stake txn so completion/refund returns principal to its
+        // source bucket and only true surplus is gated.
+        const buckets = readBucketsOrInit(walletData, currentBalance);
+        const { drawn } = drawDown(buckets, stakeAmount, STAKE_DRAW_ORDER);
+        const stakeComposition = toComposition(drawn);
         const newBalance = currentBalance - stakeAmount;
         txn.update(walletRef, {
           balance: newBalance,
+          depositedBalance: buckets.deposited - drawn.deposited,
+          bonusBalance: buckets.bonus - drawn.bonus,
+          earnedBalance: buckets.earned - drawn.earned,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
         txn.set(sessionRef, {
@@ -2888,6 +2915,7 @@ export const createSoloSession = onRequest(
           cadence,
           stakeAmount,
           potentialPayout: stakeAmount,
+          stakeComposition,
           startedAt: admin.firestore.Timestamp.fromDate(startedAt),
           endsAt: admin.firestore.Timestamp.fromDate(endsAt),
           status: "active",
@@ -2899,6 +2927,9 @@ export const createSoloSession = onRequest(
           amount: -stakeAmount,
           description: "Solo session stake",
           sessionId,
+          deposited: stakeComposition.deposited,
+          bonus: stakeComposition.bonus,
+          earned: stakeComposition.earned,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -3026,16 +3057,43 @@ export const handleSessionComplete = onRequest(
           endsAt.getTime(),
         );
 
-        // Payout = stake (stickK model). User gets their stake back.
-        const payout = stakeAmount;
+        // Payout returns the staked principal to its SOURCE buckets and routes
+        // only true surplus to the gated `earned` bucket. Solo is stickK 1x by
+        // default (SOLO_PAYOUT_MULTIPLIER=1.0 => surplus 0, principal simply
+        // returned). Legacy sessions (pre-bucket) carry no composition; treat
+        // their returned stake as deposited principal.
+        const composition = readComposition(sessionData?.stakeComposition);
+        const principal =
+          sumComposition(composition) > 0
+            ? composition
+            : { deposited: stakeAmount, earned: 0, bonus: 0 };
+        const principalCents =
+          principal.deposited + principal.earned + principal.bonus;
+        const surplus = Math.max(
+          0,
+          Math.round(principalCents * (SOLO_PAYOUT_MULTIPLIER - 1)),
+        );
+        const payout = principalCents + surplus;
 
         // Credit balance to wallets collection (protected from client writes)
         const walletSnap = await txn.get(walletRef);
-        const currentBalance: number = walletSnap.data()?.balance ?? 0;
+        const wd = walletSnap.data() ?? {};
+        const currentBalance: number =
+          typeof wd.balance === "number" ? wd.balance : 0;
+        const wb = readBucketsOrInit(wd, currentBalance);
         const updatedBalance = currentBalance + payout;
-        txn.update(walletRef, { balance: updatedBalance });
+        txn.update(walletRef, {
+          balance: updatedBalance,
+          depositedBalance: wb.deposited + principal.deposited,
+          bonusBalance: wb.bonus + principal.bonus,
+          earnedBalance: wb.earned + principal.earned + surplus,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
 
-        // Update user stats (separate from financial balance)
+        // Update user stats. NOTE: while the multiplier is dormant (1.0x)
+        // payout == returned principal, so this preserves today's display.
+        // When earn-more is enabled, switch this to `surplus` so totalEarnings
+        // reflects true earnings, not returned stakes.
         txn.update(userRef, {
           completedSessions: admin.firestore.FieldValue.increment(1),
           totalSessions: admin.firestore.FieldValue.increment(1),
@@ -3050,6 +3108,7 @@ export const handleSessionComplete = onRequest(
           amount: payout,
           description: "Session completed — stake returned",
           sessionId,
+          surplus,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -3231,10 +3290,14 @@ export const handleSessionForfeit = onRequest(
         // Forgiveness credit to wallet + ledger
         if (refundedCents > 0) {
           const currentBalance: number = walletSnap.data()?.balance ?? 0;
+          const currentBonus: number = walletSnap.data()?.bonusBalance ?? 0;
           const nextBalance = currentBalance + refundedCents;
           if (walletSnap.exists) {
             txn.update(walletRef, {
               balance: nextBalance,
+              // Forgiveness is a house-funded grace credit -> bonus bucket
+              // (gated like other house money, never refundable to a card).
+              bonusBalance: currentBonus + refundedCents,
               lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
             });
           } else {
@@ -3243,6 +3306,7 @@ export const handleSessionForfeit = onRequest(
               {
                 balance: nextBalance,
                 pendingBalance: 0,
+                bonusBalance: currentBonus + refundedCents,
                 lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
               },
               { merge: true },
@@ -3570,6 +3634,28 @@ export const requestWithdrawal = onRequest(
             400,
             "Payout account status changed — re-verify identity in settings",
           );
+          return;
+        }
+
+        // Geo-gate: refuse payouts to states that prohibit real-money skill
+        // gaming (FL + HI by default; env-tunable via WITHDRAWAL_EXCLUDED_STATES).
+        // The Stripe Connect KYC address is the authoritative residence of the
+        // payout recipient. Deposits/play are not gated — only cash-out.
+        const payoutState = (
+          liveAccount.individual?.address?.state ??
+          liveAccount.company?.address?.state ??
+          ""
+        )
+          .trim()
+          .toUpperCase();
+        if (payoutState && WITHDRAWAL_EXCLUDED_STATES.has(payoutState)) {
+          await db.runTransaction(async (txn) => {
+            const snap = await txn.get(walletRef);
+            const current: number = snap.data()?.balance ?? 0;
+            txn.update(walletRef, { balance: current + amount });
+          });
+          await txnRef.delete();
+          sendError(res, 403, "Withdrawals aren't available in your state yet.");
           return;
         }
       } catch (err) {
@@ -4875,14 +4961,27 @@ export const createGroupSession = onRequest(
 
       await db.runTransaction(async (txn) => {
         const walletSnap = await txn.get(walletRef);
-        const currentBalance: number = walletSnap.data()?.balance ?? 0;
+        const walletData = walletSnap.data() ?? {};
+        const currentBalance: number =
+          typeof walletData.balance === "number" ? walletData.balance : 0;
 
         if (currentBalance < stakePerParticipant) {
           throw new Error("Insufficient balance to stake");
         }
 
+        const buckets = readBucketsOrInit(walletData, currentBalance);
+        const { drawn } = drawDown(
+          buckets,
+          stakePerParticipant,
+          STAKE_DRAW_ORDER,
+        );
+        const stakeComposition = toComposition(drawn);
         txn.update(walletRef, {
           balance: currentBalance - stakePerParticipant,
+          depositedBalance: buckets.deposited - drawn.deposited,
+          bonusBalance: buckets.bonus - drawn.bonus,
+          earnedBalance: buckets.earned - drawn.earned,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
         txn.set(stakeTxnRef, {
           userId: uid,
@@ -4890,6 +4989,9 @@ export const createGroupSession = onRequest(
           amount: -stakePerParticipant,
           description: "Group session stake",
           sessionId,
+          deposited: stakeComposition.deposited,
+          bonus: stakeComposition.bonus,
+          earned: stakeComposition.earned,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       });
@@ -5087,13 +5189,22 @@ export const respondToGroupInvite = onRequest(
           }
 
           const walletSnap = await txn.get(walletRef);
-          const currentBalance: number = walletSnap.data()?.balance ?? 0;
+          const walletData = walletSnap.data() ?? {};
+          const currentBalance: number =
+            typeof walletData.balance === "number" ? walletData.balance : 0;
           if (currentBalance < inviteCur.stake) {
             throw new Error("Insufficient balance to stake");
           }
 
+          const buckets = readBucketsOrInit(walletData, currentBalance);
+          const { drawn } = drawDown(buckets, inviteCur.stake, STAKE_DRAW_ORDER);
+          const stakeComposition = toComposition(drawn);
           txn.update(walletRef, {
             balance: currentBalance - inviteCur.stake,
+            depositedBalance: buckets.deposited - drawn.deposited,
+            bonusBalance: buckets.bonus - drawn.bonus,
+            earnedBalance: buckets.earned - drawn.earned,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           });
           txn.set(stakeTxnRef, {
             userId: uid,
@@ -5101,6 +5212,9 @@ export const respondToGroupInvite = onRequest(
             amount: -inviteCur.stake,
             description: "Group session stake",
             sessionId: inviteCur.sessionId,
+            deposited: stakeComposition.deposited,
+            bonus: stakeComposition.bonus,
+            earned: stakeComposition.earned,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
           txn.update(inviteRef, {
@@ -5659,9 +5773,9 @@ export const reportSessionStatus = onRequest(
 
       if (!outcome.sessionComplete) {
         // Notify other participants when someone gives up mid-session.
-        // Two pushes go out: the legacy `session_surrender` for clients that
-        // route on that key, plus the richer `leaderboard_shift` so the new
-        // banner shows the updated per-share estimate.
+        // Individual stakes: a quitter's stake goes to the house, NOT split
+        // among the others — so there is no "your share grew" redistribution
+        // message (that was both inaccurate post-de-pool and gamble framing).
         if (
           action === "surrender" &&
           outcome.participantIds &&
@@ -5673,46 +5787,11 @@ export const reportSessionStatus = onRequest(
           sendPushToUsers(
             survivors,
             {
-              title: `${outcome.actorName} tapped out 💸`,
-              body: "Their stake just got split between everyone still locked in.",
+              title: `${outcome.actorName} tapped out`,
+              body: "You're still locked in — finish strong to get your stake back.",
             },
             { type: "session_surrender", sessionId },
           );
-          try {
-            const refreshed = await sessionRef.get();
-            const refreshedData = refreshed.data() ?? {};
-            const totalParticipants = Array.isArray(refreshedData.participantIds)
-              ? refreshedData.participantIds.length
-              : 0;
-            const remaining = totalParticipants
-              ? Object.values(
-                  refreshedData.participants as Record<string, { surrendered?: boolean }>,
-                ).filter((p) => !p?.surrendered).length
-              : 0;
-            const stake =
-              typeof refreshedData.stakePerParticipant === "number"
-                ? refreshedData.stakePerParticipant
-                : 0;
-            const newShareCents =
-              remaining > 0
-                ? Math.floor((totalParticipants * stake) / remaining)
-                : 0;
-            sendPushToUsers(
-              survivors,
-              {
-                title: "Your share just grew",
-                body: `If you finish, you'd now take home about $${(newShareCents / 100).toFixed(2)}.`,
-              },
-              {
-                type: "leaderboard_shift",
-                sessionId,
-                actorName: outcome.actorName,
-                newShareCents: String(newShareCents),
-              },
-            );
-          } catch (err) {
-            console.warn("leaderboard_shift push failed (non-fatal):", err);
-          }
         }
         console.log(
           `reportSessionStatus: session=${sessionId}, user=${uid}, action=${action}, allReported=false`,

@@ -58,29 +58,27 @@ export function isValidFirebaseUid(value: unknown): value is string {
   return typeof value === "string" && /^[a-zA-Z0-9]{1,128}$/.test(value);
 }
 
+/**
+ * Group sessions are INDIVIDUAL stakes, not a pool. Each completer gets their
+ * OWN stake back (times an optional house-funded completion multiplier).
+ * Non-completers forfeit their stake to the house — it is NEVER redistributed
+ * to other participants. Redistributing losers' stakes to winners would be a
+ * wagering pool: a Stripe/Apple gambling-classification risk and strict-state
+ * gambling exposure (see docs/may-26-resume.md). The completion multiplier (>1)
+ * is house-funded surplus, gated like solo earnings; it defaults to 1 (stake
+ * returned, no surplus) so it ships dormant.
+ */
 export function calculateGroupSessionPayouts(
   participantIds: string[],
   participants: Record<string, GroupSessionPayoutParticipant>,
   stakePerParticipant: number,
+  completionMultiplier = 1,
 ): Record<string, number> {
-  const completers = participantIds.filter(
-    (pid) => participants[pid]?.completed,
-  );
-  const totalPool = participantIds.length * stakePerParticipant;
+  const perCompleter = Math.round(stakePerParticipant * completionMultiplier);
   const payouts: Record<string, number> = {};
-
-  if (completers.length === 0) {
-    for (const pid of participantIds) {
-      payouts[pid] = 0;
-    }
-    return payouts;
-  }
-
-  const payoutPerCompleter = Math.floor(totalPool / completers.length);
   for (const pid of participantIds) {
-    payouts[pid] = participants[pid]?.completed ? payoutPerCompleter : 0;
+    payouts[pid] = participants[pid]?.completed ? perCompleter : 0;
   }
-
   return payouts;
 }
 

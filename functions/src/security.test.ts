@@ -29,7 +29,10 @@ const authFixture = (
   metadata: override.metadata ?? { creationTime: minutesAgo(60) },
 });
 
-test("calculateGroupSessionPayouts splits the pool across completers", () => {
+test("calculateGroupSessionPayouts returns each completer their own stake (no pool)", () => {
+  // Individual stakes: a completer gets their OWN stake back, never a share of
+  // a non-completer's forfeited stake. bob forfeits 500 to the house; alice and
+  // cara each get exactly their own 500 back — NOT 750.
   const payouts = calculateGroupSessionPayouts(
     ["alice", "bob", "cara"],
     {
@@ -41,10 +44,21 @@ test("calculateGroupSessionPayouts splits the pool across completers", () => {
   );
 
   assert.deepEqual(payouts, {
-    alice: 750,
+    alice: 500,
     bob: 0,
-    cara: 750,
+    cara: 500,
   });
+});
+
+test("calculateGroupSessionPayouts applies the house-funded completion multiplier", () => {
+  const payouts = calculateGroupSessionPayouts(
+    ["alice", "bob"],
+    { alice: { completed: true }, bob: { completed: false } },
+    1000,
+    1.1,
+  );
+  // alice: own 1000 + 10% house-funded surplus; bob forfeits to the house.
+  assert.deepEqual(payouts, { alice: 1100, bob: 0 });
 });
 
 test("buildStoredPayouts normalizes missing or invalid amounts", () => {
