@@ -18,7 +18,7 @@
 
 **Legal posture DECIDED** (not counsel; revisit at scale): lean on Stripe+Plaid as processors of record, don't custody funds, house-funded + no player pools. MSB/MTL classification deferred (regulator-at-scale risk). Gatekeeper-now risks (Stripe/Apple gambling classification) handled by de-pool + language + commitment-contract framing. See FinCEN payment-processor exemption (goods/services prong fails for wallets → Stripe covers its leg, not Niyah's wallet/cashout).
 
-**Built + verified this session** (`tsc` clean, 38/38 functions tests green; all LOCAL, uncommitted):
+**Built + verified this session** (`tsc` clean, 38/38 functions tests green; committed on branch `wallet-ledger` = `a8bc968` + `74b3702`, local-only — NOT pushed/merged):
 - Schema: `Wallet` type + buckets (deposited/earned/bonus/credit) in `src/types`; txn taxonomy `+bonus/credit/refund/forgiveness`; `wallets` create-rule hole closed (`firebase/firestore.rules`).
 - `functions/src/wallet.ts` pure bucket helpers (drawDown / composition / withdrawable / lazy-init).
 - Writers bucket-routed: deposit→deposited, forgiveness→bonus, solo stake (composition) + payout (principal-return-to-source, surplus→earned), group stakes (composition), group payout→deposited.
@@ -48,7 +48,8 @@ We're mid-build on the wallet bucket ledger. Pilot scope is LOCKED: ship a clean
 commitment-contract binary by ~5/28 with all earn-more/bucket machinery DORMANT behind flags;
 group ships de-pooled + real-money on. The SERVER money-path is done + verified (de-pool,
 settlement untangle, bucket-routing, FL/HI geo-gate) — tsc clean, 38/38 functions tests green,
-ALL UNCOMMITTED.
+committed on branch wallet-ledger (a8bc968 + 74b3702), local-only — NOT pushed/merged. Resume on
+the wallet-ledger branch.
 
 Continue the BINARY work in this order:
 1) CLIENT DE-POOL: src/utils/payoutAlgorithm.ts calculatePayouts still splits the full pool —
