@@ -403,19 +403,9 @@ function ConfirmSessionScreenInner() {
           </View>
         )}
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>
-            {showPartner
-              ? "Your Potential Earn"
-              : isSolo
-                ? "On Completion"
-                : "Earn on Completion"}
-          </Text>
+          <Text style={styles.detailLabel}>On Completion</Text>
           <Text style={[styles.stakeValue, { color: Colors.gain }]}>
-            {showPartner
-              ? `Up to ${formatMoney(config.stake * 2)}`
-              : isSolo
-                ? `Keep ${formatMoney(config.stake)}`
-                : formatMoney(config.stake * SOLO_COMPLETION_MULTIPLIER)}
+            Keep {formatMoney(config.stake * SOLO_COMPLETION_MULTIPLIER)}
           </Text>
         </View>
       </Card>
@@ -427,11 +417,8 @@ function ConfirmSessionScreenInner() {
           <View style={[styles.outcomeDot, { backgroundColor: Colors.gain }]} />
           <Text style={styles.outcomeText}>
             <Text style={styles.outcomeHighlight}>Complete the session:</Text>{" "}
-            {showPartner
-              ? `Earn your share of the pool — up to ${formatMoney(config.stake * 2)}`
-              : isSolo
-                ? `Keep your ${formatMoney(config.stake)} stake — proof you followed through`
-                : `Earn ${formatMoney(config.stake * SOLO_COMPLETION_MULTIPLIER)} (${SOLO_COMPLETION_MULTIPLIER}× your stake)`}
+            Keep your {formatMoney(config.stake)} stake — proof you followed
+            through
           </Text>
         </View>
         <View style={styles.outcomeRow}>
@@ -445,8 +432,9 @@ function ConfirmSessionScreenInner() {
           <View style={styles.outcomeRow}>
             <View style={styles.outcomeDot} />
             <Text style={styles.outcomeText}>
-              <Text style={styles.outcomeHighlight}>Duo mode:</Text> If your
-              partner surrenders and you complete, you split their stake
+              <Text style={styles.outcomeHighlight}>Duo mode:</Text> You and your
+              partner each keep your own stake — staking together keeps you both
+              accountable.
             </Text>
           </View>
         )}

@@ -1,16 +1,20 @@
 // Session configurations
 //
-// Phase 1 (App Store launch): GROUP SESSIONS ONLY
-//   Peer-to-peer pool. Completers split surrenderers' stakes. Niyah takes no cut.
-//   All money comes from participants — no Niyah treasury involvement.
-//
-// Phase 2 (future): SOLO SESSIONS
-//   Niyah is the counterparty. Complete = earn SOLO_COMPLETION_MULTIPLIER × stake.
-//   Surrender = lose stake (Niyah keeps it). Requires Niyah to fund payouts.
+// Commitment-contract model (NOT a wager pool). Every session is INDIVIDUAL
+// stakes — solo and group settle identically:
+//   - A completer gets their OWN stake back.
+//   - A non-completer forfeits their stake to the house.
+//   - Stakes are NEVER redistributed between participants. Pooling a loser's
+//     stake onto winners would be a wager — a Stripe/Apple gambling-
+//     classification risk and strict-state gambling exposure.
+// Mirrors the authoritative server settlement in
+// functions/src/security.ts `calculateGroupSessionPayouts`.
 
-// Payout multiplier for solo sessions (Phase 2, not yet active in sessionStore).
-// Stake $5, complete → earn $10. Niyah profits if >50% of users surrender.
-export const SOLO_COMPLETION_MULTIPLIER = 2;
+// House-funded completion multiplier applied to a completer's returned stake.
+// 1.0 = stake returned, no surplus — ships DORMANT for the pilot. A value > 1
+// is house-funded surplus, gated like earned balance and capped; do NOT raise
+// it until the server-side cap lands (docs/may-26-resume.md, Step 7).
+export const SOLO_COMPLETION_MULTIPLIER = 1;
 export const CADENCES = {
   // ── Short sessions (for testing + quick use) ──────────────────────────────
   test: {

@@ -169,9 +169,7 @@ function BlockedScreenInner() {
 
         {stakeCents > 0 && (
           <View style={styles.stakeCard}>
-            <Text style={styles.stakeLabel}>
-              {isGroup ? "Your stake in the pool" : "On the line"}
-            </Text>
+            <Text style={styles.stakeLabel}>On the line</Text>
             <Text style={styles.stakeAmount}>{formatMoney(stakeCents)}</Text>
             {isGroup && (
               <Text style={styles.stakeContext}>

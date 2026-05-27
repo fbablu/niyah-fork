@@ -34,8 +34,8 @@ const STEPS = [
   },
   {
     emoji: "🏆",
-    title: "Finish, and the pool is yours",
-    body: "Complete the session and keep your stake. Quit early and you forfeit to everyone still in.",
+    title: "Finish, and your stake is yours",
+    body: "Complete the session and keep your stake. Quit early and you forfeit it — no refunds.",
   },
 ];
 

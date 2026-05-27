@@ -301,17 +301,6 @@ function ActiveSessionScreenInner() {
     : (effectiveFirestoreSession?.stakePerParticipant ??
       activeGroupSession?.stakePerParticipant ??
       0);
-  const poolTotal = isSoloStaked
-    ? (soloSession?.stakeAmount ?? 0) * SOLO_COMPLETION_MULTIPLIER
-    : (effectiveFirestoreSession?.poolTotal ??
-      activeGroupSession?.poolTotal ??
-      0);
-  const participantCount = isSoloStaked
-    ? 1
-    : effectiveFirestoreSession
-      ? Object.keys(effectiveFirestoreSession.participants).length
-      : (activeGroupSession?.participants.length ?? 0);
-
   // Live leaderboard rows. For Firestore sessions we read participant status
   // (active/completed/surrendered) and violation counts directly from the
   // synced doc; legacy in-memory sessions just show the participant list.
@@ -682,15 +671,11 @@ function ActiveSessionScreenInner() {
       {/* Payout Card — hidden for solo quick-block (no money involved) */}
       {mode !== "solo_quick" && (
         <Card style={styles.payoutCard}>
-          <Text style={styles.payoutLabel}>
-            {isSoloStaked ? "Complete to keep" : "Complete to earn"}
-          </Text>
+          <Text style={styles.payoutLabel}>Complete to keep</Text>
           <Text style={styles.payoutAmount}>
             {isSoloStaked
               ? formatMoney(soloSession?.potentialPayout ?? stakeAmount)
-              : participantCount <= 1
-                ? formatMoney(stakeAmount * SOLO_COMPLETION_MULTIPLIER)
-                : `Up to ${formatMoney(poolTotal)}`}
+              : formatMoney(stakeAmount * SOLO_COMPLETION_MULTIPLIER)}
           </Text>
         </Card>
       )}

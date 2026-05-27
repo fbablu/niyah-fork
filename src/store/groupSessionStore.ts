@@ -12,7 +12,12 @@ import {
   CadenceType,
   UserReputation,
 } from "../types";
-import { CADENCES, DEMO_MODE, USE_SHORT_TIMERS } from "../constants/config";
+import {
+  CADENCES,
+  DEMO_MODE,
+  USE_SHORT_TIMERS,
+  SOLO_COMPLETION_MULTIPLIER,
+} from "../constants/config";
 import { useAuthStore } from "./authStore";
 import { useWalletStore } from "./walletStore";
 import {
@@ -178,13 +183,10 @@ function optimisticUserPayoutCents(doc: GroupSessionDoc): number {
   if (!myId) return 0;
   const me = doc.participants[myId];
   if (!me || me.surrendered) return 0;
-  // Optimistic = full pool / active participant count. Cloud Function does
-  // the authoritative settlement on completion.
-  const active = Object.values(doc.participants).filter(
-    (p) => !p.surrendered,
-  ).length;
-  if (active <= 0) return 0;
-  return Math.floor(doc.poolTotal / active);
+  // De-pooled: a completer gets their OWN stake back (× the dormant completion
+  // multiplier), NEVER a share of a pool. Does not grow when others surrender.
+  // The Cloud Function runs the authoritative settlement on completion.
+  return Math.round(doc.stakePerParticipant * SOLO_COMPLETION_MULTIPLIER);
 }
 
 /**

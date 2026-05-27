@@ -300,16 +300,17 @@ describe("groupSessionStore", () => {
       );
     });
 
-    it("credits payout to wallet when current user completed", () => {
+    it("credits own stake back to wallet when current user completed", () => {
       start();
       const balanceAfterStake = useWalletStore.getState().balance;
       useGroupSessionStore.getState().completeGroupSession([
         { userId: "user-a", completed: true },
         { userId: "user-b", completed: false },
       ]);
-      // Pool = 2 × stake; user-a is the sole completer and wins the full pool
+      // De-pooled: user-a gets their OWN stake back — NOT the pool. user-b's
+      // forfeited stake goes to the house, never redistributed to user-a.
       expect(useWalletStore.getState().balance).toBe(
-        balanceAfterStake + 2 * CADENCES.daily.stake,
+        balanceAfterStake + CADENCES.daily.stake,
       );
     });
 
@@ -395,7 +396,7 @@ describe("groupSessionStore", () => {
       expect(useAuthStore.getState().user!.completedSessions).toBe(1);
     });
 
-    it("produces transfer from surrendering partner to completer", () => {
+    it("produces no inter-player transfer (forfeits go to the house, not the completer)", () => {
       start();
       useGroupSessionStore.getState().completeGroupSession([
         { userId: "user-a", completed: true },
@@ -403,11 +404,9 @@ describe("groupSessionStore", () => {
       ]);
       const { transfers } =
         useGroupSessionStore.getState().groupSessionHistory[0];
-      // user-b loses their stake to user-a: 1 transfer expected
-      expect(transfers).toHaveLength(1);
-      expect(transfers[0].fromUserId).toBe("user-b");
-      expect(transfers[0].toUserId).toBe("user-a");
-      expect(transfers[0].amount).toBe(CADENCES.daily.stake);
+      // De-pooled: user-b's forfeited stake goes to the house. No money moves
+      // between players, so there are no transfers to settle.
+      expect(transfers).toEqual([]);
     });
 
     it("attaches payout to each participant", () => {

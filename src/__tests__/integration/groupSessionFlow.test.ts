@@ -10,7 +10,11 @@
 import { useGroupSessionStore } from "../../store/groupSessionStore";
 import { useWalletStore } from "../../store/walletStore";
 import { useAuthStore } from "../../store/authStore";
-import { CADENCES, INITIAL_BALANCE } from "../../constants/config";
+import {
+  CADENCES,
+  INITIAL_BALANCE,
+  SOLO_COMPLETION_MULTIPLIER,
+} from "../../constants/config";
 import type {
   GroupSession,
   SessionTransfer,
@@ -125,7 +129,7 @@ describe("Group Session Flow Integration Tests", () => {
         { userId: "user-a", completed: true },
         { userId: "user-b", completed: true },
       ]);
-      // Even-split: payout == stake → net 0
+      // De-pooled: each completer gets their own stake back → net 0.
       expect(useWalletStore.getState().balance).toBe(initial);
     });
 
@@ -275,7 +279,7 @@ describe("Group Session Flow Integration Tests", () => {
       );
     });
 
-    it("wallet nets +250 when current user completes with 1 of 3 surrendering", () => {
+    it("wallet returns to initial when current user completes (others' forfeits go to the house)", () => {
       const initial = useWalletStore.getState().balance;
       useGroupSessionStore
         .getState()
@@ -285,9 +289,9 @@ describe("Group Session Flow Integration Tests", () => {
         { userId: "user-b", completed: false },
         { userId: "user-c", completed: true },
       ]);
-      // Pool = 3 × 500 = 1500; 2 completers → floor(1500/2) = 750 each
-      // Net for user-a: 750 − 500 (stake) = +250
-      expect(useWalletStore.getState().balance).toBe(initial + 250);
+      // De-pooled: user-a gets only their OWN 500 stake back → net 0. user-b's
+      // forfeited stake goes to the house, NOT split among the completers.
+      expect(useWalletStore.getState().balance).toBe(initial);
     });
 
     it("each participant has payout attached after completion", () => {
@@ -323,7 +327,7 @@ describe("Group Session Flow Integration Tests", () => {
       expect(user.completedSessions).toBe(5);
     });
 
-    it("wallet grows by stake per completion when partner surrenders each session", () => {
+    it("wallet returns to initial after consecutive completions (each returns the stake, net 0)", () => {
       const initial = useWalletStore.getState().balance;
       for (let i = 0; i < 5; i++) {
         useGroupSessionStore.getState().startGroupSession("daily", [P_A, P_B]);
@@ -331,11 +335,9 @@ describe("Group Session Flow Integration Tests", () => {
           .getState()
           .completeGroupSession([{ userId: "user-a", completed: true }]);
       }
-      // Each session: user-b defaults to false → user-a wins pool (2×stake),
-      // net per session = +stake. After 5 sessions: initial + 5×stake.
-      expect(useWalletStore.getState().balance).toBe(
-        initial + 5 * CADENCES.daily.stake,
-      );
+      // De-pooled: each completion returns user-a's own stake → net 0 per
+      // session. After 5 completions the balance is unchanged.
+      expect(useWalletStore.getState().balance).toBe(initial);
     });
 
     it("history accumulates all sessions, most recent first, each with unique id", () => {
@@ -417,7 +419,7 @@ describe("Group Session Flow Integration Tests", () => {
       expect(useWalletStore.getState().balance).toBe(initial - stake * 3);
     });
 
-    it("complete → complete → surrender nets +1 stake (wins offset final loss)", () => {
+    it("complete → complete → surrender nets −1 stake (completions return the stake, only the surrender loses)", () => {
       const initial = useWalletStore.getState().balance;
       const stake = CADENCES.daily.stake;
 
@@ -436,12 +438,19 @@ describe("Group Session Flow Integration Tests", () => {
         .getState()
         .completeGroupSession([{ userId: "user-a", completed: false }]);
 
-      // Each win: partner defaults false → user-a wins full pool (+stake net)
-      // Session 1: +stake, Session 2: +stake, Session 3: −stake → net +stake
-      expect(useWalletStore.getState().balance).toBe(initial + stake);
+      // De-pooled: each completion returns user-a's own stake (net 0); only the
+      // final surrender forfeits a stake to the house.
+      // Session 1: +0, Session 2: +0, Session 3: −stake → net −stake
+      expect(useWalletStore.getState().balance).toBe(initial - stake);
     });
 
-    it("totalEarnings accumulates only from completions, not surrenders", () => {
+    it("totalEarnings accumulates net surplus from completions only, never surrenders", () => {
+      // De-pooled: a completion returns the stake; net surplus is only the
+      // house-funded multiplier above 1.0 (dormant → 0). A surrender adds
+      // nothing. Computed from the constant so this survives a multiplier bump.
+      const surplus = (stake: number) =>
+        Math.round(stake * SOLO_COMPLETION_MULTIPLIER) - stake;
+
       useGroupSessionStore.getState().startGroupSession("daily", [P_A, P_B]);
       useGroupSessionStore
         .getState()
@@ -459,7 +468,7 @@ describe("Group Session Flow Integration Tests", () => {
 
       const user = useAuthStore.getState().user!;
       expect(user.totalEarnings).toBe(
-        CADENCES.daily.stake + CADENCES.weekly.stake,
+        surplus(CADENCES.daily.stake) + surplus(CADENCES.weekly.stake),
       );
     });
 
