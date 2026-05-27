@@ -12,7 +12,7 @@
 
 ---
 
-## 2026-05-26 PM — Wallet-ledger build + pilot scope (IN PROGRESS, nothing committed)
+## 2026-05-26 PM — Wallet-ledger build + pilot scope (client BINARY items 1–2 + de-pooled legal copy DONE)
 
 **Pilot scope DECIDED:** ship a clean **solo commitment-contract** binary by ~5/28. All earn-more/bucket machinery ships **dormant behind flags (enforcement OFF)** — the pilot behaves like today's stickK model. Group ships **de-pooled + real-money ON** (settlement untangled). Flip enforcement/earn-more server-side post-submit once verified. **Backfill MUST run before enabling enforcement.**
 
@@ -31,10 +31,17 @@
 **Decisions locked:** forgiveness→bonus; stake draw order deposited→bonus→earned; solo **1.1× (dormant)** + cap = `min(1× net deposits, $50)` — **cap NOT built; required before multiplier >1**; gate = ≥3 qualifying sessions + ≥12 focus-hrs + ≥120-min-to-count, drop distinct-partners + hard age gate (**NOT built — Step 4**).
 
 **Remaining BINARY (block submit):**
-- **Client de-pool** (biggest) — `src/utils/payoutAlgorithm.ts` `calculatePayouts` still splits the full pool, and `app/session/active.tsx` shows an optimistic "if you finish you'd take home $X" projection off it. Contradicts the de-pooled server + is gamble framing. Mirror the server: each completer → own stake back, forfeit→house, no inter-player transfers (`calculateTransfers` collapses to `[]`). Align `SOLO_COMPLETION_MULTIPLIER`→1.0. Rewrite the client `payoutAlgorithm` tests (they still assert pool splits).
-- **18+ attestation** — onboarding checkbox + ToS clause (no DOB storage needed).
-- **Language sweep** — in progress; `stripe-onboarding.tsx` "winnings"→"payouts" done; finish `active.tsx` "take home" + any other user-facing copy. (Plant-`pot` art + the "Not Gambling" legal text are correct, leave them.)
-- **ToS + Privacy Policy** — I draft (commitment-contract framing); you host + paste URLs into App Store Connect (privacy-policy URL is mandatory).
+
+✅ **DONE 2026-05-26 (evening), on `wallet-ledger` — items 1–2 + in-app legal copy:**
+- ~~Client de-pool~~ — `calculatePayouts` → own-stake-back, `calculateTransfers` → `[]`, `SOLO_COMPLETION_MULTIPLIER`→1.0, `active.tsx` projection fixed, client tests rewritten (commit `3d42e1f`). **Plus the settlement SCREENS the first pass missed:** `surrender.tsx` + `complete.tsx` de-pooled (removed the "Pay your partner via Venmo" flow — surrender now forfeits only your own stake, mirrors solo); Venmo display+data stripped from `partner.tsx`/`confirm.tsx`/`quick-block.tsx`. `complete.tsx`'s transfers-driven settlement cards were already inert (`transfers` is `[]`) and are now deleted.
+- ~~18+ attestation~~ — explicit "I am 18+" checkbox in `LegalAcceptanceOverlay` (Continue gated on BOTH it and ToS-accept); `ageAttested18` written server-side by `acceptLegalTerms` (admin SDK) + added to the `firestore.rules` protected denylist (client-immutable, like `legalAccepted*`); hydrated in `authStore`. **No DOB stored** — Stripe KYC verifies real age at money-out.
+- ~~In-app ToS/Privacy de-pool~~ — `LegalContentView` rewritten: group stakes are individual (no pool/share/redistribute), no Venmo P2P (forfeits → house, settle via Stripe), explicit 18+ eligibility clause. `CURRENT_LEGAL_VERSION` 1.0.0 → **2.0.0** → re-prompts every user, which also backfills `ageAttested18`.
+
+**Commit state:** 13 files uncommitted on `wallet-ledger` (client de-pool core already committed as `3d42e1f`). Grouping: (1) 18+ attestation — rules/functions/types/authStore/overlay+test; (2) ToS+version — LegalContentView/config; (3) de-pool screens — surrender/complete/confirm/partner/quick-block. Nothing pushed/merged/deployed.
+
+**Still open:**
+- **Language sweep (item 3)** — `active.tsx` "take home" + `stripe-onboarding.tsx` "winnings" already done; do a final audit for any other user-facing "bet/wager/gamble/win"/overstated-payout copy. (Plant-`pot` art + the "Not Gambling" legal text are correct — leave them.)
+- **Hosted ToS + Privacy Policy (item 4)** — the IN-APP copy is now correct; still need the standalone HOSTED docs (commitment-contract framing) for the mandatory App Store Connect privacy-policy URL. I draft; you host + paste URLs.
 
 **POST-SUBMIT (dormant enablement behind flags):** bucket-aware `requestWithdrawal` + re-enabled `assertWithdrawalEligibility` (Step 4); `deleteAccount` bucket rewrite (Step 5); soft deactivate (Step 6); backfill + reconcile bucket-invariant (Step 3); solo/group multiplier + cap (Step 7); client withdrawable UI (Step 8). Then `/vibe-security` the full diff → backfill → flip flags.
 
@@ -44,22 +51,31 @@
 
 ```
 Read docs/may-26-resume.md, especially the "2026-05-26 PM — Wallet-ledger build" section.
-We're mid-build on the wallet bucket ledger. Pilot scope is LOCKED: ship a clean solo
-commitment-contract binary by ~5/28 with all earn-more/bucket machinery DORMANT behind flags;
-group ships de-pooled + real-money on. The SERVER money-path is done + verified (de-pool,
-settlement untangle, bucket-routing, FL/HI geo-gate) — tsc clean, 38/38 functions tests green,
-committed on branch wallet-ledger (a8bc968 + 74b3702), local-only — NOT pushed/merged. Resume on
-the wallet-ledger branch.
+Pilot scope is LOCKED: clean solo commitment-contract binary by ~5/28 with all earn-more/bucket
+machinery DORMANT behind flags; group de-pooled + real-money on. Work continues on branch
+wallet-ledger.
 
-Continue the BINARY work in this order:
-1) CLIENT DE-POOL: src/utils/payoutAlgorithm.ts calculatePayouts still splits the full pool —
-   rewrite to individual stake-back (each completer gets own stake back, forfeit→house, no
-   inter-player transfers) to match functions/src/security.ts calculateGroupSessionPayouts. Set
-   SOLO_COMPLETION_MULTIPLIER=1.0 (dormant). Fix app/session/active.tsx "if you finish you'd take
-   home $X" projection + rewrite the client payoutAlgorithm tests.
-2) 18+ attestation on onboarding + ToS clause.
-3) Finish the language sweep (active.tsx "take home", any other user-facing gamble copy).
-4) Draft ToS + Privacy Policy (commitment-contract framing) for me to host.
+DONE so far on wallet-ledger:
+- SERVER money-path (committed a8bc968 + 74b3702, local-only): de-pool, settlement untangle,
+  bucket-routing, FL/HI geo-gate. tsc clean, 38/38 functions tests.
+- CLIENT de-pool (item 1; commit 3d42e1f + uncommitted screens): payoutAlgorithm own-stake-back,
+  calculateTransfers=[], SOLO_COMPLETION_MULTIPLIER=1.0, active.tsx projection, tests rewritten;
+  PLUS surrender.tsx + complete.tsx de-pooled (removed "Pay partner via Venmo") and
+  partner/confirm/quick-block Venmo display+data stripped.
+- 18+ attestation (item 2): explicit "I am 18+" checkbox in LegalAcceptanceOverlay; ageAttested18
+  written server-side by acceptLegalTerms + protected in firestore.rules (client-immutable);
+  hydrated in authStore. No DOB.
+- In-app ToS/Privacy de-pooled (LegalContentView) + CURRENT_LEGAL_VERSION → 2.0.0 (re-prompts all
+  users, backfills ageAttested18).
+(13 files uncommitted on wallet-ledger — commit grouping is in the resume doc. Nothing pushed.)
+
+CONTINUE the BINARY work:
+3) LANGUAGE SWEEP — final audit for any remaining user-facing "bet/wager/gamble/win" / overstated-
+   payout copy. (active.tsx "take home" + stripe-onboarding "winnings" already done. Leave the
+   plant-pot art + the "Not Gambling" legal text.)
+4) HOSTED ToS + Privacy Policy — draft standalone docs (commitment-contract framing) for the
+   mandatory App Store Connect privacy-policy URL. The in-app LegalContentView copy is already
+   correct + de-pooled; this is the externally-hosted version you paste into App Store Connect.
 
 POST-SUBMIT only (dormant enablement behind flags — NOT before submit): Step 4 bucket-aware
 requestWithdrawal + re-enabled assertWithdrawalEligibility (gate: ≥3 sessions + ≥12 focus-hrs +
@@ -73,7 +89,7 @@ deploy/push/merge without my explicit go; no "bet/wager/gamble/win" language; ke
 APP_CHECK_ENFORCED=false. Drifted test account cMtHvQkJJZOgU6pgYARj8nN5Wpf1 stays frozen — don't
 use it for clean tests.
 
-Start with the client de-pool.
+Start with item 3 (language sweep).
 ```
 
 ---
