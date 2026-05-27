@@ -463,7 +463,7 @@ function CompleteScreenInner() {
               <Card style={styles.receiptCard}>
                 <Text style={styles.receiptTitle}>Where your stake went</Text>
                 <Text style={styles.receiptBody}>
-                  {`${formatMoney(lastSolo.stakeAmount)} forfeited to the Niyah pool. It funds future payouts and keeps the commitment real. You staked this money so your future self couldn't weasel out.`}
+                  {`${formatMoney(lastSolo.stakeAmount)} forfeited to Niyah. You staked this money so your future self couldn't weasel out — that's what keeps the commitment real.`}
                 </Text>
               </Card>
             ) : null}

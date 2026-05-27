@@ -48,23 +48,23 @@ const PAGES = [
   {
     title: "Welcome to\nNiyah",
     subtitle:
-      "Tie screen-time limits with money,\nand earn more if you stick to them.",
+      "Tie screen-time limits to real money\nand actually follow through.",
     hint: "Swipe to learn more \u2794",
   },
   {
     title: "Take your focus\nto the next level",
     subtitle:
-      "Block distracting apps and set limits.\nPut up real $$ to test your strength.",
+      "Block distracting apps and set limits.\nBack your goals with real money.",
   },
   {
-    title: "Earn real f*ckin\nmoney.",
+    title: "Put your money\nwhere your focus is",
     subtitle:
-      "Withdraw immediately once you hit your\ngoal. Only lose what you put in.",
+      "Stake on a session. Finish it and your\nmoney comes back \u2014 quit early, you forfeit it.",
   },
   {
-    title: "Grow Your\nWealth",
+    title: "Build the\nhabit",
     subtitle:
-      "Complete sessions to earn payouts.\nBuild streaks for bonus multipliers.",
+      "Complete sessions to get your stake back\nand grow your focus streak.",
   },
 ];
 

@@ -499,7 +499,7 @@ function WaitingRoomScreenInner() {
               </Text>
             </View>
             <View style={styles.sessionInfoItem}>
-              <Text style={styles.sessionInfoLabel}>Pool</Text>
+              <Text style={styles.sessionInfoLabel}>Total staked</Text>
               <Text style={styles.sessionInfoValue}>
                 {formatMoney(activeSession.poolTotal)}
               </Text>
@@ -595,7 +595,7 @@ function WaitingRoomScreenInner() {
         title="Cancel this session?"
         body={`Everyone in the waiting room will be refunded and notified. ${
           activeSession.poolTotal
-            ? `Pool of ${formatMoney(activeSession.poolTotal)} will be returned.`
+            ? `All ${formatMoney(activeSession.poolTotal)} in stakes will be returned.`
             : ""
         }`}
         holdLabel={isCancelling ? "Cancelling…" : "Hold to cancel session"}

@@ -302,8 +302,8 @@ function SelectCadenceScreenInner() {
       }
       subtitle={
         sessionType === "solo"
-          ? "Stake on yourself. Complete to earn more."
-          : "Higher stakes, higher rewards"
+          ? "Stake on yourself. Complete to get it back."
+          : "Focus together. Everyone stakes their own."
       }
       centerTitle={false}
       footer={
