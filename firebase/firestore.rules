@@ -50,7 +50,7 @@ service cloud.firestore {
                 && request.resource.data.name.size() <= 120))
         && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
-                'legalAcceptanceVersion', 'legalAcceptedAt',
+                'legalAcceptanceVersion', 'legalAcceptedAt', 'ageAttested18',
                 'stripeAccountId', 'stripeAccountStatus', 'stripeKycProvidedAt',
                 'stripeCustomerId',
                 'legalFirstName', 'legalLastName',
@@ -87,7 +87,7 @@ service cloud.firestore {
             || (request.resource.data.name is string
                 && request.resource.data.name.size() <= 120))
         && !request.resource.data.keys().hasAny([
-             'legalAcceptanceVersion', 'legalAcceptedAt',
+             'legalAcceptanceVersion', 'legalAcceptedAt', 'ageAttested18',
              'stripeAccountId', 'stripeAccountStatus', 'stripeKycProvidedAt',
              'stripeCustomerId',
              'legalFirstName', 'legalLastName',

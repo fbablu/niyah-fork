@@ -65,6 +65,10 @@ export interface User {
   // Legal acceptance
   legalAcceptanceVersion?: string;
   legalAcceptedAt?: Date;
+  // Self-attested 18+ at legal acceptance. No DOB stored — Stripe KYC verifies
+  // actual age at money-out. Server-written via acceptLegalTerms; rules keep it
+  // client-immutable, same as legalAccepted* above.
+  ageAttested18?: boolean;
   // First-surrender forgiveness ($5 refund on first-ever surrender)
   firstSurrenderForgiven?: boolean;
   firstSurrenderForgivenAt?: Date;

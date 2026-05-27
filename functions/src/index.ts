@@ -4652,6 +4652,10 @@ export const acceptLegalTerms = onRequest(
       await db.collection("users").doc(uid).update({
         legalAcceptanceVersion: version,
         legalAcceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // In-app acceptance requires affirming 18+ (LegalAcceptanceOverlay gates
+        // Continue on it), so record the attestation alongside. No DOB stored —
+        // Stripe KYC verifies actual age at money-out.
+        ageAttested18: true,
       });
 
       res.json({ success: true });

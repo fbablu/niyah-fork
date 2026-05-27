@@ -1,59 +1,84 @@
 /**
  * Unit Tests for LegalAcceptanceOverlay component
  *
- * Tests visibility, checkbox interaction, continue button state, and callbacks.
+ * Two affirmations gate Continue: an explicit 18+ age attestation and
+ * Terms/Privacy agreement. Tests cover rendering, the both-required gate,
+ * and the loading state.
  */
 
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react-native";
 import { LegalAcceptanceOverlay } from "../../../components/LegalAcceptanceOverlay";
 
+const AGE_LABEL = "I confirm I am 18 years of age or older";
+const TERMS_LABEL = "I agree to the Terms of Service and Privacy Policy";
+
 describe("LegalAcceptanceOverlay", () => {
-  it("renders when visible", () => {
+  it("renders both attestations when visible", () => {
     render(<LegalAcceptanceOverlay visible={true} onAccept={jest.fn()} />);
 
     expect(screen.getByText("Terms & Privacy")).toBeTruthy();
     expect(
       screen.getByText("Please review and accept to continue"),
     ).toBeTruthy();
-    expect(
-      screen.getByText("I agree to the Terms of Service and Privacy Policy"),
-    ).toBeTruthy();
+    expect(screen.getByText(AGE_LABEL)).toBeTruthy();
+    expect(screen.getByText(TERMS_LABEL)).toBeTruthy();
     expect(screen.getByText("Continue")).toBeTruthy();
   });
 
-  it("checkbox starts unchecked", () => {
+  it("both checkboxes start unchecked", () => {
     render(<LegalAcceptanceOverlay visible={true} onAccept={jest.fn()} />);
 
-    const checkbox = screen.getByRole("checkbox");
-    expect(checkbox.props.accessibilityState.checked).toBe(false);
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes).toHaveLength(2);
+    boxes.forEach((b) =>
+      expect(b.props.accessibilityState.checked).toBe(false),
+    );
   });
 
-  it("continue button is disabled when checkbox is unchecked", () => {
+  it("Continue does nothing when nothing is checked", () => {
     const onAccept = jest.fn();
     render(<LegalAcceptanceOverlay visible={true} onAccept={onAccept} />);
 
-    // Press Continue while unchecked — onAccept should NOT be called
     fireEvent.press(screen.getByText("Continue"));
     expect(onAccept).not.toHaveBeenCalled();
   });
 
-  it("ticking checkbox enables continue and pressing it calls onAccept", () => {
+  it("Continue stays disabled when only the 18+ box is checked", () => {
     const onAccept = jest.fn();
     render(<LegalAcceptanceOverlay visible={true} onAccept={onAccept} />);
 
-    const checkbox = screen.getByRole("checkbox");
+    fireEvent.press(screen.getByLabelText(AGE_LABEL));
+    fireEvent.press(screen.getByText("Continue"));
+    expect(onAccept).not.toHaveBeenCalled();
+  });
 
-    // Tick the checkbox
-    fireEvent.press(checkbox);
-    expect(checkbox.props.accessibilityState.checked).toBe(true);
+  it("Continue stays disabled when only the terms box is checked", () => {
+    const onAccept = jest.fn();
+    render(<LegalAcceptanceOverlay visible={true} onAccept={onAccept} />);
 
-    // Now press Continue
+    fireEvent.press(screen.getByLabelText(TERMS_LABEL));
+    fireEvent.press(screen.getByText("Continue"));
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it("ticking BOTH boxes enables Continue and calls onAccept once", () => {
+    const onAccept = jest.fn();
+    render(<LegalAcceptanceOverlay visible={true} onAccept={onAccept} />);
+
+    const age = screen.getByLabelText(AGE_LABEL);
+    const terms = screen.getByLabelText(TERMS_LABEL);
+
+    fireEvent.press(age);
+    fireEvent.press(terms);
+    expect(age.props.accessibilityState.checked).toBe(true);
+    expect(terms.props.accessibilityState.checked).toBe(true);
+
     fireEvent.press(screen.getByText("Continue"));
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
-  it("shows loading state — Continue button hides title when loading", () => {
+  it("keeps the header visible in the loading state", () => {
     render(
       <LegalAcceptanceOverlay
         visible={true}
@@ -62,14 +87,11 @@ describe("LegalAcceptanceOverlay", () => {
       />,
     );
 
-    // When loading=true, the Button component shows ActivityIndicator
-    // instead of title text. The "Continue" text should not appear
-    // as the Button renders a spinner in its place.
-    // The header title "Terms & Privacy" should still render.
+    // Button shows a spinner instead of "Continue" while loading; header stays.
     expect(screen.getByText("Terms & Privacy")).toBeTruthy();
   });
 
-  it("does not call onAccept when loading even if checked", () => {
+  it("does not call onAccept when loading even if both boxes are checked", () => {
     const onAccept = jest.fn();
     render(
       <LegalAcceptanceOverlay
@@ -79,13 +101,8 @@ describe("LegalAcceptanceOverlay", () => {
       />,
     );
 
-    // Tick checkbox
-    fireEvent.press(screen.getByRole("checkbox"));
-
-    // Button is disabled when loading, so pressing it should not trigger onAccept.
-    // The Button component uses disabled={!checked || loading}, so it won't fire.
-    // Since the button text is hidden when loading, we can't press by text.
-    // Just verify onAccept was never called.
+    fireEvent.press(screen.getByLabelText(AGE_LABEL));
+    fireEvent.press(screen.getByLabelText(TERMS_LABEL));
     expect(onAccept).not.toHaveBeenCalled();
   });
 });

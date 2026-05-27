@@ -278,6 +278,7 @@ const buildUser = (
         | string
         | undefined,
       legalAcceptedAt: toDateSafe(firestoreData.legalAcceptedAt),
+      ageAttested18: firestoreData.ageAttested18 === true,
       legalFirstName: firestoreData.legalFirstName as string | undefined,
       legalLastName: firestoreData.legalLastName as string | undefined,
       stripeKycProvidedAt: toDateSafe(firestoreData.stripeKycProvidedAt),
@@ -822,6 +823,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await updateUserDoc(user.id, {
         legalAcceptanceVersion: CURRENT_LEGAL_VERSION,
         legalAcceptedAt: new Date(),
+        ageAttested18: true,
       });
     } catch (error) {
       logger.error("Failed to persist legal acceptance to Firestore:", error);
@@ -832,6 +834,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         ...user,
         legalAcceptanceVersion: CURRENT_LEGAL_VERSION,
         legalAcceptedAt: new Date(),
+        ageAttested18: true,
       },
       hasAcceptedCurrentLegal: true,
     });

@@ -19,6 +19,36 @@ interface LegalAcceptanceOverlayProps {
   loading?: boolean;
 }
 
+interface CheckRowProps {
+  styles: ReturnType<typeof makeStyles>;
+  checked: boolean;
+  onToggle: () => void;
+  label: string;
+}
+
+// A single labeled checkbox row. Two are stacked in the overlay: an explicit
+// 18+ age affirmation and Terms/Privacy agreement. Both must be ticked before
+// Continue enables; the age attestation is recorded server-side on accept.
+const CheckRow: React.FC<CheckRowProps> = ({
+  styles,
+  checked,
+  onToggle,
+  label,
+}) => (
+  <Pressable
+    style={styles.checkboxRow}
+    onPress={onToggle}
+    accessibilityRole="checkbox"
+    accessibilityState={{ checked }}
+    accessibilityLabel={label}
+  >
+    <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+      {checked && <Text style={styles.checkmark}>✓</Text>}
+    </View>
+    <Text style={styles.checkboxLabel}>{label}</Text>
+  </Pressable>
+);
+
 export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
   visible,
   onAccept,
@@ -26,15 +56,19 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
 }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  const [checked, setChecked] = useState(false);
+  const [age18, setAge18] = useState(false);
+  const [agreedTerms, setAgreedTerms] = useState(false);
 
-  const handleCheckbox = () => {
+  const toggle = (setter: React.Dispatch<React.SetStateAction<boolean>>) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setChecked((prev) => !prev);
+    setter((prev) => !prev);
   };
 
+  // Both affirmations are required: 18+ eligibility and Terms/Privacy agreement.
+  const canContinue = age18 && agreedTerms;
+
   const handleConfirm = () => {
-    if (!checked) return;
+    if (!canContinue) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onAccept();
   };
@@ -62,25 +96,23 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
 
         {/* Acceptance controls */}
         <View style={styles.footer}>
-          <Pressable
-            style={styles.checkboxRow}
-            onPress={handleCheckbox}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked }}
-            accessibilityLabel="I agree to the Terms of Service and Privacy Policy"
-          >
-            <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-              {checked && <Text style={styles.checkmark}>✓</Text>}
-            </View>
-            <Text style={styles.checkboxLabel}>
-              I agree to the Terms of Service and Privacy Policy
-            </Text>
-          </Pressable>
+          <CheckRow
+            styles={styles}
+            checked={age18}
+            onToggle={() => toggle(setAge18)}
+            label="I confirm I am 18 years of age or older"
+          />
+          <CheckRow
+            styles={styles}
+            checked={agreedTerms}
+            onToggle={() => toggle(setAgreedTerms)}
+            label="I agree to the Terms of Service and Privacy Policy"
+          />
 
           <Button
             title="Continue"
             onPress={handleConfirm}
-            disabled={!checked || loading}
+            disabled={!canContinue || loading}
             loading={loading}
             size="large"
           />
