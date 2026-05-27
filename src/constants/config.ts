@@ -101,7 +101,10 @@ export const REPUTATION_LEVELS = {
 
 // Legal versioning
 // Bump this when Terms or Privacy content changes to re-prompt all users.
-export const CURRENT_LEGAL_VERSION = "1.0.0";
+// 2.0.0: de-pooled session/payment terms (no peer-to-peer settlement, stakes
+// never shared between participants) + explicit 18+ affirmation. Re-prompting
+// every user also backfills the ageAttested18 record.
+export const CURRENT_LEGAL_VERSION = "2.0.0";
 
 // Referral system
 // Each accepted referral permanently boosts the new user's social credit score by this amount.

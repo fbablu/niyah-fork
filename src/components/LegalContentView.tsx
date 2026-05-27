@@ -13,22 +13,22 @@ import { useColors } from "../hooks/useColors";
 
 const TERMS_CONTENT = `Terms of Service
 
-Last updated: March 2026
+Last updated: May 2026
 
 1. Overview
-Niyah is a productivity app and commitment-contract service. Users stake money as a commitment device to support focus goals. Session outcomes depend on user action, not chance, luck, or random events.
+Niyah is a productivity app and commitment-contract service. You stake your own money as a commitment device to support your focus goals. Session outcomes depend on your own actions, not chance, luck, or random events.
 
 2. Eligibility
-You must be at least 18 years old and a U.S. resident to use Niyah. You are responsible for maintaining the security of your account credentials.
+You must be at least 18 years old and a U.S. resident to use Niyah. By creating an account and accepting these terms, you affirm that you meet these requirements. You are responsible for maintaining the security of your account credentials.
 
 3. How Sessions Work
-You choose a session cadence (daily, weekly, or monthly) and stake an amount. If you complete the session, your stake is returned. If you surrender early, your stake is forfeited. In group sessions, completers share the pool of forfeited stakes.
+You choose a session cadence (daily, weekly, or monthly) and stake an amount as a commitment to your own focus goal. If you complete the session, your stake is returned to you. If you surrender early, your stake is forfeited. In group sessions, each participant stakes individually and is accountable only for their own goal — stakes are never pooled, shared, or redistributed between participants. Completing or surrendering affects only your own stake.
 
 4. Not Gambling
-Niyah is not a gambling, gaming, lottery, or betting service. Stakes are commitment devices — outcomes are determined entirely by your own actions during the session period.
+Niyah is not a gambling, gaming, lottery, or betting service. Stakes are commitment devices, and outcomes are determined entirely by your own actions during the session period — not by chance, by other participants, or by any random event. Stakes are never wagered against or pooled with other users.
 
-5. Payments and Settlements
-Deposits and withdrawals are processed through Stripe. Group session settlements between participants may use Venmo or other peer-to-peer payment methods. Niyah does not guarantee settlement between participants.
+5. Payments
+Deposits, returned stakes, and withdrawals are processed through our payment provider, Stripe. Forfeited stakes are retained by Niyah; they are not paid to, split among, or settled between other participants. There are no peer-to-peer payments between users within Niyah.
 
 6. User Conduct
 You agree not to abuse the service, create fake accounts, manipulate sessions, or engage in fraudulent payment activity. Niyah reserves the right to suspend or terminate accounts that violate these terms.
@@ -44,10 +44,10 @@ Questions about these terms? Contact us at support@niyah.app.`;
 
 const PRIVACY_CONTENT = `Privacy Policy
 
-Last updated: March 2026
+Last updated: May 2026
 
 1. Information We Collect
-We collect: account information (name, email, phone number), profile information, session data, social connections, payment-related identifiers (Stripe customer ID, Venmo handle), and legal acceptance records.
+We collect: account information (name, email, phone number), profile information, session data, social connections, payment-related identifiers (such as your Stripe customer and account IDs, and any payment handle you choose to add), and legal acceptance records (including your acceptance of these terms and your affirmation that you are at least 18 years old).
 
 2. How We Use Your Data
 Your data is used to operate the app: authenticate your identity, run focus sessions, manage your wallet and transactions, enable social features, and maintain legal and compliance records.
