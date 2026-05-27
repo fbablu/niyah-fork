@@ -27,13 +27,11 @@ const makeReputation = (
 const P_A = {
   userId: "user-a",
   name: "Alice",
-  venmoHandle: "@alice",
   reputation: makeReputation(),
 };
 const P_B = {
   userId: "user-b",
   name: "Bob",
-  venmoHandle: "@bob",
   reputation: makeReputation(),
 };
 const P_C = { userId: "user-c", name: "Charlie", reputation: makeReputation() };
@@ -884,53 +882,4 @@ describe("groupSessionStore", () => {
     });
   });
 
-  // ── getVenmoPayLink ───────────────────────────────────────────────────────
-
-  describe("getVenmoPayLink", () => {
-    it("generates a valid Venmo deep link", () => {
-      const link = useGroupSessionStore
-        .getState()
-        .getVenmoPayLink(500, "@bob", "Niyah session");
-      expect(link).toContain("venmo://paycharge");
-      expect(link).toContain("txn=pay");
-      expect(link).toContain("recipients=bob");
-    });
-
-    it("strips @ from handle", () => {
-      const link = useGroupSessionStore
-        .getState()
-        .getVenmoPayLink(500, "@alice-test", "note");
-      expect(link).toContain("recipients=alice-test");
-      expect(link).not.toContain("@alice-test");
-    });
-
-    it("converts cents to dollars (500 → 5.00)", () => {
-      const link = useGroupSessionStore
-        .getState()
-        .getVenmoPayLink(500, "@bob", "note");
-      expect(link).toContain("amount=5.00");
-    });
-
-    it("converts larger amounts correctly (10000 → 100.00)", () => {
-      const link = useGroupSessionStore
-        .getState()
-        .getVenmoPayLink(10000, "@bob", "note");
-      expect(link).toContain("amount=100.00");
-    });
-
-    it("URL-encodes the note", () => {
-      const link = useGroupSessionStore
-        .getState()
-        .getVenmoPayLink(500, "@bob", "Niyah session & payment");
-      expect(link).not.toContain(" "); // spaces encoded
-      expect(link).toContain("note=");
-    });
-
-    it("works without @ prefix on handle", () => {
-      const link = useGroupSessionStore
-        .getState()
-        .getVenmoPayLink(500, "bob", "note");
-      expect(link).toContain("recipients=bob");
-    });
-  });
 });

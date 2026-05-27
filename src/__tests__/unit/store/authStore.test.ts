@@ -262,26 +262,6 @@ describe("authStore", () => {
     });
   });
 
-  describe("setVenmoHandle", () => {
-    it("should set venmo handle on user", () => {
-      simulateAuthenticated();
-
-      act(() => {
-        useAuthStore.getState().setVenmoHandle("@test-user");
-      });
-
-      expect(useAuthStore.getState().user?.venmoHandle).toBe("@test-user");
-    });
-
-    it("should do nothing when not logged in", () => {
-      act(() => {
-        useAuthStore.getState().setVenmoHandle("@test-user");
-      });
-
-      expect(useAuthStore.getState().user).toBeNull();
-    });
-  });
-
   describe("state consistency", () => {
     it("should maintain consistent state through auth cycles", async () => {
       // Simulate login
@@ -577,7 +557,6 @@ describe("authStore", () => {
           uid: "test-uid",
           email: "user@gmail.com",
           displayName: "Test User",
-          photoURL: null,
           phoneNumber: null,
           providerId: "google.com",
           isNewUser: false,
@@ -802,44 +781,6 @@ describe("authStore", () => {
     });
   });
 
-  // ─── setZelleHandle ───────────────────────────────────────────────────────────
-
-  describe("setZelleHandle", () => {
-    it("sets the Zelle handle on the authenticated user", () => {
-      simulateAuthenticated();
-
-      act(() => {
-        useAuthStore.getState().setZelleHandle("user@bank.com");
-      });
-
-      expect(useAuthStore.getState().user?.zelleHandle).toBe("user@bank.com");
-    });
-
-    it("preserves all other user fields when setting Zelle handle", () => {
-      simulateAuthenticated({
-        email: "original@test.com",
-        venmoHandle: "@venmo-user",
-      });
-
-      act(() => {
-        useAuthStore.getState().setZelleHandle("zelle@bank.com");
-      });
-
-      const user = useAuthStore.getState().user!;
-      expect(user.email).toBe("original@test.com");
-      expect(user.venmoHandle).toBe("@venmo-user");
-      expect(user.zelleHandle).toBe("zelle@bank.com");
-    });
-
-    it("does nothing when not logged in", () => {
-      act(() => {
-        useAuthStore.getState().setZelleHandle("user@bank.com");
-      });
-
-      expect(useAuthStore.getState().user).toBeNull();
-    });
-  });
-
   // ─── Firestore sync (updateUserDoc assertions) ────────────────────────────
 
   describe("Firestore sync via updateUserDoc", () => {
@@ -908,32 +849,6 @@ describe("authStore", () => {
       );
     });
 
-    it("setVenmoHandle syncs to Firestore", async () => {
-      simulateAuthenticated();
-
-      act(() => {
-        useAuthStore.getState().setVenmoHandle("@alice");
-      });
-      await Promise.resolve();
-
-      expect(updateUserDoc).toHaveBeenCalledWith("test-uid", {
-        venmoHandle: "@alice",
-      });
-    });
-
-    it("setZelleHandle syncs to Firestore", async () => {
-      simulateAuthenticated();
-
-      act(() => {
-        useAuthStore.getState().setZelleHandle("z@bank.com");
-      });
-      await Promise.resolve();
-
-      expect(updateUserDoc).toHaveBeenCalledWith("test-uid", {
-        zelleHandle: "z@bank.com",
-      });
-    });
-
     it("updateReputation handles Firestore error silently — local state still updated", async () => {
       simulateAuthenticated();
       updateUserDoc.mockRejectedValueOnce(new Error("Firestore offline"));
@@ -952,31 +867,6 @@ describe("authStore", () => {
       expect(rep?.paymentsMissed).toBe(1);
     });
 
-    it("setVenmoHandle handles Firestore error silently — local state still updated", async () => {
-      simulateAuthenticated();
-      updateUserDoc.mockRejectedValueOnce(new Error("Firestore offline"));
-
-      act(() => {
-        useAuthStore.getState().setVenmoHandle("@broken");
-      });
-      // Flush fire-and-forget promise so the .catch handler executes (line 590)
-      await new Promise((r) => setTimeout(r, 0));
-
-      expect(useAuthStore.getState().user?.venmoHandle).toBe("@broken");
-    });
-
-    it("setZelleHandle handles Firestore error silently — local state still updated", async () => {
-      simulateAuthenticated();
-      updateUserDoc.mockRejectedValueOnce(new Error("Firestore offline"));
-
-      act(() => {
-        useAuthStore.getState().setZelleHandle("z@broken.com");
-      });
-      // Flush fire-and-forget promise so the .catch handler executes (line 602)
-      await new Promise((r) => setTimeout(r, 0));
-
-      expect(useAuthStore.getState().user?.zelleHandle).toBe("z@broken.com");
-    });
   });
 
   // ─── acceptLegal ─────────────────────────────────────────────────────────────
@@ -1013,7 +903,6 @@ describe("authStore", () => {
           uid: "apple-uid",
           email: "user@icloud.com",
           displayName: "Apple User",
-          photoURL: null,
           phoneNumber: null,
           providerId: "apple.com",
           isNewUser: false,
@@ -1057,7 +946,6 @@ describe("authStore", () => {
           uid: "fail-uid",
           email: "fail@example.com",
           displayName: "Fail User",
-          photoURL: null,
           phoneNumber: null,
           providerId: "google.com",
           isNewUser: false,

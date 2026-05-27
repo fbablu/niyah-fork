@@ -56,7 +56,6 @@ const makeReputation = (
 const ME = {
   userId: "me",
   name: "Test User",
-  venmoHandle: "@me",
   reputation: makeReputation(),
 };
 

@@ -40,13 +40,11 @@ const makeReputation = (
 const P_A = {
   userId: "user-a",
   name: "Alice",
-  venmoHandle: "@alice",
   reputation: makeReputation(),
 };
 const P_B = {
   userId: "user-b",
   name: "Bob",
-  venmoHandle: "@bob",
   reputation: makeReputation(),
 };
 const P_C = { userId: "user-c", name: "Charlie", reputation: makeReputation() };

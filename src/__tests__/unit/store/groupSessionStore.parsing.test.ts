@@ -350,7 +350,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         participants: {
           "user-a": {
             name: "Alice",
-            venmoHandle: "@alice",
             profileImage: "https://example.com/alice.jpg",
             accepted: true,
             online: true,
@@ -373,7 +372,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
       const session = useGroupSessionStore.getState().activeSession!;
       const alice = session.participants["user-a"];
       expect(alice.name).toBe("Alice");
-      expect(alice.venmoHandle).toBe("@alice");
       expect(alice.profileImage).toBe("https://example.com/alice.jpg");
       expect(alice.accepted).toBe(true);
       expect(alice.online).toBe(true);
@@ -382,7 +380,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
 
       const bob = session.participants["user-b"];
       expect(bob.name).toBe("Bob");
-      expect(bob.venmoHandle).toBeUndefined();
       expect(bob.profileImage).toBeUndefined();
       expect(bob.accepted).toBe(true);
       expect(bob.online).toBe(false);
@@ -1214,13 +1211,11 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         {
           userId: "user-a",
           name: "Alice",
-          venmoHandle: "@alice",
           reputation: makeReputation(),
         },
         {
           userId: "user-b",
           name: "Bob",
-          venmoHandle: "@bob",
           reputation: makeReputation(),
         },
       ]);
@@ -1241,13 +1236,11 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         {
           userId: "user-a",
           name: "Alice",
-          venmoHandle: "@alice",
           reputation: makeReputation(),
         },
         {
           userId: "user-b",
           name: "Bob",
-          venmoHandle: "@bob",
           reputation: makeReputation(),
         },
       ]);

@@ -67,7 +67,6 @@ export interface FirebaseUser {
   uid: string;
   email: string | null;
   displayName: string | null;
-  photoURL: string | null;
   phoneNumber: string | null;
   providerId: string | null;
   isNewUser: boolean;
@@ -80,7 +79,6 @@ const mapUser = (
   uid: rnfbUser.uid,
   email: rnfbUser.email,
   displayName: rnfbUser.displayName,
-  photoURL: rnfbUser.photoURL,
   phoneNumber: rnfbUser.phoneNumber,
   providerId: rnfbUser.providerId,
   isNewUser,
@@ -288,15 +286,13 @@ export const saveUserProfile = async (
   const authUser = authInstance.currentUser;
   const canonicalEmail = authUser?.email || data.email || "";
   const canonicalPhone = authUser?.phoneNumber || data.phone || undefined;
-  const canonicalPhotoURL =
-    authUser?.photoURL || data.profileImage || undefined;
 
   const payload: Record<string, unknown> = {
     firstName: data.firstName,
     lastName: data.lastName,
     email: canonicalEmail,
     phone: canonicalPhone,
-    profileImage: canonicalPhotoURL,
+    profileImage: data.profileImage || undefined,
     blobAvatar: data.blobAvatar,
     authProvider: data.authProvider,
     name: `${data.firstName} ${data.lastName}`.trim(),

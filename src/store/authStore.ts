@@ -166,8 +166,6 @@ interface AuthState {
   logout: () => Promise<void>;
   updateUser: (updates: Partial<User>) => void;
   updateReputation: (updates: Partial<UserReputation>) => void;
-  setVenmoHandle: (handle: string) => void;
-  setZelleHandle: (handle: string) => void;
   setBlobAvatar: (blobAvatar: BlobAvatarConfig) => void;
   acceptLegal: () => Promise<void>;
 }
@@ -228,10 +226,7 @@ const buildUser = (
       name: (firestoreData.name as string) || firebaseUser.displayName || "",
       firstName: firestoreData.firstName as string | undefined,
       lastName: firestoreData.lastName as string | undefined,
-      profileImage:
-        (firestoreData.profileImage as string) ||
-        firebaseUser.photoURL ||
-        undefined,
+      profileImage: (firestoreData.profileImage as string) || undefined,
       blobAvatar: normalizeBlobAvatarConfig(
         firestoreData.blobAvatar as Partial<BlobAvatarConfig> | undefined,
         firebaseUser.uid,
@@ -253,8 +248,6 @@ const buildUser = (
         lastUpdated: new Date(),
         referralCount: rep.referralCount || 0,
       },
-      venmoHandle: firestoreData.venmoHandle as string | undefined,
-      zelleHandle: firestoreData.zelleHandle as string | undefined,
       // Prefer Firebase Auth as source of truth — Firestore mirror is
       // best-effort and can be stale after re-auth flows. Falls back to the
       // mirrored field only when auth doesn't carry a phone (e.g. user
@@ -298,7 +291,7 @@ const buildUser = (
     id: firebaseUser.uid,
     email: firebaseUser.email || "",
     name: firebaseUser.displayName || "",
-    profileImage: firebaseUser.photoURL || undefined,
+    profileImage: undefined,
     blobAvatar: generateBlobAvatarPreset(firebaseUser.uid),
     balance: 0,
     currentStreak: 0,
@@ -634,7 +627,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         lastName: data.lastName,
         email: firebaseUser.email || "",
         phone: data.phone,
-        profileImage: firebaseUser.photoURL || undefined,
+        profileImage: undefined,
         blobAvatar: generateBlobAvatarPreset(firebaseUser.uid),
         authProvider,
       });
@@ -761,30 +754,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Sync reputation to Firestore (fire-and-forget)
       updateUserDoc(user.id, { reputation: newReputation }).catch((err) =>
         logger.error("Failed to sync reputation to Firestore:", err),
-      );
-    }
-  },
-
-  setVenmoHandle: (handle: string) => {
-    const { user } = get();
-    if (user) {
-      set({ user: { ...user, venmoHandle: handle } });
-
-      // Sync to Firestore (fire-and-forget)
-      updateUserDoc(user.id, { venmoHandle: handle }).catch((err) =>
-        logger.error("Failed to sync venmoHandle to Firestore:", err),
-      );
-    }
-  },
-
-  setZelleHandle: (handle: string) => {
-    const { user } = get();
-    if (user) {
-      set({ user: { ...user, zelleHandle: handle } });
-
-      // Sync to Firestore (fire-and-forget)
-      updateUserDoc(user.id, { zelleHandle: handle }).catch((err) =>
-        logger.error("Failed to sync zelleHandle to Firestore:", err),
       );
     }
   },

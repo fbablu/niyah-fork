@@ -25,7 +25,6 @@ import {
   calculateTransfers,
   ParticipantResult,
 } from "../utils/payoutAlgorithm";
-import { getVenmoPayLink } from "../utils/format";
 import { generateId } from "../utils/id";
 import {
   createGroupSession as cloudCreateGroupSession,
@@ -82,7 +81,6 @@ function parseParticipants(
     const p = data as Record<string, unknown>;
     result[uid] = {
       name: (p.name as string) ?? "",
-      venmoHandle: p.venmoHandle as string | undefined,
       profileImage: p.profileImage as string | undefined,
       reputation: ((p.reputation as UserReputation) ?? {
         score: 50,
@@ -296,11 +294,6 @@ interface GroupSessionState {
   ) => GroupSession | undefined;
   getTimeRemaining: () => number;
 
-  getVenmoPayLink: (
-    amount: number,
-    recipientHandle: string,
-    note: string,
-  ) => string;
   reset: () => void;
 }
 
@@ -849,8 +842,6 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
   },
 
   // ─── Utilities ──────────────────────────────────────────────────────────────
-
-  getVenmoPayLink,
 
   reset: () => {
     clearSessionContext().catch(() => {});

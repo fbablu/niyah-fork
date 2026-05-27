@@ -4,7 +4,6 @@ import { CADENCES, DEMO_MODE, USE_SHORT_TIMERS } from "../constants/config";
 import { useAuthStore } from "./authStore";
 import { useWalletStore } from "./walletStore";
 import { fetchUserProfile, awardReferralToUser } from "../config/firebase";
-import { getVenmoPayLink } from "../utils/format";
 import { generateId } from "../utils/id";
 
 interface PartnerState {
@@ -31,11 +30,6 @@ interface PartnerState {
   markSettlementReceived: (sessionId: string) => void;
   sendInvite: (email: string, name: string) => void;
   acceptInvite: (inviteId: string) => void;
-  getVenmoPayLink: (
-    amount: number,
-    recipientHandle: string,
-    note: string,
-  ) => string;
   // Called on the new user's device after they authenticate via a referral link.
   // Fetches the referrer's name, boosts the new user's reputation, and awards the referrer.
   applyReferralBonus: (referrerUid: string) => Promise<void>;
@@ -57,7 +51,6 @@ const DEMO_PARTNER: Partner = {
   oderId: "partner-user-1",
   name: "Fardeen Bablu",
   email: "fardeen@example.com",
-  venmoHandle: "@fardeen-demo",
   reputation: {
     score: 72,
     level: "tree",
@@ -124,7 +117,6 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
       status: "active",
       partnerId: currentPartner.oderId,
       partnerName: currentPartner.name,
-      partnerVenmo: currentPartner.venmoHandle,
     };
 
     useWalletStore.getState().deductStake(config.stake, duoSession.id);
@@ -363,8 +355,6 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
 
     awardReferralToUser(referrerUid);
   },
-
-  getVenmoPayLink,
 
   reset: () => {
     set({

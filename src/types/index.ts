@@ -35,8 +35,6 @@ export interface User {
   createdAt: Date;
   // Reputation/Social Credit
   reputation: UserReputation;
-  venmoHandle?: string; // For settlements
-  zelleHandle?: string; // Email or phone for Zelle settlements
   profileImage?: string;
   blobAvatar?: {
     colorPreset: "sunset" | "ocean" | "forest" | "berry" | "lemon" | "coral";
@@ -102,7 +100,6 @@ export interface Partner {
   oderId: string; // The other user's ID
   name: string;
   email: string;
-  venmoHandle?: string;
   profileImage?: string;
   reputation: UserReputation;
   connectedAt: Date;
@@ -124,7 +121,6 @@ export interface DuoSession {
   // Partner info
   partnerId: string;
   partnerName: string;
-  partnerVenmo?: string;
   // Outcomes
   userCompleted?: boolean; // Did current user complete?
   partnerCompleted?: boolean; // Did partner complete?
@@ -211,7 +207,6 @@ export type TransferStatus =
 export interface SessionParticipant {
   userId: string;
   name: string;
-  venmoHandle?: string;
   profileImage?: string;
   reputation: UserReputation;
   stakeAmount: number; // in cents — set from cadence config when session starts
@@ -258,7 +253,6 @@ export type GroupSessionStatus =
 
 export interface GroupSessionParticipant {
   name: string;
-  venmoHandle?: string;
   profileImage?: string;
   reputation: UserReputation;
   accepted: boolean;

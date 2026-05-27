@@ -1,7 +1,7 @@
 /**
  * Unit Tests for partnerStore
  *
- * Tests partner management, duo sessions, settlements, invites, and Venmo links.
+ * Tests partner management, duo sessions, settlements, and invites.
  */
 
 import { usePartnerStore } from "../../../store/partnerStore";
@@ -188,7 +188,6 @@ describe("partnerStore", () => {
         oderId: "user-1",
         name: "Alice",
         email: "a@test.com",
-        venmoHandle: "@alice",
         reputation: makeReputation(),
         connectedAt: new Date(),
         totalSessionsTogether: 0,
@@ -251,7 +250,6 @@ describe("partnerStore", () => {
         oderId: "user-1",
         name: "Alice",
         email: "a@test.com",
-        venmoHandle: "@alice",
         reputation: makeReputation(),
         connectedAt: new Date(),
         totalSessionsTogether: 3,
@@ -371,7 +369,6 @@ describe("partnerStore", () => {
         status: "surrendered" as const,
         partnerId: "user-1",
         partnerName: "Alice",
-        partnerVenmo: "@alice",
         settlementStatus: "pending" as const,
         amountOwed: 500, // Positive = user owes partner
       };
@@ -447,7 +444,6 @@ describe("partnerStore", () => {
         status: "completed" as const,
         partnerId: "user-1",
         partnerName: "Alice",
-        partnerVenmo: "@alice",
         settlementStatus: "pending" as const,
         amountOwed: -500, // Negative = partner owes user
       };
@@ -522,28 +518,6 @@ describe("partnerStore", () => {
       expect(partners).toHaveLength(1);
       expect(partners[0].name).toBe("Alice");
       expect(pendingInvites[0].status).toBe("accepted");
-    });
-  });
-
-  describe("getVenmoPayLink", () => {
-    it("generates correct Venmo deep link", () => {
-      const link = usePartnerStore
-        .getState()
-        .getVenmoPayLink(500, "@alice", "Niyah session payout");
-
-      expect(link).toContain("venmo://paycharge");
-      expect(link).toContain("recipients=alice");
-      expect(link).toContain("amount=5.00");
-      expect(link).toContain("note=Niyah");
-    });
-
-    it("strips @ from handle", () => {
-      const link = usePartnerStore
-        .getState()
-        .getVenmoPayLink(1000, "@bob-test", "Payment");
-
-      expect(link).toContain("recipients=bob-test");
-      expect(link).not.toContain("recipients=@");
     });
   });
 
