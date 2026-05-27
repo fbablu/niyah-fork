@@ -15,6 +15,21 @@ function env(name, fallback) {
   );
 }
 
+// Apple privacy-manifest "collected data" entry — mirrors the App Store Connect
+// privacy labels. Every type Niyah collects is linked to the account and none is
+// used for tracking (no ad SDKs / data brokers).
+function collectedType(
+  type,
+  purposes = ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+) {
+  return {
+    NSPrivacyCollectedDataType: type,
+    NSPrivacyCollectedDataTypeLinked: true,
+    NSPrivacyCollectedDataTypeTracking: false,
+    NSPrivacyCollectedDataTypePurposes: purposes,
+  };
+}
+
 const firebaseProjectId = env("EXPO_PUBLIC_FIREBASE_PROJECT_ID");
 const googleIosClientId = env("EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID");
 const googleIosShortId = googleIosClientId.replace(
@@ -72,8 +87,6 @@ module.exports = {
           "Niyah uses your contacts to invite friends to focus sessions.",
         NSCameraUsageDescription:
           "Niyah may use the camera to scan payment cards during deposit or verify identity for payouts.",
-        NSPhotoLibraryUsageDescription:
-          "Niyah may access your photo library to select a profile picture.",
         NSMicrophoneUsageDescription:
           "Niyah does not record audio. This permission is required by included payment SDKs.",
         NSFaceIDUsageDescription:
@@ -82,6 +95,48 @@ module.exports = {
           "Niyah does not track you across other apps.",
         NSLocationWhenInUseUsageDescription:
           "Niyah does not collect location. This permission is referenced by included SDKs.",
+      },
+      // App privacy manifest → PrivacyInfo.xcprivacy on prebuild. Required-reason
+      // API types + NSPrivacyTracking are re-declared (so they survive whether
+      // Expo merges or replaces its defaults); NSPrivacyCollectedDataTypes mirrors
+      // the 10 App Store Connect privacy labels (all linked, none for tracking).
+      privacyManifests: {
+        NSPrivacyTracking: false,
+        NSPrivacyAccessedAPITypes: [
+          {
+            NSPrivacyAccessedAPIType:
+              "NSPrivacyAccessedAPICategoryFileTimestamp",
+            NSPrivacyAccessedAPITypeReasons: ["C617.1", "0A2A.1", "3B52.1"],
+          },
+          {
+            NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryUserDefaults",
+            NSPrivacyAccessedAPITypeReasons: ["CA92.1", "1C8F.1", "C56D.1"],
+          },
+          {
+            NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryDiskSpace",
+            NSPrivacyAccessedAPITypeReasons: ["E174.1", "85F4.1"],
+          },
+          {
+            NSPrivacyAccessedAPIType:
+              "NSPrivacyAccessedAPICategorySystemBootTime",
+            NSPrivacyAccessedAPITypeReasons: ["35F9.1"],
+          },
+        ],
+        NSPrivacyCollectedDataTypes: [
+          collectedType("NSPrivacyCollectedDataTypeName"),
+          collectedType("NSPrivacyCollectedDataTypeEmailAddress"),
+          collectedType("NSPrivacyCollectedDataTypePhoneNumber"),
+          collectedType("NSPrivacyCollectedDataTypeOtherFinancialInfo"),
+          collectedType("NSPrivacyCollectedDataTypeContacts"),
+          collectedType("NSPrivacyCollectedDataTypeUserID"),
+          collectedType("NSPrivacyCollectedDataTypeDeviceID"),
+          collectedType("NSPrivacyCollectedDataTypeProductInteraction", [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            "NSPrivacyCollectedDataTypePurposeAnalytics",
+          ]),
+          collectedType("NSPrivacyCollectedDataTypeCrashData"),
+          collectedType("NSPrivacyCollectedDataTypePerformanceData"),
+        ],
       },
     },
     android: {
