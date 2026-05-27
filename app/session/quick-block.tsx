@@ -271,7 +271,6 @@ function QuickBlockScreenInner() {
           {
             userId: user.id,
             name: user.name,
-            venmoHandle: user.venmoHandle,
             profileImage: user.profileImage,
             reputation: user.reputation,
           },

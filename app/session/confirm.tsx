@@ -283,14 +283,12 @@ function ConfirmSessionScreenInner() {
           {
             userId: user.id,
             name: user.name,
-            venmoHandle: user.venmoHandle,
             profileImage: user.profileImage,
             reputation: user.reputation,
           },
           {
             userId: currentPartner.oderId,
             name: currentPartner.name,
-            venmoHandle: currentPartner.venmoHandle,
             profileImage: currentPartner.profileImage,
             reputation: currentPartner.reputation,
           },
@@ -299,7 +297,6 @@ function ConfirmSessionScreenInner() {
           {
             userId: user.id,
             name: user.name,
-            venmoHandle: user.venmoHandle,
             profileImage: user.profileImage,
             reputation: user.reputation,
           },

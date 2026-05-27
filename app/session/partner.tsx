@@ -111,12 +111,6 @@ function PartnerSelectionScreenInner() {
               </View>
             )}
           </View>
-          {partner.venmoHandle && (
-            <View style={styles.venmoRow}>
-              <Text style={styles.venmoLabel}>Venmo:</Text>
-              <Text style={styles.venmoHandle}>{partner.venmoHandle}</Text>
-            </View>
-          )}
         </Card>
       </Pressable>
     );
@@ -314,24 +308,6 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.labelSmall,
       ...Font.semibold,
       color: Colors.text,
-    },
-    venmoRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      marginTop: Spacing.sm,
-      paddingTop: Spacing.sm,
-      borderTopWidth: 1,
-      borderTopColor: Colors.border,
-    },
-    venmoLabel: {
-      fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
-      marginRight: Spacing.xs,
-    },
-    venmoHandle: {
-      fontSize: Typography.labelSmall,
-      color: Colors.primary,
-      ...Font.medium,
     },
     emptyCard: {
       alignItems: "center",

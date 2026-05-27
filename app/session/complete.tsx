@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
-import { View, Text, StyleSheet, Animated, Linking, Alert } from "react-native";
+import { View, Text, StyleSheet, Animated } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   Typography,
@@ -21,7 +21,7 @@ import { useAuthStore } from "../../src/store/authStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
 import { formatMoney } from "../../src/utils/format";
-import type { GroupSessionDoc, SessionTransfer } from "../../src/types";
+import type { GroupSessionDoc } from "../../src/types";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -141,76 +141,6 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.bodySmall,
       color: Colors.textSecondary,
       textAlign: "center",
-    },
-    transferCard: {
-      marginBottom: Spacing.xs,
-      paddingVertical: Spacing.sm,
-    },
-    transferCardOverdue: {
-      borderWidth: 1,
-      borderColor: Colors.loss,
-      backgroundColor: Colors.lossLight,
-    },
-    transferCardSettled: {
-      borderWidth: 1,
-      borderColor: Colors.gain,
-      backgroundColor: Colors.gainLight,
-    },
-    transferCardDisputed: {
-      borderWidth: 1,
-      borderColor: Colors.warning,
-      backgroundColor: Colors.warningLight,
-    },
-    transferRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: Spacing.xs,
-    },
-    transferDirection: {
-      fontSize: Typography.bodySmall,
-      ...Font.medium,
-      color: Colors.text,
-      flex: 1,
-    },
-    transferAmount: {
-      fontSize: Typography.bodyMedium,
-      ...Font.bold,
-    },
-    amountOwed: {
-      color: Colors.loss,
-    },
-    amountIncoming: {
-      color: Colors.gain,
-    },
-    venmoHandle: {
-      fontSize: Typography.labelSmall,
-      color: Colors.primary,
-      ...Font.medium,
-      marginBottom: Spacing.xs,
-    },
-    transferAction: {
-      marginTop: 2,
-    },
-    awaitingText: {
-      fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
-      ...Font.medium,
-    },
-    overdueText: {
-      fontSize: Typography.labelMedium,
-      color: Colors.loss,
-      ...Font.semibold,
-    },
-    settledText: {
-      fontSize: Typography.labelMedium,
-      color: Colors.gain,
-      ...Font.semibold,
-    },
-    disputedText: {
-      fontSize: Typography.labelMedium,
-      color: Colors.warning,
-      ...Font.semibold,
     },
     statsGrid: {
       flexDirection: "row",
@@ -372,13 +302,8 @@ function CompleteScreenInner() {
   const router = useRouter();
   const params = useLocalSearchParams<{ type?: string }>();
   const user = useAuthStore((state) => state.user);
-  const {
-    groupSessionHistory,
-    activeSession: firestoreSession,
-    markTransferConfirmed,
-    markTransferPaid,
-    getVenmoPayLink,
-  } = useGroupSessionStore();
+  const { groupSessionHistory, activeSession: firestoreSession } =
+    useGroupSessionStore();
   const soloHistory = useSessionStore((s) => s.sessionHistory);
   const lastForgivenCents = useSessionStore((s) => s.lastForgivenCents);
   const isSolo = params.type === "solo";
@@ -398,10 +323,6 @@ function CompleteScreenInner() {
   const didComplete = isSolo
     ? lastSolo?.status === "completed"
     : myParticipant?.completed || firestoreMyParticipant?.completed;
-
-  const activeTransfers =
-    lastSession?.transfers.filter((t) => t.status !== "none") ??
-    (firestoreSession?.transfers ?? []).filter((t) => t.status !== "none");
 
   const isSoloSession =
     isSolo ||
@@ -448,67 +369,9 @@ function CompleteScreenInner() {
   // Wallet balance now auto-syncs via onSnapshot listener in walletStore.
   // No manual hydrate needed on session completion.
 
-  // Track transfer actions already in-flight so rapid taps don't double-fire
-  // markTransferPaid / markTransferConfirmed (each would write a duplicate
-  // settlement record).
-  const [pendingTransferIds, setPendingTransferIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const isPending = (id: string) => pendingTransferIds.has(id);
-  const lockTransfer = (id: string) =>
-    setPendingTransferIds((s) => {
-      const next = new Set(s);
-      next.add(id);
-      return next;
-    });
-
   const handleDone = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.dismissAll();
-  };
-
-  const handleMarkReceived = (transferId: string) => {
-    if (!lastSession || isPending(transferId)) return;
-    lockTransfer(transferId);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    markTransferConfirmed(lastSession.id, transferId);
-  };
-
-  const handlePayVenmo = async (transfer: SessionTransfer) => {
-    if (isPending(transfer.id)) return;
-    lockTransfer(transfer.id);
-    const recipient = lastSession?.participants.find(
-      (p) => p.userId === transfer.toUserId,
-    );
-    if (!recipient?.venmoHandle) {
-      Alert.alert(
-        "No Venmo Handle",
-        `${recipient?.name ?? "Your partner"} hasn't added their Venmo handle. Pay them directly.`,
-      );
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const venmoUrl = getVenmoPayLink(
-      transfer.amount,
-      recipient.venmoHandle,
-      `Niyah session payment`,
-    );
-    try {
-      const canOpen = await Linking.canOpenURL(venmoUrl);
-      await Linking.openURL(
-        canOpen
-          ? venmoUrl
-          : `https://venmo.com/${recipient.venmoHandle.replace("@", "")}`,
-      );
-      if (lastSession) {
-        markTransferPaid(lastSession.id, transfer.id);
-      }
-    } catch {
-      Alert.alert(
-        "Error",
-        "Could not open Venmo. Please pay your partner manually.",
-      );
-    }
   };
 
   const getStreakMessage = () => {
@@ -655,19 +518,14 @@ function CompleteScreenInner() {
           />
         ) : null}
 
-        {/* Payments: who owes who and current state — skipped for solo sessions (no peer transfers) */}
+        {/* Payment status — solo sessions have no settlement step. Stakes are
+            de-pooled: returned or forfeited individually via Stripe, never paid
+            between participants. */}
         {!isSolo && (
           <View style={styles.paymentsSection}>
             <Text style={styles.sectionTitle}>Payments</Text>
 
-            {activeTransfers.length === 0 && !firestoreSession?.payouts ? (
-              <Card style={styles.noPaymentsCard}>
-                <Text style={styles.noPaymentsText}>No payments needed</Text>
-                <Text style={styles.noPaymentsSubtext}>
-                  Everyone's stake has been settled automatically.
-                </Text>
-              </Card>
-            ) : activeTransfers.length === 0 && firestoreSession?.payouts ? (
+            {firestoreSession?.payouts ? (
               <Card style={styles.noPaymentsCard}>
                 <Text style={styles.noPaymentsText}>Settled via Stripe</Text>
                 <Text style={styles.noPaymentsSubtext}>
@@ -677,105 +535,12 @@ function CompleteScreenInner() {
                 </Text>
               </Card>
             ) : (
-              activeTransfers.map((transfer) => {
-                const iAmPayer = transfer.fromUserId === user?.id;
-                const iAmRecipient = transfer.toUserId === user?.id;
-                const counterparty = lastSession?.participants.find(
-                  (p) =>
-                    p.userId ===
-                    (iAmPayer ? transfer.toUserId : transfer.fromUserId),
-                );
-
-                return (
-                  <Card
-                    key={transfer.id}
-                    style={[
-                      styles.transferCard,
-                      transfer.status === "overdue" &&
-                        styles.transferCardOverdue,
-                      transfer.status === "settled" &&
-                        styles.transferCardSettled,
-                      transfer.status === "disputed" &&
-                        styles.transferCardDisputed,
-                    ]}
-                  >
-                    <View style={styles.transferRow}>
-                      <Text style={styles.transferDirection}>
-                        {iAmPayer
-                          ? `You owe ${counterparty?.name ?? transfer.toUserName}`
-                          : iAmRecipient
-                            ? `${counterparty?.name ?? transfer.fromUserName} owes you`
-                            : `${transfer.fromUserName} → ${transfer.toUserName}`}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.transferAmount,
-                          iAmPayer ? styles.amountOwed : styles.amountIncoming,
-                        ]}
-                      >
-                        {formatMoney(transfer.amount)}
-                      </Text>
-                    </View>
-
-                    {counterparty?.venmoHandle && (
-                      <Text style={styles.venmoHandle}>
-                        {counterparty.venmoHandle}
-                      </Text>
-                    )}
-
-                    <View style={styles.transferAction}>
-                      {(transfer.status === "pending" ||
-                        transfer.status === "overdue") &&
-                        iAmPayer && (
-                          <Button
-                            title={
-                              transfer.status === "overdue"
-                                ? "Pay Now (Overdue)"
-                                : "Pay via Venmo"
-                            }
-                            onPress={() => handlePayVenmo(transfer)}
-                            disabled={isPending(transfer.id)}
-                            variant={
-                              transfer.status === "overdue"
-                                ? "danger"
-                                : "primary"
-                            }
-                            size="small"
-                          />
-                        )}
-                      {transfer.status === "pending" && iAmRecipient && (
-                        <Text style={styles.awaitingText}>
-                          Awaiting payment
-                        </Text>
-                      )}
-                      {transfer.status === "overdue" && iAmRecipient && (
-                        <Text style={styles.overdueText}>Payment overdue</Text>
-                      )}
-                      {transfer.status === "payment_indicated" &&
-                        iAmRecipient && (
-                          <Button
-                            title="Mark as Received"
-                            onPress={() => handleMarkReceived(transfer.id)}
-                            disabled={isPending(transfer.id)}
-                            variant="secondary"
-                            size="small"
-                          />
-                        )}
-                      {transfer.status === "payment_indicated" && iAmPayer && (
-                        <Text style={styles.awaitingText}>
-                          Sent — awaiting confirmation
-                        </Text>
-                      )}
-                      {transfer.status === "settled" && (
-                        <Text style={styles.settledText}>Settled ✓</Text>
-                      )}
-                      {transfer.status === "disputed" && (
-                        <Text style={styles.disputedText}>Disputed</Text>
-                      )}
-                    </View>
-                  </Card>
-                );
-              })
+              <Card style={styles.noPaymentsCard}>
+                <Text style={styles.noPaymentsText}>No payments needed</Text>
+                <Text style={styles.noPaymentsSubtext}>
+                  Everyone's stake has been settled automatically.
+                </Text>
+              </Card>
             )}
           </View>
         )}
