@@ -429,9 +429,9 @@ function ConfirmSessionScreenInner() {
           <View style={styles.outcomeRow}>
             <View style={styles.outcomeDot} />
             <Text style={styles.outcomeText}>
-              <Text style={styles.outcomeHighlight}>Duo mode:</Text> You and your
-              partner each keep your own stake — staking together keeps you both
-              accountable.
+              <Text style={styles.outcomeHighlight}>Duo mode:</Text> You and
+              your partner each keep your own stake — staking together keeps you
+              both accountable.
             </Text>
           </View>
         )}

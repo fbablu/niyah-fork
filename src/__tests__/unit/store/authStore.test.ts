@@ -866,7 +866,6 @@ describe("authStore", () => {
       expect(rep?.paymentsCompleted).toBe(3);
       expect(rep?.paymentsMissed).toBe(1);
     });
-
   });
 
   // ─── acceptLegal ─────────────────────────────────────────────────────────────

@@ -238,7 +238,10 @@ function SurrenderScreenInner() {
             Type QUIT to confirm surrender
           </Text>
           <TextInput
-            style={[styles.confirmInput, canSurrender && styles.confirmInputValid]}
+            style={[
+              styles.confirmInput,
+              canSurrender && styles.confirmInputValid,
+            ]}
             value={confirmText}
             onChangeText={setConfirmText}
             placeholder="Type QUIT"

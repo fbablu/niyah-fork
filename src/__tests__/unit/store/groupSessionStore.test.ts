@@ -881,5 +881,4 @@ describe("groupSessionStore", () => {
       ).toHaveLength(0);
     });
   });
-
 });
