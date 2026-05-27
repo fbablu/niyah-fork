@@ -20,7 +20,7 @@ import { buildStoredPayouts, calculateGroupSessionPayouts } from "./security";
 function buildWithdrawalIdempotencyKey(
   uid: string,
   amount: number,
-  method: "standard" | "instant" | "venmo",
+  method: "standard" | "instant",
   nowMs: number,
 ): string {
   const bucket = Math.floor(nowMs / 60_000);

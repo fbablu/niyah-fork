@@ -3460,7 +3460,7 @@ export const requestWithdrawal = onRequest(
 
     const { amount, method = "standard" } = req.body as {
       amount: unknown;
-      method?: "standard" | "instant" | "venmo";
+      method?: "standard" | "instant";
     };
 
     if (
@@ -3557,7 +3557,7 @@ export const requestWithdrawal = onRequest(
           type: "withdrawal",
           amount: -amount,
           description: `Withdrawal (${method})`,
-          status: method === "venmo" ? "pending_venmo" : "processing",
+          status: "processing",
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       });
@@ -3565,17 +3565,6 @@ export const requestWithdrawal = onRequest(
       // error path must either (a) restore balance AND delete the txn, or
       // (b) keep both (if money has already moved via Stripe).
       txnPersisted = true;
-
-      // Venmo: balance deducted, user handles Venmo request separately
-      if (method === "venmo") {
-        await txnRef.update({ status: "pending_venmo" });
-        res.json({
-          success: true,
-          transferId: txnRef.id,
-          estimatedArrival: "Within 24 hours (manual Venmo)",
-        });
-        return;
-      }
 
       // Stripe methods require a connected account. Read account id/status
       // from userPrivate (post-H1) — public users doc no longer mirrors them.
@@ -4926,7 +4915,6 @@ export const createGroupSession = onRequest(
         string,
         {
           name: string;
-          venmoHandle: string;
           profileImage: string;
           reputation: Record<string, unknown>;
           accepted: boolean;
@@ -4936,7 +4924,6 @@ export const createGroupSession = onRequest(
 
       participants[uid] = {
         name: proposerData.name ?? "",
-        venmoHandle: proposerData.venmoHandle ?? "",
         profileImage: proposerData.profileImage ?? "",
         reputation: proposerData.reputation ?? {},
         accepted: true,
@@ -4947,7 +4934,6 @@ export const createGroupSession = onRequest(
         const inviteeData = inviteeDocs[i].data() ?? {};
         participants[inviteeIds[i]] = {
           name: inviteeData.name ?? "",
-          venmoHandle: inviteeData.venmoHandle ?? "",
           profileImage: inviteeData.profileImage ?? "",
           reputation: inviteeData.reputation ?? {},
           accepted: false,
