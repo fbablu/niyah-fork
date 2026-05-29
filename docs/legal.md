@@ -58,7 +58,7 @@ Posture (not counsel — revisit at scale):
 
 - Completion surplus ("earned") and promo credits ("bonus") are **house-funded**, withdrawable only **after an engagement gate** (the anti-fraud lever).
 - Framed as **rewards/credits**, never "winnings won from others."
-- Ship **dormant** at launch (1.0×, promo off); flipped server-side **post-approval** ([may-26-resume.md](./may-26-resume.md) → "submit now, flip in days").
+- Ship **dormant** at launch (1.0×, promo off); flipped server-side **post-approval** ([STATUS.md](./STATUS.md) → "submit now, flip in days").
 
 ## App Store Strategy
 

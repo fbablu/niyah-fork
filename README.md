@@ -6,11 +6,13 @@ You want to stop doomscrolling. Screen time apps don't work because there's no r
 
 ## Solution
 
-Trap your own money. Rescue it through discipline. Hit streaks and earn even more.
+Stake your **own** money on a focus session as a commitment device. Complete it → get your stake
+back. Quit early → forfeit it. The financial consequence is what willpower alone lacks. This is a
+**commitment contract** (same model as stickK/Beeminder), **not** gambling — see [docs/legal.md](docs/legal.md).
 
-**Solo Mode**: Deposit money, block distracting apps, track screen time. More screen time = lose money. Less screen time = earn money.
+**Solo**: Deposit money, block distracting apps, stake on a focus session. Complete → stake returned; surrender early → stake forfeited to the house.
 
-**Pool Mode**: Pool money with friends, block distracting apps, compete on screen time. Lower usage = bigger share of the pool.
+**Group**: Focus together — but **de-pooled**. Every participant stakes their **own** money individually; completers get their own stake back, non-completers forfeit to the house. Stakes are never pooled, shared, or redistributed between users.
 
 ## Development Setup
 
@@ -82,7 +84,7 @@ pnpm start
 ### Testing & Code Quality
 
 ```bash
-pnpm test        # Run all tests (1018 tests)
+pnpm test        # Run all client tests (Jest)
 pnpm typecheck   # TypeScript strict mode check
 pnpm lint        # ESLint
 pnpm ci          # Full CI: lint + typecheck + test
@@ -246,6 +248,7 @@ adb reverse tcp:8081 tcp:8081
 
 Detailed docs are in the [`docs/`](docs/) directory:
 
+- [STATUS](docs/STATUS.md) -- **current launch state, what's left to submit, post-submit flips (read first)**
 - [Architecture](docs/architecture.md) -- project structure, directory tree
 - [Development](docs/development.md) -- full command reference, env vars, Cloud Functions
 - [Features](docs/features.md) -- auth, sessions, wallet, social, demo mode

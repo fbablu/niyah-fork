@@ -22,7 +22,7 @@ Auth state managed by `authStore.ts`, which listens to Firebase `onAuthStateChan
 
 A returning user who first signed up by phone and later taps "Sign in with Google" must land on the same `uid` if the Google email matches the phone-owner's verified email. The auth store consults Firestore for an existing user whose verified `phoneNumber` or `email` matches before creating a new account, then calls Firebase `linkWithCredential` so all providers attach to the original user record. Source-of-truth profile fields (`displayName`, `email`, `phoneNumber`) are read directly from `firebase.auth().currentUser` on every profile save to keep the auth user and Firestore doc consistent. Migration of pre-link duplicates is handled by the admin-only `mergeDuplicateUsers` Cloud Function; merged wallets and `migrations/{date}` audit entry per merge.
 
-See [post-demo-roadmap.md Lane A](./post-demo-roadmap.md#lane-a--auth-identity-profile-keyboard-3-days) for the rollout plan.
+Shipped in the Phase 4 auth lane — see [roadmap.md](./roadmap.md).
 
 ### Phone OTP Throttle
 
@@ -47,30 +47,25 @@ Sessions persist to Firestore `sessions` collection with crash recovery via `rec
 
 One-tap app blocking without money. User picks a duration (25 min / 1 hr / 2 hr / 4 hr / Until tonight), taps "Block Apps", and selected apps are shielded immediately. Reuses the active session timer view. Part of the April 15 sprint rearchitecture toward schedule-based blocking.
 
-### Duo Session
-
-**Store**: `partnerStore.ts` | **Screen**: `app/session/partner.tsx`
-
-1. User selects a partner from their partner list
-2. Both stake the same amount
-3. Loser pays winner (settled via Venmo deep links outside app)
-
-### Group Session
+### Group Session (de-pooled)
 
 **Store**: `groupSessionStore.ts` | **Screen**: `app/session/propose.tsx`
 
 1. Proposer creates session, selects stake amount and invites friends
-2. Invitees accept (stake deducted) or decline
+2. Invitees accept (own stake deducted) or decline
 3. All participants mark online in waiting room, proposer starts session
 4. Screen Time blocking activates on all devices, live leaderboard tracks progress
-5. On complete: server-side payout distribution splits losers' pool among completers
-6. 9 FCM push notification types for real-time group coordination
+5. On complete: each completer gets their **own** stake back; each forfeiter's stake goes **to the house**. **No pool, no redistribution, no peer-to-peer payments.** Settlement is server-authoritative; payout credits the wallet (cash-out at withdrawal).
 
-**Status**: Full stack complete — 7 Cloud Functions deployed, real-time Firestore listeners, Stripe escrow, custom shield blocking.
+**Status**: Full stack complete — ~10 Cloud Functions, real-time Firestore listeners, live Stripe, custom shield blocking.
 
-### Group Equity (Cap-Target Payout)
+> A "duo" session is just a 2-person group session routed through `groupSessionStore`. The legacy
+> `partnerStore` "loser pays winner via Venmo" flow is **removed** (dead code) — see [legal.md](./legal.md).
 
-Even-split among completers is unfair when participant baselines differ. The post-demo cap-target model gives every user a Strava-style target (`baseline × CAP_FACTOR`, default 0.5) verified by the `NiyahDeviceActivityReport` extension. Under-cap completers earn their full share of the pool; over-cap completers earn a linearly scaled share; 2× cap counts as a payout-zero (stake refunded, no forfeit). Full design in [group-equity.md](./group-equity.md).
+### Group Equity (Cap-Target Payout) — superseded design
+
+> ⚠️ **Superseded by the de-pool.** This cap-target/handicap model assumed a redistributable pool,
+> which no longer exists. Kept as a design reference only. Full doc: [group-equity.md](./group-equity.md).
 
 ### Live Activities (Lock Screen + Dynamic Island)
 
@@ -82,18 +77,18 @@ Onboarding moves past Apple's stock `FamilyActivityPicker`: users pick all categ
 
 ### Per-App Shield Variants
 
-`ShieldConfigurationExtension` branches on `application.token` and `category.token` to render five visual variants (social, video, gaming, news, default) with category-matched pep-talk copy and 20+ rotating quotes keyed by `Calendar.minute`. The previous generic shield stays as fallback. Shield surrender is now two-step: tap "Unlock & forfeit" → push notification → tap push → in-app confirm sheet (HoldToConfirmModal). Removes the single-tap forfeit footgun.
+`targets/shieldconfig/ShieldConfigurationExtension.swift` detects variant via `detectVariant(bundleID:categoryName:)` (branching on `application.bundleIdentifier` / `category.localizedDisplayName`) with category-matched pep-talk copy; quote selection rotates by `Int(Date().timeIntervalSince1970 / 60) % quotes.count`. Shield surrender is two-step: tap "Open Niyah" → land in-app → confirm sheet (HoldToConfirmModal). Removes the single-tap forfeit footgun. (Per-app visual variants B4 are still partly deferred — see [roadmap.md](./roadmap.md).)
 
 ## Wallet & Transactions
 
 **Store**: `walletStore.ts` | **Screens**: `deposit.tsx`, `withdraw.tsx`
 
-- Virtual balance tracked in cents
-- Transaction types: `deposit`, `withdrawal`, `stake`, `payout`, `forfeit`, `settlement_paid`, `settlement_received`
+- Balance tracked in cents across four buckets (`deposited`/`earned`/`bonus`/`credit`)
+- Transaction types: `deposit`, `withdrawal`, `stake`, `payout`, `forfeit`, `bonus`, `credit`, `refund`, `forgiveness`
 - Demo mode starts with $50 balance (`INITIAL_BALANCE`)
 - Non-demo mode hydrates from Firestore `wallets/{uid}`
 
-See [Payments](./payments.md) for Stripe integration and payout formulas.
+See [Payments](./payments.md) for the wallet ledger, Stripe/Plaid integration, and payout structure.
 
 ## Social Features
 
@@ -139,16 +134,12 @@ Controlled by env var (`EXPO_PUBLIC_DEMO_MODE=true`):
 | Profile     | Real Firestore persistence (reads + writes)                                                                                          |
 | Sessions    | Short timers (10s daily, 60s weekly, 90s monthly). Persisted to Firestore with crash recovery. Cloud Function calls skipped.         |
 | Wallet      | Starts at $50. Non-demo hydrates from Firestore.                                                                                     |
-| Screen Time | Module production-quality, onboarding flow built (`screentime-setup.tsx`), quick-block wired. Full session lifecycle wiring pending. |
-| Payments    | Trust model (virtual balances, settle outside app)                                                                                   |
+| Screen Time | Module production-quality, onboarding + session lifecycle wired.                                                                     |
+| Payments    | Cloud Function calls skipped; virtual balance only. **Non-demo runs on live Stripe + Plaid.**                                        |
 
-## Trust Model (Current)
+## Payments Model
 
-Instead of real payments:
-
-1. Users see virtual balance in-app
-2. Duo/group settlements tracked with transfer status
-3. Venmo deep links generated for actual money transfer
-4. Reputation system tracks payment reliability
-
-Trust model active while `DEMO_MODE = true`. Real Stripe escrow planned for [Phase 2](./roadmap.md#phase-2-beta-cohort).
+Non-demo builds run on **live Stripe Connect + Plaid production** — real deposits, refunds, and
+withdrawals. `DEMO_MODE=true` only short-circuits Cloud Function calls and uses a virtual balance for
+local testing. There is **no honor-based / Venmo settlement** — that pre-April-15 model is removed
+(see [legal.md](./legal.md), [payments.md](./payments.md)).
