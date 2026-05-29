@@ -1,8 +1,10 @@
-# Security Deploy Checklist — 2026-05-19
+# Security Deploy Checklist (operator runbook)
 
-> **Current execution status (updated 2026-05-23):** see [`may-26-resume.md`](./may-26-resume.md). This file is the reference / instructions; the resume doc tracks what's actually been done so far.
+> **This is the operator runbook** — the by-hand dashboard/CLI steps to activate each protection.
+> Background + what's wired in code: [security.md](./security.md). Current execution status (what's
+> actually been done): [STATUS.md](./STATUS.md).
 
-Everything in the codebase is shipped on the `security` branch. This doc lists what's left for **you** to do — by hand in a dashboard or via CLI — to fully activate the protections.
+This doc lists what's left for **you** to do — by hand in a dashboard or via CLI — to fully activate the protections.
 
 Items are ordered by deploy criticality. ✅ = ready to do now. ⏸ = wait until after first paying users / specific signal.
 
