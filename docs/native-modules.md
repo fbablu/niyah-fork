@@ -9,7 +9,7 @@ React Native Firebase packages provide Auth and Firestore:
 
 | Package                            | Purpose                                                |
 | ---------------------------------- | ------------------------------------------------------ |
-| `@react-native-firebase/app`       | Core initialization (Expo plugin in `app.config.ts`)   |
+| `@react-native-firebase/app`       | Core initialization (Expo plugin in `app.config.js`)   |
 | `@react-native-firebase/auth`      | Google, Apple, email magic link, and phone SMS sign-in |
 | `@react-native-firebase/firestore` | User profiles, wallets, sessions, follows              |
 | `@react-native-firebase/messaging` | FCM push notifications (token management, foreground)  |
@@ -70,9 +70,13 @@ The custom Niyah-branded shield is implemented via `ShieldConfigurationExtension
 
 iOS does not allow injecting modals into other apps. The custom shield via `ManagedSettingsStore` is the only API-compliant approach.
 
-## Planned iOS Extension Targets (Post-Demo)
+## iOS Extension Targets
 
-These two new extensions are scoped in [post-demo-roadmap.md](./post-demo-roadmap.md) Lane B and unblock several premium-UX features. Both are **build-required** — no JS-only fallback.
+> ⚠️ **Lane B (2026-05-16) moved all extensions to `@bacons/apple-targets` under top-level `targets/`**
+> (`monitor`, `report`, `shieldaction`, `shieldconfig`, `widget`), registered via
+> `targets/*/expo-target.config.json` — **not** via config plugins. The `DeviceActivityReport` and
+> Live Activity extensions below are **shipped**, not planned; paths in older sections of this file
+> that point at `modules/niyah-screentime/ios/` or `ios/Niyah*/` are stale. See [roadmap.md](./roadmap.md).
 
 ### `NiyahDeviceActivityReport`
 
