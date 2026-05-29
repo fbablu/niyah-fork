@@ -332,10 +332,10 @@ export async function getWithdrawalEligibility(): Promise<WithdrawalEligibility>
   return callFunction<WithdrawalEligibility>("getWithdrawalEligibility", {});
 }
 
-// method: 'standard' (free, 1-2 days) | 'instant' (1.5% fee, ~30 min) | 'venmo' (manual, ~24h)
+// method: 'standard' (free, 1-2 days) | 'instant' (1.5% fee, ~30 min)
 export async function requestWithdrawal(
   amount: number,
-  method: "standard" | "instant" | "venmo",
+  method: "standard" | "instant",
 ): Promise<WithdrawalResult> {
   return callFunction<WithdrawalResult>("requestWithdrawal", {
     amount,

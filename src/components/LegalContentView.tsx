@@ -8,12 +8,11 @@ import {
 } from "../constants/colors";
 import { useColors } from "../hooks/useColors";
 
-// ─── Draft legal content ────────────────────────────────────────────────────
-// Placeholder copy direction — must be reviewed by counsel before release.
+// ─── Legal content (in-app mirror of niyah.live/legal/*) ─────────────────────
 
 const TERMS_CONTENT = `Terms of Service
 
-Last updated: May 2026
+Last updated: May 27, 2026
 
 1. Overview
 Niyah is a productivity app and commitment-contract service. You stake your own money as a commitment device to support your focus goals. Session outcomes depend on your own actions, not chance, luck, or random events.
@@ -39,12 +38,15 @@ Niyah is provided "as is" without warranties of any kind. We are not liable for 
 8. Changes to Terms
 We may update these terms from time to time. When we do, you will be prompted to accept the new version before continuing to use the app.
 
-9. Contact
-Questions about these terms? Contact us at support@niyah.app.`;
+9. Apple App Store
+These terms are between you and Niyah only — not Apple. Apple has no responsibility for the app or its content and is not obligated to provide any maintenance or support for it. Apple makes no warranties regarding the app and, to the maximum extent permitted by law, is not responsible for any claims relating to the app, including product-liability, legal/regulatory, or consumer-protection claims. You agree to use the app in compliance with the Apple Media Services Terms and Usage Rules. Apple and its subsidiaries are third-party beneficiaries of these terms and may enforce them against you.
+
+10. Contact
+Questions about these terms? Contact us at support@niyah.live.`;
 
 const PRIVACY_CONTENT = `Privacy Policy
 
-Last updated: May 2026
+Last updated: May 27, 2026
 
 1. Information We Collect
 We collect: account information (name, email, phone number), profile information, session data, social connections, payment-related identifiers (such as your Stripe customer and account IDs, and any payment handle you choose to add), and legal acceptance records (including your acceptance of these terms and your affirmation that you are at least 18 years old).
@@ -59,7 +61,7 @@ We use Firebase (Google Cloud) for authentication and data storage, and Stripe f
 Your data is retained as long as your account is active. You may request deletion of your account and associated data by contacting us.
 
 5. Your Rights
-You may access, correct, or request deletion of your personal data. Contact us at support@niyah.app.
+You may access, correct, or request deletion of your personal data. Contact us at support@niyah.live.
 
 6. Security
 We use industry-standard measures to protect your data, including encryption in transit and at rest. However, no system is perfectly secure, and we cannot guarantee absolute security.
@@ -68,7 +70,7 @@ We use industry-standard measures to protect your data, including encryption in 
 We may update this policy from time to time. Changes will be reflected in the "Last updated" date above, and you will be prompted to review the new version.
 
 8. Contact
-Questions about privacy? Contact us at support@niyah.app.`;
+Questions about privacy? Contact us at support@niyah.live.`;
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
