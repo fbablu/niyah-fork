@@ -4,31 +4,63 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-05-30.**
+> Last updated: **2026-05-30** (PM — PR #7 merged to `main`, pre-deploy pre-flight green, smoke pending).
 
 ## Right now
 
-- **Branch:** `wallet-ledger` — **22 commits ahead of `main`**, clean fast-forward (no divergence).
-  All de-pool / legal / dead-code / privacy-manifest work is **committed** on this branch.
-  - **2026-05-30 legal-UX polish (staged, not yet committed):** acceptance overlay redesigned;
-    legal gate moved to fire right after sign-in (before profile setup); the permission-denied on
-    accept fixed; `acceptLegalTerms` CF made idempotent. Detail in the **Legal** bullet below. The
-    CF change needs the functions deploy to fully persist a new user's acceptance.
-  - **2026-05-30 money-path security hardening (staged, not yet committed):** `/vibe-security` run on
-    the branch → all findings fixed across 3 adversarial verification rounds. The bucket ledger
-    (`balance == Σbuckets`) is now enforced **everywhere money moves**: withdrawal is bucket-aware;
-    promo → `bonus`; delete refunds `deposited`-to-card only (+ pays/holds withdrawable house money,
-    records forfeits, guards frozen/drifted wallets); group cancel/timeout refunds + account merge
-    move buckets in lockstep; group refunds are now **idempotent**. Detail in **Audit findings**
-    below. **Needs the functions + rules deploy to take effect.**
-- **NOT merged, NOT pushed to `main`, NOT deployed.** Nothing live yet from this branch.
+- **Branch:** `wallet-ledger` == `main` == `origin/main` == `41dfb43` — the de-pooled v1, **fully
+  merged** (PR #7 squash-merged the landing de-pool; **0 commits divergence** either way). The whole
+  money path + `firestore.rules` + indexes + the landing de-pool are on `main`. All de-pool / legal
+  / money-path-hardening / privacy-manifest work is **committed**. (4 stale worktree branches still
+  exist — `fix/appstore-copy`, `chore/dead-code`, `chore/docs`, `feat/ux-onboarding` — clean up
+  post-deploy.)
+  - **Legal-UX polish (committed):** acceptance overlay redesigned; legal gate fires right after
+    sign-in (before profile setup); the permission-denied on accept fixed; `acceptLegalTerms` CF
+    made idempotent. Detail in the **Legal** bullet below. The CF change needs the functions deploy
+    to fully persist a new user's acceptance.
+  - **Money-path security hardening (committed):** `/vibe-security` run → all findings fixed across
+    3 adversarial verification rounds. The bucket ledger (`balance == Σbuckets`) is now enforced
+    **everywhere money moves**: withdrawal is bucket-aware; promo → `bonus`; delete refunds
+    `deposited`-to-card only (+ pays/holds withdrawable house money, records forfeits, guards
+    frozen/drifted wallets); group cancel/timeout refunds + account merge move buckets in lockstep;
+    group refunds are now **idempotent**. Detail in **Audit findings** below. **Needs the functions
+    + rules deploy to take effect.**
+- **Merged + pushed to `main`; landing is LIVE; functions NOT yet deployed.** niyah.live is
+  de-pooled and serves `/legal/{privacy,terms}` (PR #7 → main → GitHub Pages); the
+  `niyah.live/stripe/return` bounce is live. The **prod money path is still the OLD `launch`
+  functions** — the new bucket ledger is on `main` but ships at the **next** deploy.
+- **Pre-deploy QA in progress (2026-05-30 PM).** Pre-flight is **all green** (next subsection); the
+  controlled post-deploy run is **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**.
 - **Tests green:** ~742 client (Jest) + **52/52 functions** (`wallet.test.ts` — 14
-  bucket/withdrawal/deletion contract tests + `security`/`withdraw-earned`). Functions suites now
-  run via `pnpm test:functions` (Node built-in runner + `tsx`) and are **gated in CI** (`ci` script
+  bucket/withdrawal/deletion contract tests + `security`/`withdraw-earned`). Functions suites run
+  via `pnpm test:functions` (Node built-in runner + `tsx`) and are **gated in CI** (`ci` script
   + `.github/workflows/ci.yml`). `tsc` clean both sides, eslint 0 errors.
-- **Deployed today:** the previously-shipped `launch` security/payments work (rules + functions
-  deploy ran; migration ran 16 processed / 9 migrated). The landing `niyah.live/stripe/return`
-  bounce is live. The `wallet-ledger` changes are **not** part of that — they ship at the next deploy.
+- **Deployed previously:** the `launch` security/payments work (rules + functions deploy ran;
+  migration 16 processed / 9 migrated). The `wallet-ledger` changes are **not** part of that — they
+  ship at the next deploy.
+
+### Pre-flight — verified 2026-05-30 PM (all green)
+
+Read-only checks cleared before the live `firebase deploy`:
+
+- **Secret Manager (project `niyah-b972d`)** — all 5 present: `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `PLAID_CLIENT_ID`, `PLAID_SECRET`, `ADMIN_API_KEY` (declared via
+  `defineSecret`, attached to each fn's `secrets:[]`).
+- **Firestore `config/serverFlags`** — `promoCents` 0/absent, `billingKillSwitchEnabled` off. This
+  doc is the **source of truth** for promo + kill-switch (`061fd5a`: resolved Firestore → env →
+  safe default). ⚠️ `functions/.env.production` is **not** auto-loaded by Firebase dotenv (it loads
+  `.env` / `.env.<projectId>` / `.env.<alias>`; the only alias is `default`→`niyah-b972d`), so it is
+  **not** the load-bearing pin for `FINALS_PROMO_CENTS` — the Firestore doc + the code defaults
+  (`promo→0`, `kill-switch→false`, `PLAID_ENV→production`) govern.
+- **Stripe webhook** (`stripeWebhook`, us-central1) — endpoint registered; handles
+  `payment_intent.succeeded` + `account.updated` (a `payment_intent.failed` subscription is
+  unhandled/benign — credit only ever happens on success). The `whsec` match isn't pre-readable;
+  it's confirmed by the smoke deposit → **200** delivery.
+- **Plaid** — env = **production** (code default; `PLAID_ENV` unset). Webhook wired **per-Item** via
+  `/link/token/create` `webhook:` (`index.ts:1972`) → `plaidWebhook`; nothing to set in the Plaid
+  dashboard.
+- **Deploy command** (Fardeen runs): `cd functions && npm install` (deps already in sync) →
+  `firebase deploy --only functions,firestore:rules,firestore:indexes`. **Live + irreversible.**
 
 ### What `wallet-ledger` contains (the v1 submission binary)
 
@@ -77,19 +109,21 @@ like stickK (complete → get your exact stake back, `SOLO_COMPLETION_MULTIPLIER
 These are the steps between here and an App Store build. **Fardeen runs all git/deploy/outward
 actions** — Claude supplies messages only.
 
-1. **Merge** `wallet-ledger` → `main` (clean fast-forward).
-2. **Verify hosted legal live:** `niyah.live/legal/privacy` + `/legal/terms` (auto-deploys on merge).
+1. ~~**Merge** `wallet-ledger` → `main`~~ — **DONE.** Fully merged at `41dfb43` (PR #7; 0 divergence).
+2. ~~**Verify hosted legal live**~~ — **DONE.** `niyah.live/legal/{privacy,terms}` live (Pages).
 3. **App Store Connect:** click **Publish** on App Privacy (10 data types, all Linked=true /
    Tracking=false); confirm account-deletion + support URLs; support email `support@niyah.live`
    (display name "Niyah Support", fix reply-from).
-4. **Deploy** (merging code ≠ deploying — do before real users transact): run `/vibe-security` on
-   the money-path diff, then `firebase deploy --only firestore:rules,functions`.
-5. **Live infra:** confirm Stripe live key (`sk_live_`) + webhook; Plaid **prod** webhook URL +
-   ITEM events (see [security-deploy-checklist.md](./security-deploy-checklist.md) Phase 4); Apple
-   **APNs Auth Key** (.p8) → Firebase Cloud Messaging.
-6. **Build + smoke:** `pnpm build:production`; E2E real-money smoke ($1 deposit → stake → complete →
-   payout) on a **fresh clean account** (not the drifted test acct — see below); Delete Account on a
-   throwaway.
+4. **Deploy** (merging code ≠ deploying — do before real users transact). Pre-flight **DONE + green**
+   (see "Pre-flight" above): `cd functions && npm install`, then
+   `firebase deploy --only functions,firestore:rules,firestore:indexes`. **Live + irreversible.**
+5. **Live infra:** Stripe live key (`sk_live_`) + webhook + the 5 Secret-Manager secrets — **verified
+   present** at pre-flight. Plaid **prod** webhook is wired **per-Item** via `/link/token/create`
+   (not the dashboard); see [security-deploy-checklist.md](./security-deploy-checklist.md) Phase 4.
+   Still to confirm: Apple **APNs Auth Key** (.p8) → Firebase Cloud Messaging.
+6. **Build + smoke:** `pnpm build:production`; then the controlled real-money smoke on a **fresh
+   clean account** (not the drifted test acct — see below) + Delete on a throwaway — full tickable
+   script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**.
 7. **Submit** — be ready to explain in App Review notes: Stripe (not IAP) because deposits/stakes/
    withdrawals are the user's own funds; commitment-contract (not gambling), Productivity category.
 
@@ -116,11 +150,13 @@ fields to admin-SDK-only). Findings:
   **Needs device re-test of solo complete → payout once deployed.**
 
 **Pre-submit decisions / checks (Fardeen — not code bugs):**
-- ~~**Confirm `FINALS_PROMO_CENTS=0`**~~ — **DONE (2026-05-30).** Code default flipped 500 → **0**,
-  and `functions/.env.production` pins `FINALS_PROMO_CENTS=0` explicitly. The promo is now safe even
-  if re-enabled: it credits the gated `bonus` bucket and bucket-aware withdrawal won't release it
-  before the engagement gate. The original "$5 of house money withdrawable per qualifying user" risk
-  is closed.
+- ~~**Confirm `FINALS_PROMO_CENTS=0`**~~ — **DONE (2026-05-30).** Code default is **0**, and the
+  Firestore **`config/serverFlags.promoCents`** (the real source of truth since `061fd5a`: Firestore
+  → env → default) is **0/absent** — confirmed at pre-flight. (`functions/.env.production` also sets
+  `FINALS_PROMO_CENTS=0`, but it is **not** auto-loaded by Firebase dotenv, so it's belt-only — the
+  Firestore doc + code default govern.) The promo is safe even if re-enabled: it credits the gated
+  `bonus` bucket and bucket-aware withdrawal won't release it before the engagement gate. The
+  original "$5 of house money withdrawable per qualifying user" risk is closed.
 - **Consider `SCREEN_PROTECTION_ENABLED=true`** (`src/hooks/useScreenProtection.ts:33`, currently
   `false` as a demo workaround) for the 6 sensitive payment screens (deposit/withdraw/bank-setup/
   verify-identity/stripe-onboarding/profile). It blanks during AirPlay/mirroring — verify it won't

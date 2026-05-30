@@ -32,12 +32,15 @@ Hardened rules in `firebase/firestore.rules`. Key collections (default-deny for 
 - `wallets` — owner **read**; client may **`create` a zero-balance wallet only**
   (`balance == 0 && pendingBalance == 0`); all balance mutations are **admin-SDK only**. So
   "edit the client to add money" is an operator/insider threat, not a user threat.
-- `sessions` — owner read; client `update` restricted to `['status','completedAt','updatedAt']`;
-  financial fields immutable.
+- `sessions` — owner read; client `update` restricted to
+  `['status','completedAt','updatedAt','violationCount']`; financial fields (stakeAmount,
+  potentialPayout, endsAt, cadence) immutable; create is server-only (`createSoloSession`).
 - `userFollows` — `allow write: if false`; follow/unfollow go through `followUserFn`/`unfollowUserFn` CFs.
-- Server-managed / admin-only: `transactions`, `groupSessions`, `groupInvites`, `revenue`,
-  `rateLimits`, `walletAudits`, `userMerges`, `migrations`, `deletions`, `config/featureFlags`,
-  `analytics_events`, `metrics`.
+- Server-managed **writes** (admin-SDK only; reads vary): fully sealed (no client read or
+  write) — `revenue`, `rateLimits`, `walletAudits`, `userMerges`, `migrations`, `deletions`,
+  `config/serverFlags`; owner/participant-read, write-denied — `transactions`, `groupSessions`,
+  `groupInvites`; **public-read**, write-denied — `config/featureFlags`, `metrics`;
+  `analytics_events` is shape-locked client-`create` only (no read).
 
 **Deploy**: `firebase deploy --only firestore:rules`
 

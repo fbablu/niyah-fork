@@ -18,7 +18,7 @@ back. Quit early → forfeit it. The financial consequence is what willpower alo
 
 ### Prerequisites
 
-- **Node.js** v18+
+- **Node.js** v20+ (Expo SDK 54 + CI floor; Cloud Functions run on Node 22)
 - **pnpm** (`npm install -g pnpm`)
 - **Xcode** (iOS) -- install from Mac App Store, then `xcode-select --install`
 - **Android SDK** (Android) -- via [Android Studio](https://developer.android.com/studio)
@@ -107,7 +107,7 @@ The Mac owner builds the app once and shares an install link. Teammates install 
 Install WSL2: `wsl --install` from PowerShell, then restart. Inside WSL:
 
 ```bash
-# Install Node.js 18+ and pnpm, then:
+# Install Node.js 20+ and pnpm, then:
 git clone <repo-url>
 cd niyah
 pnpm install
@@ -255,6 +255,6 @@ Detailed docs are in the [`docs/`](docs/) directory:
 - [Native Modules](docs/native-modules.md) -- Firebase, Screen Time, config plugins
 - [Security](docs/security.md) -- SSL pinning, key management, Firestore rules
 - [Roadmap](docs/roadmap.md) -- current status, phases, blockers
-- [Payments](docs/payments.md) -- Stripe, payout formulas, settlement models
+- [Payments](docs/payments.md) -- Stripe, wallet ledger, de-pooled solo/group payout
 - [Legal](docs/legal.md) -- commitment contract framing, App Store strategy
 - [UI & Animation](docs/ui-animation.md) -- animation libraries, onboarding plans

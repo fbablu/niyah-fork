@@ -139,7 +139,7 @@ pnpm doctor            # prints state of USB, DDI, network, pods; recommends com
 | `handleSessionComplete`    | Process session completion + payout           |
 | `handleSessionForfeit`     | Process session surrender + forfeit           |
 | `requestWithdrawal`        | Initiate Stripe payout                        |
-| `distributeGroupPayouts`   | Calculate + distribute group session pool     |
+| `distributeGroupPayouts`   | Calculate + return each completer's own stake (de-pooled) |
 | `createGroupSession`       | Create group session + send invites           |
 | `respondToGroupInvite`     | Accept/decline group invite                   |
 | `markOnlineForSession`     | Signal ready for group session                |

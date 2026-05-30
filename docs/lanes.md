@@ -1,5 +1,7 @@
 # Parallel Work Lanes — App Store Submission Sprint (2026-05-29)
 
+> **Status (2026-05-30): sprint landed — `wallet-ledger` is fully merged into `main` (0 commits ahead; de-pooled money path live on `main`). `docs/STATUS.md` exists. This doc is now a historical snapshot kept for reference; the kickoff prompts and counts below are the instructions as given at kickoff, not current truth.**
+>
 > Temporary coordination doc for running multiple Claude Code sessions in parallel without collisions.
 > Lane D may fold/archive this once the docs are consolidated.
 >

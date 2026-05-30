@@ -60,7 +60,8 @@ One-tap app blocking without money. User picks a duration (25 min / 1 hr / 2 hr 
 **Status**: Full stack complete — ~10 Cloud Functions, real-time Firestore listeners, live Stripe, custom shield blocking.
 
 > A "duo" session is just a 2-person group session routed through `groupSessionStore`. The legacy
-> `partnerStore` "loser pays winner via Venmo" flow is **removed** (dead code) — see [legal.md](./legal.md).
+> "loser pays winner via Venmo" settlement is **removed** — `partnerStore` itself stays (referrals,
+> partner connections, invites), but no longer carries any peer-payment path — see [legal.md](./legal.md).
 
 ### Group Equity (Cap-Target Payout) — superseded design
 

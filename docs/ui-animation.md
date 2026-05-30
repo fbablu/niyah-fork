@@ -18,8 +18,8 @@
 | ------------------------------ | ------- | -------------------------------------------- |
 | `react-native-reanimated`      | 4.1.7   | Installed, used in some onboarding scenes    |
 | `react-native-gesture-handler` | 2.28.0  | Installed, used internally by expo-router    |
-| `expo-linear-gradient`         | 15.0.8  | Installed, not used in any component         |
-| `react-native-svg`             | 15.15.3 | In use (Timer, onboarding SVG blobs)         |
+| `expo-linear-gradient`         | 15.0.8  | In use (blob avatars, backgrounds, profile)  |
+| `react-native-svg`             | 15.15.5 | In use (Timer, onboarding SVG blobs)         |
 | `expo-haptics`                 | 15.0.8  | In use (Button, Card, NumPad press feedback) |
 
 ## Components Using Legacy Animated API
@@ -30,19 +30,17 @@ These should be migrated to Reanimated for better performance:
 | ------------------------------ | ------------------------------------ | ----------------------------------------------- |
 | `Button.tsx`                   | `Animated.spring` scale 1->0.97      | `useSharedValue` + `Gesture.Tap` + `withSpring` |
 | `Card.tsx`                     | `Animated.timing` fade + press scale | `withTiming` entrance + `withSpring` press      |
-| `(tabs)/_layout.tsx` tab icons | `Animated.sequence` bounce           | `withSequence(withTiming(), withSpring())`      |
 | `Confetti.tsx`                 | `Animated` particle system           | Reanimated shared values                        |
 
 ## Onboarding
 
 ### Current State
 
-8 scene components in `src/components/onboarding/`:
+4 scene components in `src/components/onboarding/` (exported from `index.ts`):
 
 - `BlobsScene.tsx` -- SVG blob characters
-- `ContinuousScene.tsx`, `GardenScene.tsx`, `GrowthScene.tsx`
+- `ContinuousScene.tsx`
 - `Onboarding2Scene.tsx`, `Onboarding3Scene.tsx`
-- `ShieldScene.tsx`, `StakeScene.tsx`
 
 ### Architecture Goal
 
@@ -86,6 +84,6 @@ Replace flat SVG blob characters with photorealistic 3D gemstones via SceneKit:
 | react-native-gesture-handler | Gesture tracking            | Free            | Used by router              |
 | react-native-svg             | SVG illustrations           | Free            | In use                      |
 | expo-haptics                 | Tactile feedback            | Free            | In use                      |
-| Jest + jest-expo             | Testing                     | Free            | ~796 client tests passing   |
+| Jest + jest-expo             | Testing                     | Free            | ~742 client tests passing   |
 | ESLint 9 + Prettier          | Linting + formatting        | Free            | Configured, 0 errors        |
-| Stripe                       | Payments                    | Per-transaction | Integrated (test mode)      |
+| Stripe                       | Payments                    | Per-transaction | Integrated (live keys)      |
