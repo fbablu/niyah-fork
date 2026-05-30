@@ -1,16 +1,13 @@
 import { create } from "zustand";
-import { Partner, DuoSession, CadenceType } from "../types";
-import { CADENCES, DEMO_MODE, USE_SHORT_TIMERS } from "../constants/config";
+import { Partner } from "../types";
+import { DEMO_MODE } from "../constants/config";
 import { useAuthStore } from "./authStore";
-import { useWalletStore } from "./walletStore";
 import { fetchUserProfile, awardReferralToUser } from "../config/firebase";
 import { generateId } from "../utils/id";
 
 interface PartnerState {
   currentPartner: Partner | null;
   partners: Partner[];
-  activeDuoSession: DuoSession | null;
-  duoSessionHistory: DuoSession[];
   pendingInvites: PartnerInvite[];
 
   addPartner: (
@@ -21,13 +18,6 @@ interface PartnerState {
   ) => void;
   removePartner: (oderId: string) => void;
   selectPartner: (oderId: string) => void;
-  startDuoSession: (cadence: CadenceType) => void;
-  completeDuoSession: (
-    userCompleted: boolean,
-    partnerCompleted: boolean,
-  ) => void;
-  markSettlementPaid: (sessionId: string) => void;
-  markSettlementReceived: (sessionId: string) => void;
   sendInvite: (email: string, name: string) => void;
   acceptInvite: (inviteId: string) => void;
   // Called on the new user's device after they authenticate via a referral link.
@@ -69,8 +59,6 @@ const DEMO_PARTNER: Partner = {
 export const usePartnerStore = create<PartnerState>((set, get) => ({
   currentPartner: null,
   partners: DEMO_MODE ? [DEMO_PARTNER] : [],
-  activeDuoSession: null,
-  duoSessionHistory: [],
   pendingInvites: [],
 
   addPartner: (partnerData) => {
@@ -99,165 +87,6 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
     const { partners } = get();
     const partner = partners.find((p) => p.oderId === oderId);
     set({ currentPartner: partner || null });
-  },
-
-  startDuoSession: (cadence: CadenceType) => {
-    const { currentPartner, partners } = get();
-    if (!currentPartner) return;
-
-    const config = CADENCES[cadence];
-    const duration = USE_SHORT_TIMERS ? config.demoDuration : config.duration;
-
-    const duoSession: DuoSession = {
-      id: generateId(),
-      cadence,
-      stakeAmount: config.stake,
-      startedAt: new Date(),
-      endsAt: new Date(Date.now() + duration),
-      status: "active",
-      partnerId: currentPartner.oderId,
-      partnerName: currentPartner.name,
-    };
-
-    useWalletStore.getState().deductStake(config.stake, duoSession.id);
-
-    const updatedPartners = partners.map((p) =>
-      p.oderId === currentPartner.oderId ? { ...p, isActive: true } : p,
-    );
-
-    set({
-      activeDuoSession: duoSession,
-      partners: updatedPartners,
-      currentPartner: { ...currentPartner, isActive: true },
-    });
-  },
-
-  completeDuoSession: (userCompleted: boolean, partnerCompleted: boolean) => {
-    const { activeDuoSession, duoSessionHistory, partners, currentPartner } =
-      get();
-    if (!activeDuoSession) return;
-
-    let settlementStatus: DuoSession["settlementStatus"] = undefined;
-    let amountOwed: number;
-
-    if (userCompleted && !partnerCompleted) {
-      amountOwed = -activeDuoSession.stakeAmount; // negative = partner owes user
-      settlementStatus = "pending";
-    } else if (!userCompleted && partnerCompleted) {
-      amountOwed = activeDuoSession.stakeAmount; // positive = user owes partner
-      settlementStatus = "pending";
-    } else if (userCompleted && partnerCompleted) {
-      amountOwed = 0;
-      useWalletStore
-        .getState()
-        .creditPayout(activeDuoSession.stakeAmount, activeDuoSession.id);
-    } else {
-      // Both failed — stakes go to the house/charity
-      amountOwed = 0;
-      useWalletStore
-        .getState()
-        .recordForfeit(activeDuoSession.stakeAmount, activeDuoSession.id);
-    }
-
-    const completedSession: DuoSession = {
-      ...activeDuoSession,
-      status: userCompleted ? "completed" : "surrendered",
-      completedAt: new Date(),
-      userCompleted,
-      partnerCompleted,
-      settlementStatus,
-      amountOwed,
-    };
-
-    const updatedPartners = partners.map((p) =>
-      p.oderId === activeDuoSession.partnerId
-        ? {
-            ...p,
-            isActive: false,
-            totalSessionsTogether: p.totalSessionsTogether + 1,
-          }
-        : p,
-    );
-
-    const authStore = useAuthStore.getState();
-    if (userCompleted) {
-      const newStreak = (authStore.user?.currentStreak || 0) + 1;
-      authStore.updateUser({
-        currentStreak: newStreak,
-        longestStreak: Math.max(newStreak, authStore.user?.longestStreak || 0),
-        totalSessions: (authStore.user?.totalSessions || 0) + 1,
-        completedSessions: (authStore.user?.completedSessions || 0) + 1,
-      });
-    } else {
-      authStore.updateUser({
-        currentStreak: 0,
-        totalSessions: (authStore.user?.totalSessions || 0) + 1,
-      });
-    }
-
-    set({
-      activeDuoSession: null,
-      duoSessionHistory: [completedSession, ...duoSessionHistory],
-      partners: updatedPartners,
-      currentPartner: currentPartner
-        ? { ...currentPartner, isActive: false }
-        : null,
-    });
-
-    return completedSession;
-  },
-
-  markSettlementPaid: (sessionId: string) => {
-    const { duoSessionHistory } = get();
-
-    const updatedHistory = duoSessionHistory.map((s) =>
-      s.id === sessionId ? { ...s, settlementStatus: "paid" as const } : s,
-    );
-
-    const session = duoSessionHistory.find((s) => s.id === sessionId);
-    if (session && session.amountOwed && session.amountOwed > 0) {
-      const authStore = useAuthStore.getState();
-      const currentRep = authStore.user?.reputation;
-      if (currentRep) {
-        authStore.updateReputation({
-          paymentsCompleted: currentRep.paymentsCompleted + 1,
-          totalOwedPaid: currentRep.totalOwedPaid + session.amountOwed,
-        });
-      }
-
-      useWalletStore
-        .getState()
-        .recordSettlement(
-          -session.amountOwed,
-          sessionId,
-          session.partnerId,
-          `Paid ${session.partnerName}`,
-        );
-    }
-
-    set({ duoSessionHistory: updatedHistory });
-  },
-
-  markSettlementReceived: (sessionId: string) => {
-    const { duoSessionHistory } = get();
-
-    const updatedHistory = duoSessionHistory.map((s) =>
-      s.id === sessionId ? { ...s, settlementStatus: "received" as const } : s,
-    );
-
-    const session = duoSessionHistory.find((s) => s.id === sessionId);
-    if (session && session.amountOwed && session.amountOwed < 0) {
-      useWalletStore
-        .getState()
-        .recordSettlement(
-          Math.abs(session.amountOwed),
-          sessionId,
-          session.partnerId,
-          `Received from ${session.partnerName}`,
-        );
-    }
-
-    set({ duoSessionHistory: updatedHistory });
   },
 
   sendInvite: (email: string, name: string) => {
@@ -360,8 +189,6 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
     set({
       currentPartner: null,
       partners: [],
-      activeDuoSession: null,
-      duoSessionHistory: [],
       pendingInvites: [],
     });
   },
