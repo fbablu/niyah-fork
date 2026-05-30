@@ -104,7 +104,7 @@ client-readable, unlike `config/featureFlags`). Functions resolve each flag **Fi
 - `billingKillSwitchEnabled` (bool) — arms the budget kill-switch. **Critical:** the env/code
   default is `false` (disarmed), so a lost env file would silently un-protect; set this in the doc
   to keep it durably armed.
-- `finalsPromoCents` (number) — promo grant; default `0` (OFF, safe).
+- `promoCents` (number) — promo grant; default `0` (OFF, safe).
 
 Set/toggle via Firebase Console → Firestore → `config/serverFlags`. `FIRST_SURRENDER_FORGIVENESS_CENTS`
 is still env-only (safe-on-loss default `500`); migrate it the same way if console-toggling is wanted.

@@ -6564,13 +6564,15 @@ async function getServerConfig(): Promise<Record<string, unknown>> {
   }
 }
 
-// Finals promo grant in cents. Firestore `finalsPromoCents` → env
-// FINALS_PROMO_CENTS → 0 (OFF). Default OFF so a missing config AND missing env
-// can't silently ship withdrawable house money. When enabled the credit lands in
-// the `bonus` bucket (see maybeAwardFinalsPromo), which the bucket-aware
-// withdrawal gate only releases after the engagement gate.
-async function resolveFinalsPromoCents(): Promise<number> {
-  const fromDoc = (await getServerConfig()).finalsPromoCents;
+// Promo grant in cents — a general signup/engagement promo, not exclusively
+// "finals". Firestore `promoCents` → env FINALS_PROMO_CENTS → 0 (OFF). Default
+// OFF so a missing config AND missing env can't silently ship withdrawable house
+// money. When enabled the credit lands in the `bonus` bucket (see
+// maybeAwardFinalsPromo), which the bucket-aware withdrawal gate only releases
+// after the engagement gate. (The env var + maybeAwardFinalsPromo keep their
+// legacy names — they're wired / persisted; only this fresh config key is clean.)
+async function resolvePromoCents(): Promise<number> {
+  const fromDoc = (await getServerConfig()).promoCents;
   if (typeof fromDoc === "number" && Number.isFinite(fromDoc) && fromDoc >= 0) {
     return Math.floor(fromDoc);
   }
@@ -6601,7 +6603,7 @@ const FIRST_SURRENDER_FORGIVENESS_CENTS: number = (() => {
 
 async function maybeAwardFinalsPromo(uid: string): Promise<void> {
   if (!isValidFirebaseUid(uid)) return;
-  const promoCents = await resolveFinalsPromoCents();
+  const promoCents = await resolvePromoCents();
   if (promoCents <= 0) return;
 
   const userRef = db.collection("users").doc(uid);
