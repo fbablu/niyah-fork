@@ -47,9 +47,9 @@ export function Hero() {
             </h1>
 
             <p className="mb-8 text-lg leading-relaxed text-muted-foreground md:text-xl">
-              Focus sessions with real financial stakes. Stake money with
-              friends, lock your distracting apps, and the people who actually
-              stay focused earn more back.
+              Focus sessions with real money on the line. Stake your own cash,
+              lock your distracting apps, and earn it back by finishing. Flake
+              and you lose it.
             </p>
 
             <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
