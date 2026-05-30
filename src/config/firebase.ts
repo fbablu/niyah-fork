@@ -279,19 +279,13 @@ export const saveUserProfile = async (
 ): Promise<void> => {
   const serverTs = serverTimestamp();
 
-  // Pull canonical contact + display fields directly from auth so the
-  // Firestore doc never disagrees with Firebase Auth (the source of truth
-  // for verified phone/email). Anything passed in via `data` is only used
-  // as a fallback for providers that don't surface that field.
-  const authUser = authInstance.currentUser;
-  const canonicalEmail = authUser?.email || data.email || "";
-  const canonicalPhone = authUser?.phoneNumber || data.phone || undefined;
-
+  // email/phone are PII and are NOT stored on the world-readable users/{uid}
+  // doc. The contact index used for friend discovery lives in the owner-only
+  // userPrivate/{uid}, written server-side from auth-verified values by the
+  // acceptLegalTerms Cloud Function (which every user calls during onboarding).
   const payload: Record<string, unknown> = {
     firstName: data.firstName,
     lastName: data.lastName,
-    email: canonicalEmail,
-    phone: canonicalPhone,
     profileImage: data.profileImage || undefined,
     blobAvatar: data.blobAvatar,
     authProvider: data.authProvider,

@@ -94,6 +94,12 @@ service cloud.firestore {
              'linkedBank', 'plaidAccessToken', 'plaidItemId', 'plaidAccountId',
              'firstSurrenderForgiven', 'firstSurrenderForgivenAt',
              'finalsPromoAwarded', 'finalsPromoAwardedAt',
+             // phone/email are PII — never stored on the public users doc. The
+             // owner-only userPrivate contact index (written by acceptLegalTerms
+             // from auth-verified values) is the only place they live now. This
+             // also blocks a client from seeding email=victim@x on create to be
+             // impersonated in contact discovery.
+             'phone', 'email',
              'completedSessions', 'totalSessions',
              'currentStreak', 'longestStreak', 'totalEarnings',
              'referredByUid', 'referralAwardedAt'

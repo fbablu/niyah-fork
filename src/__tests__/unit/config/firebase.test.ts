@@ -568,8 +568,6 @@ describe("firebase config layer", () => {
         expect.objectContaining({
           firstName: "John",
           lastName: "Doe",
-          email: "john@example.com",
-          phone: "+1234567890",
           profileImage: "https://img.url/pic.jpg",
           authProvider: "google",
           name: "John Doe",
@@ -594,6 +592,14 @@ describe("firebase config layer", () => {
         }),
         { merge: true },
       );
+
+      // Security: email/phone are PII and must NEVER be written to the
+      // world-readable users/{uid} doc — they live in the owner-only
+      // userPrivate contact index (written server-side by acceptLegalTerms).
+      // Pin the absence so a regression can't silently re-leak them.
+      const writtenUserDoc = mockSetDoc.mock.calls[0][1];
+      expect(writtenUserDoc).not.toHaveProperty("email");
+      expect(writtenUserDoc).not.toHaveProperty("phone");
 
       // doc() should be called for users and wallets collections
       expect(mockDoc).toHaveBeenCalledWith(

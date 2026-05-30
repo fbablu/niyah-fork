@@ -336,7 +336,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             isLoading: false,
           });
 
-          setSentryUser({ id: user.id, email: user.email });
+          // PII hygiene: send only the opaque uid to Sentry, not email.
+          setSentryUser({ id: user.id });
           logEvent("auth_complete", {
             provider: user.authProvider ?? "unknown",
             profileComplete,

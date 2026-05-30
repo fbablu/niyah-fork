@@ -1098,7 +1098,9 @@ export const createPaymentIntent = onRequest(
       if (!customerId) {
         const customer = await stripe.customers.create({
           metadata: { firebaseUid: uid },
-          email: (userData.email as string | undefined) ?? undefined,
+          // email/phone now live in userPrivate (PII fix) — read from the merged
+          // view, populated by acceptLegalTerms before any money flow.
+          email: (userView.merged.email as string | undefined) ?? undefined,
           name: (userData.name as string | undefined) ?? undefined,
         });
         customerId = customer.id;
@@ -1124,6 +1126,77 @@ export const createPaymentIntent = onRequest(
     }
   },
 );
+
+// ─── creditCardDeposit (shared, idempotent) ─────────────────────────────────
+/**
+ * Idempotently credit a succeeded card deposit to a user's wallet. Uses a
+ * deterministic transaction doc id (`deposit_<paymentIntentId>`) checked INSIDE
+ * the Firestore transaction, so the client callable (verifyAndCreditDeposit)
+ * and the webhook backup handler can race on the same PaymentIntent without
+ * double-crediting. Keeps `depositedBalance` (the withdrawable principal bucket)
+ * in lockstep with `balance` on both paths.
+ *
+ * Returns the wallet balance after crediting, or the existing balance if this
+ * PaymentIntent was already credited.
+ */
+async function creditCardDeposit(
+  uid: string,
+  paymentIntentId: string,
+  amount: number,
+): Promise<number> {
+  const walletRef = db.collection("wallets").doc(uid);
+  const txnRef = db
+    .collection("transactions")
+    .doc(`deposit_${paymentIntentId}`);
+
+  return db.runTransaction(async (txn) => {
+    // All reads before any writes (Firestore transaction requirement).
+    const txnSnap = await txn.get(txnRef);
+    const walletSnap = await txn.get(walletRef);
+    const current: number = walletSnap.data()?.balance ?? 0;
+
+    // The deterministic doc id makes the dedup atomic with the credit: a
+    // concurrent second writer (client + webhook, or a double-tap retry) either
+    // sees this doc here or collides creating it, so exactly one credit lands
+    // per PaymentIntent. This closes the prior TOCTOU race where the dedup
+    // query ran outside the transaction.
+    if (txnSnap.exists) return current;
+
+    const currentDeposited: number = walletSnap.data()?.depositedBalance ?? 0;
+    const updated = current + amount;
+
+    if (walletSnap.exists) {
+      txn.update(walletRef, {
+        balance: updated,
+        // Card deposits are always-withdrawable principal (refund-to-source).
+        depositedBalance: currentDeposited + amount,
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      txn.set(
+        walletRef,
+        {
+          balance: updated,
+          pendingBalance: 0,
+          depositedBalance: currentDeposited + amount,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+
+    txn.set(txnRef, {
+      userId: uid,
+      type: "deposit",
+      amount,
+      description: "Deposit via card",
+      paymentIntentId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return updated;
+  });
+}
 
 // ─── verifyAndCreditDeposit ─────────────────────────────────────────────────
 /**
@@ -1230,47 +1303,9 @@ export const verifyAndCreditDeposit = onRequest(
 
       const amount = pi.amount;
 
-      // Credit balance in wallets collection (protected from client writes)
-      const walletRef = db.collection("wallets").doc(uid);
-      const txnRef = db.collection("transactions").doc();
-
-      const newBalance = await db.runTransaction(async (txn) => {
-        const walletSnap = await txn.get(walletRef);
-        const current: number = walletSnap.data()?.balance ?? 0;
-        const currentDeposited: number =
-          walletSnap.data()?.depositedBalance ?? 0;
-        const updated = current + amount;
-
-        if (walletSnap.exists) {
-          txn.update(walletRef, {
-            balance: updated,
-            // Card deposits are always-withdrawable principal (refund-to-source).
-            depositedBalance: currentDeposited + amount,
-            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        } else {
-          txn.set(
-            walletRef,
-            {
-              balance: updated,
-              pendingBalance: 0,
-              depositedBalance: currentDeposited + amount,
-              lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true },
-          );
-        }
-
-        txn.set(txnRef, {
-          userId: uid,
-          type: "deposit",
-          amount,
-          description: "Deposit via card",
-          paymentIntentId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        return updated;
-      });
+      // Credit via the shared idempotent helper — race-safe against the webhook
+      // backup handler and keeps depositedBalance in lockstep with balance.
+      const newBalance = await creditCardDeposit(uid, paymentIntentId, amount);
 
       res.json({ newBalance });
     } catch (err) {
@@ -1341,8 +1376,8 @@ export const createConnectAccount = onRequest(
       const kycData = kyc?.ok ? kyc.data : null;
 
       const validEmail =
-        typeof userData.email === "string" && userData.email.includes("@")
-          ? userData.email
+        typeof merged.email === "string" && merged.email.includes("@")
+          ? merged.email
           : undefined;
 
       // Client-provided legal names win over the profile display name, which
@@ -1365,8 +1400,8 @@ export const createConnectAccount = onRequest(
       const firstName = kycData?.legalFirstName || fallbackFirst;
       const lastName = kycData?.legalLastName || fallbackLast;
       const phone =
-        typeof userData.phone === "string" && userData.phone
-          ? userData.phone
+        typeof merged.phoneNumber === "string" && merged.phoneNumber
+          ? merged.phoneNumber
           : undefined;
 
       const stripe = getStripe();
@@ -2068,9 +2103,9 @@ export const linkBankAccount = onRequest(
       try {
         if (!stripeAccountId) {
           const validEmail =
-            typeof userData.email === "string" &&
-            (userData.email as string).includes("@")
-              ? (userData.email as string)
+            typeof merged.email === "string" &&
+            (merged.email as string).includes("@")
+              ? (merged.email as string)
               : undefined;
 
           const account = await stripe.accounts.create({
@@ -2496,9 +2531,9 @@ export const replaceBankAccount = onRequest(
       let stripeAccountId = oldStripeAccountId;
       if (!stripeAccountId) {
         const validEmail =
-          typeof userData.email === "string" &&
-          (userData.email as string).includes("@")
-            ? (userData.email as string)
+          typeof merged.email === "string" &&
+          (merged.email as string).includes("@")
+            ? (merged.email as string)
             : undefined;
         const account = await stripe.accounts.create({
           type: "express",
@@ -4283,21 +4318,11 @@ export const stripeWebhook = onRequest(
                 .get();
 
               if (existingTxn.empty) {
-                const walletRef = db.collection("wallets").doc(uid);
-                const txnRef = db.collection("transactions").doc();
-                await db.runTransaction(async (txn) => {
-                  const snap = await txn.get(walletRef);
-                  const current: number = snap.data()?.balance ?? 0;
-                  txn.update(walletRef, { balance: current + pi.amount });
-                  txn.set(txnRef, {
-                    userId: uid,
-                    type: "deposit",
-                    amount: pi.amount,
-                    description: "Deposit via card",
-                    paymentIntentId: pi.id,
-                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                  });
-                });
+                // Shared idempotent helper: race-safe with the client callable
+                // (deterministic deposit_<pi.id> doc id) AND keeps
+                // depositedBalance in lockstep — the prior inline path updated
+                // only `balance`, silently breaking the bucket invariant.
+                await creditCardDeposit(uid, pi.id, pi.amount);
               }
             }
           }
@@ -4645,7 +4670,39 @@ export const acceptLegalTerms = onRequest(
         // Continue on it), so record the attestation alongside. No DOB stored —
         // Stripe KYC verifies actual age at money-out.
         ageAttested18: true,
+        // PII leak fix: email/phone are no longer stored on the world-readable
+        // users/{uid} doc. Strip any legacy values here — admin SDK bypasses the
+        // client-write denylist. The auth-verified copies go to userPrivate
+        // below. Runs for every user at acceptance + all users on the 2.0.0
+        // re-prompt, so this also migrates existing docs off the public leak.
+        email: admin.firestore.FieldValue.delete(),
+        phone: admin.firestore.FieldValue.delete(),
       });
+
+      // Maintain the owner-only contact index (userPrivate/{uid}) that
+      // findContactsOnNiyah matches against — written from auth-verified
+      // contacts so a client can't forge another user's email/phone to be
+      // discovered/impersonated in friend search. Best-effort; a failure here
+      // only means the user isn't yet discoverable by contacts, never a money
+      // or auth issue.
+      try {
+        const authRec = await admin.auth().getUser(uid);
+        const contactIndex: Record<string, unknown> = {};
+        if (authRec.email && authRec.emailVerified) {
+          contactIndex.email = authRec.email.toLowerCase();
+        }
+        if (authRec.phoneNumber) {
+          contactIndex.phoneNumber = authRec.phoneNumber;
+        }
+        if (Object.keys(contactIndex).length > 0) {
+          await db
+            .collection("userPrivate")
+            .doc(uid)
+            .set(contactIndex, { merge: true });
+        }
+      } catch (err) {
+        console.warn("contact-index sync (acceptLegalTerms) failed:", err);
+      }
 
       res.json({ success: true });
     } catch (err) {
@@ -4726,40 +4783,53 @@ export const findContactsOnNiyah = onRequest(
         reputation: { score: number; level: string };
       }[] = [];
 
-      // Firestore `in` queries are limited to 30 items, so we batch
-      const batchQuery = async (field: string, values: string[]) => {
+      // Match against the owner-only userPrivate contact index. email/phone are
+      // no longer on the world-readable users/{uid} doc (PII leak fix), so we
+      // resolve uids here, then hydrate public display fields below.
+      // Firestore `in` queries are limited to 30 items, so we batch.
+      const matchUidsByField = async (field: string, values: string[]) => {
         for (let i = 0; i < values.length; i += 30) {
           const batch = values.slice(i, i + 30);
           const snap = await db
-            .collection("users")
+            .collection("userPrivate")
             .where(field, "in", batch)
             .get();
           for (const doc of snap.docs) {
-            if (doc.id !== uid && !matchedUids.has(doc.id)) {
-              matchedUids.add(doc.id);
-              const d = doc.data();
-              matches.push({
-                uid: doc.id,
-                name: d.name ?? "Unknown",
-                reputation: {
-                  score: d.reputation?.score ?? 50,
-                  level: d.reputation?.level ?? "sapling",
-                },
-              });
-            }
+            if (doc.id !== uid) matchedUids.add(doc.id);
           }
         }
       };
 
-      // Query by phone number and email in parallel
+      // Match by phone number and email in parallel
       await Promise.all([
         cleanPhones.length > 0
-          ? batchQuery("phoneNumber", cleanPhones)
+          ? matchUidsByField("phoneNumber", cleanPhones)
           : Promise.resolve(),
         cleanEmails.length > 0
-          ? batchQuery("email", cleanEmails)
+          ? matchUidsByField("email", cleanEmails)
           : Promise.resolve(),
       ]);
+
+      // Hydrate public display fields (name/reputation) from users/{uid}.
+      const uids = [...matchedUids];
+      for (let i = 0; i < uids.length; i += 30) {
+        const refs = uids
+          .slice(i, i + 30)
+          .map((id) => db.collection("users").doc(id));
+        const snaps = await db.getAll(...refs);
+        for (const doc of snaps) {
+          const d = doc.data();
+          if (!d) continue;
+          matches.push({
+            uid: doc.id,
+            name: d.name ?? "Unknown",
+            reputation: {
+              score: d.reputation?.score ?? 50,
+              level: d.reputation?.level ?? "sapling",
+            },
+          });
+        }
+      }
 
       res.json({ matches });
     } catch (err) {
@@ -5032,7 +5102,7 @@ export const createGroupSession = onRequest(
         inviteeIds,
         {
           title: `${proposerName} wants you to lock in 🔒`,
-          body: `Stake $${(stakePerParticipant / 100).toFixed(0)} · winner takes the pool. Tap to join.`,
+          body: `Stake $${(stakePerParticipant / 100).toFixed(0)} · finish your focus goal to get your stake back. Tap to join.`,
         },
         { type: "group_invite", sessionId },
       );
@@ -6828,9 +6898,12 @@ export const mergeDuplicateUsers = onRequest(
 
 // ─── migrateSensitiveFieldsToPrivate (admin-only) ──────────────────────────
 /**
- * One-shot H1 migration. Walks `users/{uid}`, copies SENSITIVE_USER_FIELDS
- * to `userPrivate/{uid}`, moves `fcmTokens` to `userPushTokens/{uid}`, then
- * field-deletes the keys from the public user doc.
+ * One-shot migration. Walks `users/{uid}`, copies SENSITIVE_USER_FIELDS
+ * to `userPrivate/{uid}`, moves `fcmTokens` to `userPushTokens/{uid}`, moves
+ * email/phone into the owner-only userPrivate contact index (email lowercased,
+ * phone stored as `phoneNumber`), then field-deletes those keys from the public
+ * user doc. Closes the email/phone PII leak for existing/inactive docs that
+ * won't re-trigger acceptLegalTerms.
  *
  * Idempotent: re-running after success is a no-op because the source fields
  * are already gone. Safe to invoke on the long tail in batches via repeated
@@ -6894,6 +6967,20 @@ export const migrateSensitiveFieldsToPrivate = onRequest(
             privateFields[key] = data[key];
             clearOnUser[key] = admin.firestore.FieldValue.delete();
           }
+        }
+
+        // PII leak fix: move email/phone off the public users doc into the
+        // owner-only userPrivate contact index. `phone` is stored as
+        // `phoneNumber` to match findContactsOnNiyah's query + the
+        // acceptLegalTerms writer; email is lowercased for case-insensitive
+        // matching. Idempotent — once deleted from users, re-runs skip them.
+        if (typeof data.email === "string" && data.email) {
+          privateFields.email = data.email.toLowerCase();
+          clearOnUser.email = admin.firestore.FieldValue.delete();
+        }
+        if (typeof data.phone === "string" && data.phone) {
+          privateFields.phoneNumber = data.phone;
+          clearOnUser.phone = admin.firestore.FieldValue.delete();
         }
 
         const fcmTokens = Array.isArray(data.fcmTokens)
