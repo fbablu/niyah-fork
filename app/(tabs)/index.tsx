@@ -887,9 +887,6 @@ function DashboardScreenInner() {
                 const sessionPartner = session.participants.find(
                   (p) => p.userId !== user?.id,
                 );
-                const inbound = session.transfers.find(
-                  (t) => t.toUserId === user?.id && t.status !== "none",
-                );
                 const didComplete = me?.completed ?? false;
                 const isSolo = session.participants.length <= 1;
                 return (
@@ -913,11 +910,9 @@ function DashboardScreenInner() {
                         {didComplete ? (
                           <>
                             <Text style={styles.activityEarned}>
-                              {inbound
-                                ? `Earned ${formatMoney(inbound.amount)}`
-                                : isSolo
-                                  ? `${formatMoney(me?.stakeAmount ?? session.stakePerParticipant)} returned`
-                                  : "Stake kept"}
+                              {isSolo
+                                ? `${formatMoney(me?.stakeAmount ?? session.stakePerParticipant)} returned`
+                                : "Stake kept"}
                             </Text>
                             <View style={styles.statusBadge}>
                               <Text style={styles.statusSuccess}>

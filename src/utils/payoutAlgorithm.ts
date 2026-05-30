@@ -12,7 +12,8 @@ export interface ParticipantPayout {
   payout: number; // in cents
 }
 
-// Intermediate type used inside the store to build SessionTransfer objects.
+// Shape of a single peer transfer. Retained only as the typed return of
+// calculateTransfers, which is always [] post de-pool — no peer-to-peer money.
 export interface TransferDraft {
   fromUserId: string;
   fromUserName: string;

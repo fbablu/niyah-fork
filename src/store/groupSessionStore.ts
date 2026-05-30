@@ -7,8 +7,6 @@ import {
   GroupInvite,
   GroupInviteStatus,
   SessionParticipant,
-  SessionTransfer,
-  TransferStatus,
   CadenceType,
   UserReputation,
 } from "../types";
@@ -22,7 +20,6 @@ import { useAuthStore } from "./authStore";
 import { useWalletStore } from "./walletStore";
 import {
   calculatePayouts,
-  calculateTransfers,
   ParticipantResult,
 } from "../utils/payoutAlgorithm";
 import { generateId } from "../utils/id";
@@ -120,7 +117,6 @@ function parseGroupSessionDoc(data: Record<string, unknown>): GroupSessionDoc {
     endsAt: parseTimestamp(data.endsAt),
     completedAt: parseTimestamp(data.completedAt),
     payouts: data.payouts as Record<string, number> | undefined,
-    transfers: (data.transfers as SessionTransfer[]) ?? [],
     createdAt: parseTimestamp(data.createdAt) ?? new Date(),
     updatedAt: parseTimestamp(data.updatedAt) ?? new Date(),
     autoTimeoutAt: parseTimestamp(data.autoTimeoutAt),
@@ -270,18 +266,6 @@ interface GroupSessionState {
   reportCompletion: (sessionId: string) => Promise<void>;
   reportSurrender: (sessionId: string) => Promise<void>;
   cancelSession: (sessionId: string) => Promise<void>;
-
-  // Keep existing settlement methods (they work on local groupSessionHistory)
-  markTransferPaid: (sessionId: string, transferId: string) => void;
-  markTransferConfirmed: (sessionId: string, transferId: string) => void;
-  markTransferOverdue: (sessionId: string, transferId: string) => void;
-  markTransferDisputed: (sessionId: string, transferId: string) => void;
-
-  // Keep existing query methods
-  getSessionsWithPendingTransfers: (userId: string) => GroupSession[];
-  getPendingTransfersForUser: (
-    userId: string,
-  ) => Array<{ session: GroupSession; transfer: SessionTransfer }>;
 
   // Legacy lifecycle (keep for backward compat, wraps new Cloud Function calls)
   startGroupSession: (
@@ -470,7 +454,6 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       endsAt: new Date(Date.now() + duration),
       status: "active",
       participants: fullParticipants,
-      transfers: [],
     };
 
     // Only deduct from the current user's wallet; remote participants manage their own wallets.
@@ -562,14 +545,6 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       }),
     );
 
-    const drafts = calculateTransfers(finalParticipants, payouts);
-    const transfers: SessionTransfer[] = drafts.map((d) => ({
-      ...d,
-      id: generateId(),
-      status: (d.amount === 0 ? "none" : "pending") as TransferStatus,
-      createdAt: new Date(),
-    }));
-
     const currentUserResult = results.find((r) => r.userId === currentUserId);
     const didComplete = currentUserResult?.completed ?? false;
 
@@ -578,7 +553,6 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       status: didComplete ? "completed" : "surrendered",
       completedAt: new Date(),
       participants: finalParticipants,
-      transfers,
     };
 
     if (currentUserId) {
@@ -649,196 +623,6 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
     const { activeGroupSession } = get();
     if (!activeGroupSession) return 0;
     return Math.max(0, activeGroupSession.endsAt.getTime() - Date.now());
-  },
-
-  // ─── Settlement ─────────────────────────────────────────────────────────────
-
-  markTransferPaid: (sessionId, transferId) => {
-    const { groupSessionHistory } = get();
-    const session = groupSessionHistory.find((s) => s.id === sessionId);
-    const transfer = session?.transfers.find((t) => t.id === transferId);
-
-    if (!transfer || transfer.status !== "pending") return;
-
-    const updatedHistory = groupSessionHistory.map((s) =>
-      s.id !== sessionId
-        ? s
-        : {
-            ...s,
-            transfers: s.transfers.map((t) =>
-              t.id !== transferId
-                ? t
-                : {
-                    ...t,
-                    status: "payment_indicated" as TransferStatus,
-                    paidAt: new Date(),
-                  },
-            ),
-          },
-    );
-
-    useWalletStore
-      .getState()
-      .recordSettlement(
-        -transfer.amount,
-        sessionId,
-        transfer.toUserId,
-        `Paid ${transfer.toUserName}`,
-      );
-
-    const authStore = useAuthStore.getState();
-    const rep = authStore.user?.reputation;
-    if (rep) {
-      authStore.updateReputation({
-        paymentsCompleted: rep.paymentsCompleted + 1,
-        totalOwedPaid: rep.totalOwedPaid + transfer.amount,
-      });
-    }
-
-    set({ groupSessionHistory: updatedHistory });
-  },
-
-  markTransferConfirmed: (sessionId, transferId) => {
-    const { groupSessionHistory } = get();
-    const session = groupSessionHistory.find((s) => s.id === sessionId);
-    const transfer = session?.transfers.find((t) => t.id === transferId);
-
-    if (!transfer || transfer.status !== "payment_indicated") return;
-
-    const updatedHistory = groupSessionHistory.map((s) =>
-      s.id !== sessionId
-        ? s
-        : {
-            ...s,
-            transfers: s.transfers.map((t) =>
-              t.id !== transferId
-                ? t
-                : {
-                    ...t,
-                    status: "settled" as TransferStatus,
-                    confirmedAt: new Date(),
-                  },
-            ),
-          },
-    );
-
-    useWalletStore
-      .getState()
-      .recordSettlement(
-        transfer.amount,
-        sessionId,
-        transfer.fromUserId,
-        `Received from ${transfer.fromUserName}`,
-      );
-
-    set({ groupSessionHistory: updatedHistory });
-  },
-
-  markTransferOverdue: (sessionId, transferId) => {
-    const { groupSessionHistory } = get();
-    const session = groupSessionHistory.find((s) => s.id === sessionId);
-    const transfer = session?.transfers.find((t) => t.id === transferId);
-
-    if (!transfer || transfer.status !== "pending") return;
-
-    const updatedHistory = groupSessionHistory.map((s) =>
-      s.id !== sessionId
-        ? s
-        : {
-            ...s,
-            transfers: s.transfers.map((t) =>
-              t.id !== transferId
-                ? t
-                : { ...t, status: "overdue" as TransferStatus },
-            ),
-          },
-    );
-
-    // Penalise reputation only when the current user is the payer who missed.
-    const currentUserId = useAuthStore.getState().user?.id;
-    if (transfer.fromUserId === currentUserId) {
-      const authStore = useAuthStore.getState();
-      const rep = authStore.user?.reputation;
-      if (rep) {
-        authStore.updateReputation({
-          paymentsMissed: rep.paymentsMissed + 1,
-          totalOwedMissed: rep.totalOwedMissed + transfer.amount,
-        });
-      }
-    }
-
-    set({ groupSessionHistory: updatedHistory });
-  },
-
-  markTransferDisputed: (sessionId, transferId) => {
-    const { groupSessionHistory } = get();
-    const session = groupSessionHistory.find((s) => s.id === sessionId);
-    const transfer = session?.transfers.find((t) => t.id === transferId);
-
-    // Prevent disputing already-settled transfers
-    if (
-      !transfer ||
-      transfer.status === "settled" ||
-      transfer.status === "none"
-    )
-      return;
-
-    const updatedHistory = groupSessionHistory.map((s) =>
-      s.id !== sessionId
-        ? s
-        : {
-            ...s,
-            transfers: s.transfers.map((t) =>
-              t.id !== transferId
-                ? t
-                : { ...t, status: "disputed" as TransferStatus },
-            ),
-          },
-    );
-
-    set({ groupSessionHistory: updatedHistory });
-  },
-
-  // ─── Queries ────────────────────────────────────────────────────────────────
-
-  getSessionsWithPendingTransfers: (userId) => {
-    const { groupSessionHistory } = get();
-    const actionable: TransferStatus[] = [
-      "pending",
-      "payment_indicated",
-      "overdue",
-    ];
-    return groupSessionHistory.filter((session) =>
-      session.transfers.some(
-        (t) =>
-          (t.fromUserId === userId || t.toUserId === userId) &&
-          actionable.includes(t.status),
-      ),
-    );
-  },
-
-  getPendingTransfersForUser: (userId) => {
-    const { groupSessionHistory } = get();
-    const actionable: TransferStatus[] = [
-      "pending",
-      "payment_indicated",
-      "overdue",
-    ];
-    const result: Array<{ session: GroupSession; transfer: SessionTransfer }> =
-      [];
-
-    for (const session of groupSessionHistory) {
-      for (const transfer of session.transfers) {
-        if (
-          (transfer.fromUserId === userId || transfer.toUserId === userId) &&
-          actionable.includes(transfer.status)
-        ) {
-          result.push({ session, transfer });
-        }
-      }
-    }
-
-    return result;
   },
 
   // ─── Utilities ──────────────────────────────────────────────────────────────

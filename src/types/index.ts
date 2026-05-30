@@ -133,14 +133,10 @@ export interface Transaction {
     | "forgiveness"
     | "refund"
     | "bonus"
-    | "credit"
-    | "settlement_paid"
-    | "settlement_received";
+    | "credit";
   amount: number; // in cents (positive for credit, negative for debit)
   description: string;
   sessionId?: string;
-  duoSessionId?: string;
-  partnerId?: string; // For settlement transactions
   createdAt: Date;
 }
 
@@ -176,14 +172,6 @@ export interface Wallet {
 
 // ─── Group Session (N-person staked session) ────────────────────────────────
 
-export type TransferStatus =
-  | "none" // no transfer needed (all participants broke even)
-  | "pending" // transfer required; payer has not acted
-  | "payment_indicated" // payer marked as paid; awaiting recipient confirmation
-  | "settled" // recipient confirmed receipt
-  | "overdue" // grace period elapsed without payment
-  | "disputed";
-
 export interface SessionParticipant {
   userId: string;
   name: string;
@@ -193,20 +181,7 @@ export interface SessionParticipant {
   // Populated on completion
   completed?: boolean;
   screenTime?: number; // ms of usage during session (input to payout algorithm)
-  payout?: number; // in cents — share of pool from algorithm
-}
-
-export interface SessionTransfer {
-  id: string;
-  fromUserId: string;
-  fromUserName: string;
-  toUserId: string;
-  toUserName: string;
-  amount: number; // in cents, always positive
-  status: TransferStatus;
-  createdAt: Date;
-  paidAt?: Date;
-  confirmedAt?: Date;
+  payout?: number; // in cents — own stake back on completion (de-pooled, no redistribution)
 }
 
 export interface GroupSession {
@@ -219,7 +194,6 @@ export interface GroupSession {
   status: SessionStatus; // from current user's perspective
   completedAt?: Date;
   participants: SessionParticipant[];
-  transfers: SessionTransfer[]; // empty while active; populated on completion
 }
 
 // ─── Group Session (Firestore-backed, server-authoritative) ─────────────────
@@ -259,7 +233,6 @@ export interface GroupSessionDoc {
   endsAt?: Date;
   completedAt?: Date;
   payouts?: Record<string, number>; // userId -> payout in cents
-  transfers?: SessionTransfer[];
   createdAt: Date;
   updatedAt: Date;
   autoTimeoutAt?: Date; // 30 min after all accept; null while pending

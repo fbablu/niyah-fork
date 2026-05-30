@@ -27,12 +27,6 @@ interface WalletState {
   deductStake: (amount: number, sessionId: string) => void;
   creditPayout: (amount: number, sessionId: string) => void;
   recordForfeit: (amount: number, sessionId: string) => void;
-  recordSettlement: (
-    amount: number,
-    sessionId: string,
-    partnerId: string,
-    description: string,
-  ) => void;
   reset: () => void;
 }
 
@@ -206,33 +200,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set((state) => ({
       transactions: [transaction, ...state.transactions],
     }));
-  },
-
-  recordSettlement: (
-    amount: number,
-    sessionId: string,
-    partnerId: string,
-    description: string,
-  ) => {
-    const transaction: Transaction = {
-      id: generateId(),
-      type: amount > 0 ? "settlement_received" : "settlement_paid",
-      amount,
-      description,
-      sessionId,
-      duoSessionId: sessionId,
-      partnerId,
-      createdAt: new Date(),
-    };
-
-    set((state) => ({
-      balance: state.balance + amount,
-      transactions: [transaction, ...state.transactions],
-    }));
-
-    useAuthStore.getState().updateUser({
-      balance: get().balance,
-    });
   },
 
   reset: () => {

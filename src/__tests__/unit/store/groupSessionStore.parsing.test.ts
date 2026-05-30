@@ -7,7 +7,6 @@
  * - Lines 218-270: subscription management (subscribeToSession, subscribeToInvites, subscribeToActiveSessions)
  * - Lines 282-334: Cloud Function actions (proposeSession, acceptInvite, declineInvite, etc.)
  * - Lines 465-469: completeGroupSession cloudDistributePayouts edge case
- * - Line 611: markTransferDisputed settlement edge case (settled/none guard)
  *
  * The parsing functions are not exported, so we test them indirectly via
  * subscriptions that invoke them, and verify the parsed state in the store.
@@ -127,7 +126,6 @@ import {
 } from "../../../config/firebase";
 import type {
   GroupSession,
-  SessionTransfer,
   UserReputation,
 } from "../../../types";
 
@@ -219,7 +217,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         startedAt: firestoreTimestamp,
         createdAt: firestoreTimestamp,
         updatedAt: firestoreTimestamp,
-        transfers: [],
       });
 
       const session = useGroupSessionStore.getState().activeSession;
@@ -246,7 +243,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         startedAt: epoch,
         createdAt: epoch,
         updatedAt: epoch,
-        transfers: [],
       });
 
       const session = useGroupSessionStore.getState().activeSession;
@@ -271,7 +267,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         startedAt: date,
         createdAt: date,
         updatedAt: date,
-        transfers: [],
       });
 
       expect(useGroupSessionStore.getState().activeSession!.startedAt).toBe(
@@ -298,7 +293,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         completedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       const session = useGroupSessionStore.getState().activeSession;
@@ -324,7 +318,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         startedAt: "not-a-date",
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       // Strings don't match any parseTimestamp branch, so should be undefined
@@ -366,7 +359,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 1000,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       const session = useGroupSessionStore.getState().activeSession!;
@@ -409,7 +401,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 500,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       const alice =
@@ -452,7 +443,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 2500,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       const alice =
@@ -478,7 +468,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       expect(
@@ -513,7 +502,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 1000,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       const bob =
@@ -544,15 +532,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         startedAt: now,
         endsAt: later,
         payouts: { "user-a": 15000, "user-b": 5000 },
-        transfers: [
-          {
-            id: "t1",
-            fromUserId: "user-b",
-            toUserId: "user-a",
-            amount: 5000,
-            status: "pending",
-          },
-        ],
         createdAt: now,
         updatedAt: now,
         autoTimeoutAt: { toDate: () => later },
@@ -571,7 +550,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
       expect(session.startedAt).toEqual(now);
       expect(session.endsAt).toEqual(later);
       expect(session.payouts).toEqual({ "user-a": 15000, "user-b": 5000 });
-      expect(session.transfers).toHaveLength(1);
       expect(session.autoTimeoutAt).toEqual(later);
     });
 
@@ -591,7 +569,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 500,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       expect(useGroupSessionStore.getState().activeSession!.id).toBe(
@@ -614,7 +591,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 500,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       expect(useGroupSessionStore.getState().activeSession!.customStake).toBe(
@@ -637,35 +613,11 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         poolTotal: 500,
         createdAt: new Date(),
         updatedAt: new Date(),
-        transfers: [],
       });
 
       expect(
         useGroupSessionStore.getState().activeSession!.participantIds,
       ).toEqual([]);
-    });
-
-    it("defaults transfers to empty array when not provided", () => {
-      useGroupSessionStore.getState().subscribeToSession("sess-doc-5");
-
-      sessionCallback!({
-        __id: "sess-doc-5",
-        proposerId: "user-a",
-        status: "pending",
-        cadence: "daily",
-        stakePerParticipant: 500,
-        customStake: false,
-        duration: 60000,
-        participantIds: [],
-        participants: {},
-        poolTotal: 500,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      expect(useGroupSessionStore.getState().activeSession!.transfers).toEqual(
-        [],
-      );
     });
 
     it("sets activeSession to null when callback receives null", () => {
@@ -683,7 +635,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
           poolTotal: 500,
           createdAt: new Date(),
           updatedAt: new Date(),
-          transfers: [],
         },
       });
 
@@ -835,7 +786,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
           poolTotal: 500,
           createdAt: new Date(),
           updatedAt: new Date(),
-          transfers: [],
         },
         {
           __id: "active-2",
@@ -850,7 +800,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
           poolTotal: 5000,
           createdAt: new Date(),
           updatedAt: new Date(),
-          transfers: [],
         },
       ]);
 
@@ -958,7 +907,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
           poolTotal: 500,
           createdAt: new Date(),
           updatedAt: new Date(),
-          transfers: [],
         },
         pendingInvites: [
           {
@@ -1120,88 +1068,6 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
     });
   });
 
-  // ─── Settlement edge cases ─────────────────────────────────────────────────
-
-  describe("markTransferDisputed — settlement guards", () => {
-    const seedSessionWithTransfer = (
-      transferOverrides: Partial<SessionTransfer> = {},
-    ): void => {
-      const transfer: SessionTransfer = {
-        id: "t1",
-        fromUserId: "user-a",
-        fromUserName: "Alice",
-        toUserId: "user-b",
-        toUserName: "Bob",
-        amount: 500,
-        status: "pending",
-        createdAt: new Date(),
-        ...transferOverrides,
-      };
-      const session: GroupSession = {
-        id: "session-1",
-        cadence: "daily",
-        stakePerParticipant: 500,
-        poolTotal: 1000,
-        startedAt: new Date(),
-        endsAt: new Date(),
-        status: "surrendered",
-        completedAt: new Date(),
-        participants: [],
-        transfers: [transfer],
-      };
-      useGroupSessionStore.setState({ groupSessionHistory: [session] });
-    };
-
-    it("is no-op when transfer status is 'settled'", () => {
-      seedSessionWithTransfer({ status: "settled" });
-      useGroupSessionStore.getState().markTransferDisputed("session-1", "t1");
-
-      const t =
-        useGroupSessionStore.getState().groupSessionHistory[0].transfers[0];
-      expect(t.status).toBe("settled"); // unchanged
-    });
-
-    it("is no-op when transfer status is 'none'", () => {
-      seedSessionWithTransfer({ status: "none" });
-      useGroupSessionStore.getState().markTransferDisputed("session-1", "t1");
-
-      const t =
-        useGroupSessionStore.getState().groupSessionHistory[0].transfers[0];
-      expect(t.status).toBe("none"); // unchanged
-    });
-
-    it("allows dispute from 'overdue' status", () => {
-      seedSessionWithTransfer({ status: "overdue" });
-      useGroupSessionStore.getState().markTransferDisputed("session-1", "t1");
-
-      const t =
-        useGroupSessionStore.getState().groupSessionHistory[0].transfers[0];
-      expect(t.status).toBe("disputed");
-    });
-
-    it("is no-op when transfer is not found", () => {
-      seedSessionWithTransfer({ status: "pending" });
-      useGroupSessionStore
-        .getState()
-        .markTransferDisputed("session-1", "nonexistent");
-
-      const t =
-        useGroupSessionStore.getState().groupSessionHistory[0].transfers[0];
-      expect(t.status).toBe("pending"); // unchanged
-    });
-
-    it("is no-op when session is not found", () => {
-      seedSessionWithTransfer({ status: "pending" });
-      useGroupSessionStore
-        .getState()
-        .markTransferDisputed("wrong-session", "t1");
-
-      const t =
-        useGroupSessionStore.getState().groupSessionHistory[0].transfers[0];
-      expect(t.status).toBe("pending"); // unchanged
-    });
-  });
-
   // ─── completeGroupSession edge case: no auth user ─────────────────────────
 
   describe("completeGroupSession — edge cases", () => {
@@ -1257,191 +1123,4 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
     });
   });
 
-  // ─── Query helpers with more complex scenarios ─────────────────────────────
-
-  describe("getSessionsWithPendingTransfers — multi-transfer scenarios", () => {
-    it("returns session when one of multiple transfers is actionable", () => {
-      const session: GroupSession = {
-        id: "multi-t",
-        cadence: "daily",
-        stakePerParticipant: 500,
-        poolTotal: 1500,
-        startedAt: new Date(),
-        endsAt: new Date(),
-        status: "surrendered",
-        completedAt: new Date(),
-        participants: [],
-        transfers: [
-          {
-            id: "t1",
-            fromUserId: "user-a",
-            fromUserName: "Alice",
-            toUserId: "user-b",
-            toUserName: "Bob",
-            amount: 500,
-            status: "settled",
-            createdAt: new Date(),
-          },
-          {
-            id: "t2",
-            fromUserId: "user-a",
-            fromUserName: "Alice",
-            toUserId: "user-c",
-            toUserName: "Charlie",
-            amount: 300,
-            status: "pending",
-            createdAt: new Date(),
-          },
-        ],
-      };
-
-      useGroupSessionStore.setState({ groupSessionHistory: [session] });
-
-      const result = useGroupSessionStore
-        .getState()
-        .getSessionsWithPendingTransfers("user-a");
-      expect(result).toHaveLength(1);
-    });
-
-    it("excludes sessions with only 'none' status transfers", () => {
-      const session: GroupSession = {
-        id: "none-t",
-        cadence: "daily",
-        stakePerParticipant: 500,
-        poolTotal: 1000,
-        startedAt: new Date(),
-        endsAt: new Date(),
-        status: "completed",
-        completedAt: new Date(),
-        participants: [],
-        transfers: [
-          {
-            id: "t1",
-            fromUserId: "user-a",
-            fromUserName: "Alice",
-            toUserId: "user-b",
-            toUserName: "Bob",
-            amount: 0,
-            status: "none",
-            createdAt: new Date(),
-          },
-        ],
-      };
-
-      useGroupSessionStore.setState({ groupSessionHistory: [session] });
-
-      expect(
-        useGroupSessionStore
-          .getState()
-          .getSessionsWithPendingTransfers("user-a"),
-      ).toHaveLength(0);
-    });
-  });
-
-  describe("getPendingTransfersForUser — multi-session scenarios", () => {
-    it("returns transfers across multiple sessions", () => {
-      useGroupSessionStore.setState({
-        groupSessionHistory: [
-          {
-            id: "s1",
-            cadence: "daily",
-            stakePerParticipant: 500,
-            poolTotal: 1000,
-            startedAt: new Date(),
-            endsAt: new Date(),
-            status: "surrendered",
-            completedAt: new Date(),
-            participants: [],
-            transfers: [
-              {
-                id: "t1",
-                fromUserId: "user-a",
-                fromUserName: "Alice",
-                toUserId: "user-b",
-                toUserName: "Bob",
-                amount: 500,
-                status: "pending",
-                createdAt: new Date(),
-              },
-            ],
-          },
-          {
-            id: "s2",
-            cadence: "weekly",
-            stakePerParticipant: 2500,
-            poolTotal: 5000,
-            startedAt: new Date(),
-            endsAt: new Date(),
-            status: "completed",
-            completedAt: new Date(),
-            participants: [],
-            transfers: [
-              {
-                id: "t2",
-                fromUserId: "user-c",
-                fromUserName: "Charlie",
-                toUserId: "user-a",
-                toUserName: "Alice",
-                amount: 1000,
-                status: "payment_indicated",
-                createdAt: new Date(),
-              },
-            ],
-          },
-        ],
-      });
-
-      const result = useGroupSessionStore
-        .getState()
-        .getPendingTransfersForUser("user-a");
-      expect(result).toHaveLength(2);
-      expect(result[0].transfer.id).toBe("t1");
-      expect(result[1].transfer.id).toBe("t2");
-    });
-
-    it("includes multiple actionable transfers from the same session", () => {
-      useGroupSessionStore.setState({
-        groupSessionHistory: [
-          {
-            id: "s1",
-            cadence: "daily",
-            stakePerParticipant: 500,
-            poolTotal: 1500,
-            startedAt: new Date(),
-            endsAt: new Date(),
-            status: "surrendered",
-            completedAt: new Date(),
-            participants: [],
-            transfers: [
-              {
-                id: "t1",
-                fromUserId: "user-a",
-                fromUserName: "Alice",
-                toUserId: "user-b",
-                toUserName: "Bob",
-                amount: 300,
-                status: "pending",
-                createdAt: new Date(),
-              },
-              {
-                id: "t2",
-                fromUserId: "user-a",
-                fromUserName: "Alice",
-                toUserId: "user-c",
-                toUserName: "Charlie",
-                amount: 200,
-                status: "overdue",
-                createdAt: new Date(),
-              },
-            ],
-          },
-        ],
-      });
-
-      const result = useGroupSessionStore
-        .getState()
-        .getPendingTransfersForUser("user-a");
-      expect(result).toHaveLength(2);
-    });
-  });
 });
