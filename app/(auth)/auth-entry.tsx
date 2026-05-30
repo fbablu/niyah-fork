@@ -81,13 +81,11 @@ export default function AuthEntryScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await loginWithGoogle();
 
-      // Route based on whether profile is complete
-      const state = useAuthStore.getState();
-      if (state.isNewUser || !state.profileComplete) {
-        router.replace("/(auth)/profile-setup");
-      } else {
-        router.replace("/(tabs)");
-      }
+      // Route through "/" so the legal gate (app/index.tsx) runs first: a new
+      // user accepts Terms + 18+ before profile setup, a returning user
+      // re-consents if the legal version changed. index then forwards on to
+      // profile-setup or tabs.
+      router.replace("/");
     } catch (e: unknown) {
       if (!isUserCancellationError(e)) {
         logger.error("Google Sign-In error:", e);
@@ -136,12 +134,8 @@ export default function AuthEntryScreen() {
         credential.email || undefined,
       );
 
-      const state = useAuthStore.getState();
-      if (state.isNewUser || !state.profileComplete) {
-        router.replace("/(auth)/profile-setup");
-      } else {
-        router.replace("/(tabs)");
-      }
+      // Route through "/" so the legal gate runs first (see Google handler).
+      router.replace("/");
     } catch (e: unknown) {
       if (!isUserCancellationError(e)) {
         logger.error("Apple Sign-In error:", e);

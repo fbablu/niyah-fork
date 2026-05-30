@@ -18,10 +18,7 @@ import {
 } from "../constants/config";
 import { useAuthStore } from "./authStore";
 import { useWalletStore } from "./walletStore";
-import {
-  calculatePayouts,
-  ParticipantResult,
-} from "../utils/payoutAlgorithm";
+import { calculatePayouts, ParticipantResult } from "../utils/payoutAlgorithm";
 import { generateId } from "../utils/id";
 import {
   createGroupSession as cloudCreateGroupSession,

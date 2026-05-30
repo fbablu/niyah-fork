@@ -106,6 +106,11 @@ export const REPUTATION_LEVELS = {
 // every user also backfills the ageAttested18 record.
 export const CURRENT_LEGAL_VERSION = "2.0.0";
 
+// Hosted full legal text. The in-app acceptance overlay shows a short summary
+// and links out to these for the complete Terms / Privacy Policy.
+export const LEGAL_TERMS_URL = "https://niyah.live/legal/terms";
+export const LEGAL_PRIVACY_URL = "https://niyah.live/legal/privacy";
+
 // Referral system
 // Each accepted referral permanently boosts the new user's social credit score by this amount.
 // e.g. a brand-new user (score 50) who joins via referral starts at 60.

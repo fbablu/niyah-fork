@@ -7,6 +7,7 @@
  */
 
 import React from "react";
+import { Linking } from "react-native";
 import { render, screen, fireEvent } from "@testing-library/react-native";
 import { LegalAcceptanceOverlay } from "../../../components/LegalAcceptanceOverlay";
 
@@ -104,5 +105,28 @@ describe("LegalAcceptanceOverlay", () => {
     fireEvent.press(screen.getByLabelText(AGE_LABEL));
     fireEvent.press(screen.getByLabelText(TERMS_LABEL));
     expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it("opens the hosted full Terms + Privacy pages from the Read full links", () => {
+    const openURL = jest
+      .spyOn(Linking, "openURL")
+      .mockResolvedValue(undefined as never);
+    render(<LegalAcceptanceOverlay visible={true} onAccept={jest.fn()} />);
+
+    fireEvent.press(screen.getByLabelText("Read full Terms of Service"));
+    fireEvent.press(screen.getByLabelText("Read full Privacy Policy"));
+
+    expect(openURL).toHaveBeenCalledWith("https://niyah.live/legal/terms");
+    expect(openURL).toHaveBeenCalledWith("https://niyah.live/legal/privacy");
+    openURL.mockRestore();
+  });
+
+  it("the Read full links are not checkboxes (only two checkboxes gate Continue)", () => {
+    render(<LegalAcceptanceOverlay visible={true} onAccept={jest.fn()} />);
+    // Redesign added external links; the acceptance gate must still be exactly
+    // the two attestation checkboxes, not the links.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getByText("Read full Terms ↗")).toBeTruthy();
+    expect(screen.getByText("Read full Privacy Policy ↗")).toBeTruthy();
   });
 });

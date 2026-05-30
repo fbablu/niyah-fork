@@ -340,17 +340,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       sessionHistory: [completedSession, ...sessionHistory],
     });
 
-    // Update session doc in Firestore (fire-and-forget).
-    // actualPayout is written by Cloud Functions only — not sent from client.
-    updateSession(currentSession.id, {
-      status: "completed",
-      completedAt,
-    }).catch((err) =>
-      logger.error("Failed to update session in Firestore:", err),
-    );
-
-    // Sync to server (non-blocking — local state is source of truth in DEMO_MODE)
-    if (!DEMO_MODE) {
+    // Status update path differs by mode (mirror surrenderSession):
+    //   - DEMO_MODE: client writes status=completed directly (no CF).
+    //   - prod: cloudComplete's transaction is the SOLE status writer (it marks
+    //     status=completed + actualPayout atomically, index.ts handleSessionComplete).
+    //     Writing status here would race the CF's read — it would see
+    //     status=completed and reject with 400 "Session is not active", so the
+    //     payout transaction would never run and the stake would never return.
+    if (DEMO_MODE) {
+      updateSession(currentSession.id, {
+        status: "completed",
+        completedAt,
+      }).catch((err) =>
+        logger.error("Failed to update session in Firestore:", err),
+      );
+    } else {
       cloudComplete(currentSession.id, currentSession.stakeAmount).catch(
         (err) => logger.error("cloudComplete failed:", err),
       );

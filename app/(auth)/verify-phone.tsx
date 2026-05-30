@@ -81,13 +81,9 @@ export default function VerifyPhoneScreen() {
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Route based on profile state
-      const state = useAuthStore.getState();
-      if (state.isNewUser || !state.profileComplete) {
-        router.replace("/(auth)/profile-setup");
-      } else {
-        router.replace("/(tabs)");
-      }
+      // Route through "/" so the legal gate (app/index.tsx) runs first — new
+      // user accepts Terms + 18+ before profile setup; index forwards on.
+      router.replace("/");
     } catch (e: unknown) {
       const err = e as { message?: string; code?: string };
       logger.error("Phone code verification error:", e);

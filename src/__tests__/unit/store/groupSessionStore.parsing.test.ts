@@ -124,10 +124,7 @@ import {
   subscribeToGroupInvites,
   subscribeToActiveGroupSessions,
 } from "../../../config/firebase";
-import type {
-  GroupSession,
-  UserReputation,
-} from "../../../types";
+import type { GroupSession, UserReputation } from "../../../types";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -1122,5 +1119,4 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
       expect(result!.status).toBe("surrendered");
     });
   });
-
 });

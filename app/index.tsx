@@ -64,12 +64,9 @@ export default function Index() {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  if (!profileComplete) {
-    return <Redirect href="/(auth)/profile-setup" />;
-  }
-
-  // Legal gate: authenticated users who haven't accepted current legal version
-  // see a non-dismissible overlay before proceeding to tabs.
+  // Legal gate FIRST: a new user must accept Terms + affirm 18+ immediately
+  // after sign-in, BEFORE profile setup or any app use. Existing users are
+  // re-prompted here when CURRENT_LEGAL_VERSION bumps. Non-dismissible.
   if (!hasAcceptedCurrentLegal) {
     return (
       <View style={styles.loading}>
@@ -80,6 +77,10 @@ export default function Index() {
         />
       </View>
     );
+  }
+
+  if (!profileComplete) {
+    return <Redirect href="/(auth)/profile-setup" />;
   }
 
   return <Redirect href="/(tabs)" />;

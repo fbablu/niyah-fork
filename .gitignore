@@ -70,3 +70,4 @@ expo-env.d.ts
 
 functions/.env*
 docs/misc/
+.claude/scheduled_tasks.lock

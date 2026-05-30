@@ -2,10 +2,7 @@ import { useGroupSessionStore } from "../../../store/groupSessionStore";
 import { useWalletStore } from "../../../store/walletStore";
 import { useAuthStore } from "../../../store/authStore";
 import { CADENCES, INITIAL_BALANCE } from "../../../constants/config";
-import type {
-  GroupSession,
-  UserReputation,
-} from "../../../types";
+import type { GroupSession, UserReputation } from "../../../types";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -410,5 +407,4 @@ describe("groupSessionStore", () => {
       expect(useGroupSessionStore.getState().getTimeRemaining()).toBe(0);
     });
   });
-
 });

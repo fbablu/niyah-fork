@@ -774,6 +774,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { user } = get();
     if (!user) throw new Error("Not authenticated");
 
+    // The acceptLegalTerms Cloud Function is the ONLY authorized writer of the
+    // legal-acceptance fields: legalAcceptanceVersion / legalAcceptedAt /
+    // ageAttested18 sit on the Firestore rules server-only denylist, so a direct
+    // client write always fails permission-denied. Don't attempt one — the CF
+    // (admin SDK) persists them server-side. Best-effort: if it fails, local
+    // state still advances so the user isn't trapped behind the gate, and the
+    // version check re-prompts on next launch if nothing landed.
     if (!DEMO_MODE) {
       const { acceptLegalTerms } = require("../config/functions") as {
         acceptLegalTerms: (version: string) => Promise<{ success: boolean }>;
@@ -784,19 +791,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } catch (error) {
         logger.warn("acceptLegalTerms Cloud Function failed:", error);
       }
-    }
-
-    // Always persist client-side too. Belt-and-suspenders: if the Cloud
-    // Function succeeds this is a redundant merge write; if it fails this
-    // is the only path that actually lands the field in Firestore.
-    try {
-      await updateUserDoc(user.id, {
-        legalAcceptanceVersion: CURRENT_LEGAL_VERSION,
-        legalAcceptedAt: new Date(),
-        ageAttested18: true,
-      });
-    } catch (error) {
-      logger.error("Failed to persist legal acceptance to Firestore:", error);
     }
 
     set({

@@ -181,21 +181,22 @@ describe("sessionStore — Firestore persistence (DEMO_MODE=false)", () => {
 
   // ─── updateSession (completeSession) ──────────────────────────────────────
 
-  describe("completeSession — updateSession", () => {
-    it("calls updateSession with 'completed' status and payout", async () => {
+  describe("completeSession — cloudComplete owns status update", () => {
+    // Mirror of surrender: in non-DEMO mode the client must NOT write
+    // status=completed — cloudComplete's transaction sets it server-side
+    // (handleSessionComplete marks status + actualPayout atomically). Writing
+    // client-side raced the CF read and triggered "Session is not active
+    // (current status: completed)" 400s, dropping the payout. cloudComplete
+    // being called is covered in sessionStore.cloudSync.test.ts.
+    it("does not call updateSession when completing in prod mode", async () => {
       await useSessionStore.getState().startSession("daily");
-      const session = useSessionStore.getState().currentSession!;
-
       useSessionStore.getState().completeSession();
       await flush();
 
-      expect(updateSession).toHaveBeenCalledWith(
-        session.id,
-        expect.objectContaining({
-          status: "completed",
-          completedAt: expect.any(Date),
-        }),
+      const completeCalls = (updateSession as jest.Mock).mock.calls.filter(
+        ([, payload]) => payload?.status === "completed",
       );
+      expect(completeCalls).toHaveLength(0);
     });
   });
 
