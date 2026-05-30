@@ -109,26 +109,6 @@ export interface Partner {
   tag?: string; // Optional label e.g. "Your Referrer"
 }
 
-// Duo session - both partners stake, loser pays winner
-export interface DuoSession {
-  id: string;
-  cadence: CadenceType;
-  stakeAmount: number; // in cents - what each person stakes
-  startedAt: Date;
-  endsAt: Date;
-  status: SessionStatus;
-  completedAt?: Date;
-  // Partner info
-  partnerId: string;
-  partnerName: string;
-  // Outcomes
-  userCompleted?: boolean; // Did current user complete?
-  partnerCompleted?: boolean; // Did partner complete?
-  // Settlement
-  settlementStatus?: "pending" | "paid" | "received" | "disputed";
-  amountOwed?: number; // Positive = user owes partner, negative = partner owes user
-}
-
 // Solo session (Phase 2 — stickK model for now; will use SOLO_COMPLETION_MULTIPLIER later)
 export interface Session {
   id: string;
@@ -194,7 +174,7 @@ export interface Wallet {
   lastUpdated?: Date;
 }
 
-// ─── Group Session (N-person generalization of DuoSession) ──────────────────
+// ─── Group Session (N-person staked session) ────────────────────────────────
 
 export type TransferStatus =
   | "none" // no transfer needed (all participants broke even)
