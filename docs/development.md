@@ -62,7 +62,13 @@ pnpm test:integration  # Integration tests only
 pnpm test:unit         # Unit tests only
 pnpm test:stores       # Store tests only
 pnpm test:components   # Component tests only
+pnpm test:functions    # Cloud Functions money-path tests (Node built-in runner, NOT jest)
 ```
+
+> **Functions tests** (`functions/src/*.test.ts` — 52 bucket-ledger invariant tests) run under the
+> Node built-in test runner (`node:test` + `tsx`), **not jest**: jest's `testMatch` only covers
+> `src/`/`tests/`, so it skips `functions/`. They run via `pnpm test:functions`, now gated in CI
+> (wired into the `ci` script and `.github/workflows/ci.yml`).
 
 ### Code Quality
 
@@ -72,7 +78,8 @@ pnpm lint              # ESLint 9
 pnpm lint:fix          # Auto-fix lint issues
 pnpm format            # Prettier format
 pnpm format:check      # Check formatting
-pnpm ci                # lint + typecheck + test (full CI check)
+pnpm run ci            # lint + typecheck + client tests + functions tests (full CI check)
+                       #   use `pnpm run ci` — bare `pnpm ci` is a reserved pnpm builtin
 ```
 
 ### Building

@@ -22,8 +22,10 @@
     move buckets in lockstep; group refunds are now **idempotent**. Detail in **Audit findings**
     below. **Needs the functions + rules deploy to take effect.**
 - **NOT merged, NOT pushed to `main`, NOT deployed.** Nothing live yet from this branch.
-- **Tests green:** ~796 client (Jest) + **52/52 functions** (new `wallet.test.ts` — 14
-  bucket/withdrawal/deletion contract tests). `tsc` clean both sides, eslint 0 errors.
+- **Tests green:** ~742 client (Jest) + **52/52 functions** (`wallet.test.ts` — 14
+  bucket/withdrawal/deletion contract tests + `security`/`withdraw-earned`). Functions suites now
+  run via `pnpm test:functions` (Node built-in runner + `tsx`) and are **gated in CI** (`ci` script
+  + `.github/workflows/ci.yml`). `tsc` clean both sides, eslint 0 errors.
 - **Deployed today:** the previously-shipped `launch` security/payments work (rules + functions
   deploy ran; migration ran 16 processed / 9 migrated). The landing `niyah.live/stripe/return`
   bounce is live. The `wallet-ledger` changes are **not** part of that — they ship at the next deploy.
