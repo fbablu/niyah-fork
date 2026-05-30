@@ -39,6 +39,9 @@ jobs:
       - name: Test
         run: pnpm test:coverage
 
+      - name: Functions money-path tests
+        run: pnpm test:functions
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
