@@ -93,6 +93,22 @@ True secrets that never touch client code:
 - `ADMIN_API_KEY` — guards admin-only HTTP CFs (e.g. `migrateSensitiveFieldsToPrivate`, `mergeDuplicateUsers`); 32+ chars, constant-time compared
 - `GCLOUD_PROJECT` / `GCP_PROJECT` — auto-set runtime env vars, **not** Secret Manager entries
 
+### Server-Side Operational Flags (`config/serverFlags`)
+
+Non-secret money-path knobs that must survive losing the local `functions/.env.production`
+**and** be toggleable without a redeploy live in the Firestore **`config/serverFlags`** doc —
+**server-only** (rules `allow read, write: if false`; admin-SDK / console writes only; NOT
+client-readable, unlike `config/featureFlags`). Functions resolve each flag **Firestore →
+`process.env` → safe code default** (`getServerConfig` / `resolve*` in `index.ts`, ~60s cache).
+
+- `billingKillSwitchEnabled` (bool) — arms the budget kill-switch. **Critical:** the env/code
+  default is `false` (disarmed), so a lost env file would silently un-protect; set this in the doc
+  to keep it durably armed.
+- `finalsPromoCents` (number) — promo grant; default `0` (OFF, safe).
+
+Set/toggle via Firebase Console → Firestore → `config/serverFlags`. `FIRST_SURRENDER_FORGIVENESS_CENTS`
+is still env-only (safe-on-loss default `500`); migrate it the same way if console-toggling is wanted.
+
 ### Firebase Config Files
 
 `GoogleService-Info.plist` and `google-services.json` are **gitignored**. They contain API keys that, while designed to be public (embedded in every compiled app binary), were removed from the repo for defense-in-depth.

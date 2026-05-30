@@ -6534,17 +6534,60 @@ export const sessionProgressNudges = onSchedule(
 // a one-time $5 credit. Same mechanism as the "first 100 signups" promo on
 // niyah.live, but gated so two friends can't cycle money and cash out.
 
-// Default OFF. The promo is deferred to the post-approval server flip (see
-// docs/STATUS.md) — turning it on is an explicit FINALS_PROMO_CENTS=<cents> env
-// set, never an untracked default. Safe-state is the default so a missing env
-// file can't silently ship withdrawable house money. When it IS enabled the
-// credit lands in the `bonus` bucket (see maybeAwardFinalsPromo), which the
-// bucket-aware withdrawal gate only releases after the engagement gate.
-const FINALS_PROMO_CENTS: number = (() => {
+// ─── Server-side runtime config (config/serverFlags) ─────────────────────────
+// Operational flags that must (a) survive losing the local `functions/.env.production`
+// and (b) be toggleable WITHOUT a redeploy live in the Firestore `config/serverFlags`
+// doc — server-only (admin-SDK write; rules deny all client read+write, unlike the
+// client-readable `config/featureFlags`). Resolution order per flag: Firestore
+// (durable, console-toggleable) → `process.env` (deploy-time override) → safe code
+// default. Cached ~1 min so hot paths don't read Firestore every call while a
+// console toggle still lands quickly. Set the doc in the Firebase console to make
+// Firestore authoritative; until then this falls back to env/default (no behavior
+// change on deploy).
+let serverConfigCache: { at: number; data: Record<string, unknown> } | null = null;
+const SERVER_CONFIG_TTL_MS = 60_000;
+
+async function getServerConfig(): Promise<Record<string, unknown>> {
+  const now = Date.now();
+  if (serverConfigCache && now - serverConfigCache.at < SERVER_CONFIG_TTL_MS) {
+    return serverConfigCache.data;
+  }
+  try {
+    const snap = await db.collection("config").doc("serverFlags").get();
+    const data = snap.exists ? snap.data() ?? {} : {};
+    serverConfigCache = { at: now, data };
+    return data;
+  } catch (err) {
+    // Never throw on a config read — fall back to the last good cache, then env.
+    console.warn("getServerConfig: read failed, using cache/env fallback:", err);
+    return serverConfigCache?.data ?? {};
+  }
+}
+
+// Finals promo grant in cents. Firestore `finalsPromoCents` → env
+// FINALS_PROMO_CENTS → 0 (OFF). Default OFF so a missing config AND missing env
+// can't silently ship withdrawable house money. When enabled the credit lands in
+// the `bonus` bucket (see maybeAwardFinalsPromo), which the bucket-aware
+// withdrawal gate only releases after the engagement gate.
+async function resolveFinalsPromoCents(): Promise<number> {
+  const fromDoc = (await getServerConfig()).finalsPromoCents;
+  if (typeof fromDoc === "number" && Number.isFinite(fromDoc) && fromDoc >= 0) {
+    return Math.floor(fromDoc);
+  }
   const raw = process.env.FINALS_PROMO_CENTS;
   const parsed = raw ? parseInt(raw, 10) : 0;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-})();
+}
+
+// Billing kill-switch armed state. Firestore `billingKillSwitchEnabled` → env
+// BILLING_KILL_SWITCH_ENABLED → false (disarmed). Putting the durable source in
+// Firestore means losing the local env file can no longer silently DISARM the
+// switch on the next deploy (the env default is `false` = un-protected).
+async function resolveBillingKillSwitchArmed(): Promise<boolean> {
+  const fromDoc = (await getServerConfig()).billingKillSwitchEnabled;
+  if (typeof fromDoc === "boolean") return fromDoc;
+  return process.env.BILLING_KILL_SWITCH_ENABLED === "true";
+}
 
 // One-time refund applied the first time a user surrenders (solo sessions
 // only). Capped at this value even if stake is larger — frames the
@@ -6558,7 +6601,8 @@ const FIRST_SURRENDER_FORGIVENESS_CENTS: number = (() => {
 
 async function maybeAwardFinalsPromo(uid: string): Promise<void> {
   if (!isValidFirebaseUid(uid)) return;
-  if (FINALS_PROMO_CENTS <= 0) return;
+  const promoCents = await resolveFinalsPromoCents();
+  if (promoCents <= 0) return;
 
   const userRef = db.collection("users").doc(uid);
   const userSnap = await userRef.get();
@@ -6578,7 +6622,7 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
     const walletSnap = await txn.get(walletRef);
     const currentBalance: number = walletSnap.data()?.balance ?? 0;
     const currentBonus: number = walletSnap.data()?.bonusBalance ?? 0;
-    const newBalance = currentBalance + FINALS_PROMO_CENTS;
+    const newBalance = currentBalance + promoCents;
 
     if (walletSnap.exists) {
       txn.update(walletRef, {
@@ -6587,7 +6631,7 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
         // ledger invariant (balance == Σbuckets) holds. bonus is withdrawable
         // only after the engagement gate and never refundable to a card, so
         // this $ can't be cashed out as free money before real engagement.
-        bonusBalance: currentBonus + FINALS_PROMO_CENTS,
+        bonusBalance: currentBonus + promoCents,
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else {
@@ -6596,7 +6640,7 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
         {
           balance: newBalance,
           pendingBalance: 0,
-          bonusBalance: currentBonus + FINALS_PROMO_CENTS,
+          bonusBalance: currentBonus + promoCents,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -6611,7 +6655,7 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
     txn.set(txnRef, {
       userId: uid,
       type: "promo",
-      amount: FINALS_PROMO_CENTS,
+      amount: promoCents,
       description: "Finals beta bonus — 5 sessions with 2+ friends",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -6623,12 +6667,12 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
     sendPushToUsers(
       [uid],
       {
-        title: `You earned $${(FINALS_PROMO_CENTS / 100).toFixed(0)} 🎉`,
+        title: `You earned $${(promoCents / 100).toFixed(0)} 🎉`,
         body: "Finals beta bonus unlocked. Keep stacking focused sessions.",
       },
       { type: "finals_promo_awarded" },
     );
-    console.log(`finals_promo_awarded uid=${uid} cents=${FINALS_PROMO_CENTS}`);
+    console.log(`finals_promo_awarded uid=${uid} cents=${promoCents}`);
   }
 }
 
@@ -7575,8 +7619,10 @@ async function mergeOne(
  */
 const BILLING_KILL_SWITCH_TOPIC =
   process.env.BILLING_KILL_SWITCH_TOPIC ?? "billing-alerts";
-const BILLING_KILL_SWITCH_ENABLED =
-  process.env.BILLING_KILL_SWITCH_ENABLED === "true";
+// Armed state is resolved at RUNTIME via resolveBillingKillSwitchArmed()
+// (Firestore config/serverFlags → env → false) so it survives losing the local
+// env file and can be toggled in the console without a redeploy. The topic above
+// stays env-only — it wires the Pub/Sub trigger at deploy time.
 const BILLING_KILL_RATIO = (() => {
   const raw = process.env.BILLING_KILL_RATIO;
   const parsed = raw ? Number.parseFloat(raw) : 2.0;
@@ -7650,13 +7696,14 @@ export const disableBillingOnBudgetExceeded = onMessagePublished(
     }
 
     const ratio = costAmount / Math.max(budgetAmount, 0.01);
+    const armed = await resolveBillingKillSwitchArmed();
     console.info(
-      `budget-kill-switch: cost=${costAmount} budget=${budgetAmount} ratio=${ratio.toFixed(2)} armed=${BILLING_KILL_SWITCH_ENABLED}`,
+      `budget-kill-switch: cost=${costAmount} budget=${budgetAmount} ratio=${ratio.toFixed(2)} armed=${armed}`,
     );
 
     if (ratio < BILLING_KILL_RATIO) return;
 
-    if (!BILLING_KILL_SWITCH_ENABLED) {
+    if (!armed) {
       console.warn(
         `budget-kill-switch: WOULD detach billing (ratio ${ratio.toFixed(2)} >= ${BILLING_KILL_RATIO}) — armed=false, doing nothing`,
       );

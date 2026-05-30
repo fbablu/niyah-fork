@@ -321,6 +321,18 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // config/serverFlags
+    // -------------------------------------------------------------------------
+    // Server-only operational config (billing kill-switch armed state, finals
+    // promo cents, other money-path knobs). Read by Cloud Functions via the
+    // admin SDK; NOT client-readable (unlike featureFlags) so operational
+    // posture isn't exposed to clients. Set/toggle via the Firebase console
+    // (console writes use admin privileges and bypass these rules).
+    match /config/serverFlags {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // userMerges/{newUid}
     // -------------------------------------------------------------------------
     // Account-link merge queue. Written exclusively by the `requestAccountMerge`
