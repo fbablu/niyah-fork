@@ -20,6 +20,8 @@ import Animated, {
   interpolate,
   interpolateColor,
   Extrapolation,
+  FadeIn,
+  FadeInDown,
   type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
@@ -188,16 +190,40 @@ const AnimatedPageText: React.FC<{
     transform: [{ translateX: index * pageWidth - scrollX.value }],
   }));
 
+  // Page 0 gets a one-time staggered entrance on mount. Other pages are
+  // offscreen at mount, so we skip the entrance to avoid wasted work.
+  const isHero = index === 0;
+
   return (
     <Animated.View style={[styles.textBlock, { width: pageWidth }, style]}>
-      <Text style={styles.title}>{page.title}</Text>
-      {index === 0 && (
-        <View style={styles.logoContainer}>
+      <Animated.Text
+        style={styles.title}
+        entering={isHero ? FadeInDown.duration(550).delay(120) : undefined}
+      >
+        {page.title}
+      </Animated.Text>
+      {isHero && (
+        <Animated.View
+          style={styles.logoContainer}
+          entering={FadeIn.duration(550).delay(260)}
+        >
           <NiyahLogo width={90} />
-        </View>
+        </Animated.View>
       )}
-      <Text style={styles.subtitle}>{page.subtitle}</Text>
-      {page.hint && <Text style={styles.hint}>{page.hint}</Text>}
+      <Animated.Text
+        style={styles.subtitle}
+        entering={isHero ? FadeInDown.duration(550).delay(320) : undefined}
+      >
+        {page.subtitle}
+      </Animated.Text>
+      {page.hint && (
+        <Animated.Text
+          style={styles.hint}
+          entering={isHero ? FadeInDown.duration(550).delay(440) : undefined}
+        >
+          {page.hint}
+        </Animated.Text>
+      )}
     </Animated.View>
   );
 };
@@ -412,7 +438,10 @@ export default function WelcomeScreen() {
         </View>
 
         {/* === Bottom section === */}
-        <View style={styles.bottomSection}>
+        <Animated.View
+          style={styles.bottomSection}
+          entering={FadeInDown.duration(600).delay(380)}
+        >
           {/* Pagination dots */}
           <View style={styles.dotsContainer}>
             {PAGES.map((_, i) => (
@@ -438,7 +467,7 @@ export default function WelcomeScreen() {
           >
             <Text style={styles.getStartedButtonText}>Get Started</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </SafeAreaView>
     </Animated.View>
   );
