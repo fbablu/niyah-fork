@@ -56,31 +56,16 @@ export function Footer() {
               </p>
               <nav className="flex flex-col gap-2">
                 <Link
-                  href="#"
+                  href="/legal/privacy"
                   className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                 >
                   Privacy Policy
                 </Link>
                 <Link
-                  href="#"
+                  href="/legal/terms"
                   className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                 >
                   Terms of Service
-                </Link>
-              </nav>
-            </div>
-            <div>
-              <p className="mb-3 text-sm font-semibold text-foreground">
-                Build
-              </p>
-              <nav className="flex flex-col gap-2">
-                <Link
-                  href="https://github.com/fbablu/niyah"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Source on GitHub
                 </Link>
               </nav>
             </div>
@@ -90,14 +75,6 @@ export function Footer() {
         <div className="mt-10 flex flex-col gap-4 border-t border-border pt-8 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
           <p>&copy; {new Date().getFullYear()} Niyah. All rights reserved.</p>
           <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-4">
-            <Link
-              href="https://github.com/fbablu/niyah"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="transition-colors hover:text-foreground"
-            >
-              View source on GitHub &rarr;
-            </Link>
             <p>App Store Category: Productivity &middot; Payments via Stripe</p>
           </div>
         </div>
