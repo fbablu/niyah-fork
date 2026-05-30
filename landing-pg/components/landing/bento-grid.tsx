@@ -25,7 +25,7 @@ export function BentoGrid() {
                 Financial stakes change everything
               </h3>
               <p className="max-w-lg text-white/75">
-                Niyah is built on behavioral economics — commitment contracts
+                Niyah is built on behavioral economics: commitment contracts
                 with real financial stakes. When your actual money is on the
                 line, and your friends can see whether you followed through, the
                 incentive structure is fundamentally different.
@@ -44,7 +44,7 @@ export function BentoGrid() {
             </h3>
             <p className="text-[oklch(0.93_0.01_80)]/55">
               Uses Apple&apos;s own Screen Time framework. This isn&apos;t a
-              nudge — it&apos;s a real block that persists even if you delete
+              nudge. It&apos;s a real block that persists even if you delete
               the app.
             </p>
           </div>
@@ -63,7 +63,7 @@ export function BentoGrid() {
             </p>
           </div>
 
-          {/* Normalized competition - spans 2 columns */}
+          {/* De-pooled: your stake, your outcome - spans 2 columns */}
           <div className="rounded-3xl bg-[oklch(0.20_0.04_150)] p-8 lg:col-span-2">
             <div className="flex flex-col gap-6 md:flex-row md:items-center">
               <div className="flex-1">
@@ -71,30 +71,30 @@ export function BentoGrid() {
                   <TrendingUp className="h-6 w-6 text-[oklch(0.60_0.12_150)]" />
                 </div>
                 <h3 className="mb-3 text-xl font-semibold text-[oklch(0.93_0.01_80)]">
-                  Normalized competition
+                  Your stake, your outcome
                 </h3>
                 <p className="text-[oklch(0.93_0.01_80)]/55">
-                  Someone who normally uses 8 hours and cuts to 4 is rewarded
-                  equally to someone who goes from 2 hours to 1. It&apos;s
-                  percentage improvement, not raw numbers.
+                  No shared pot, no competition. You stake your own money on your
+                  own goal. Finish and every cent comes back. Quit early and you
+                  forfeit it to the house, never to another user.
                 </p>
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-center">
                   <p className="font-mono text-3xl font-bold text-[oklch(0.60_0.12_150)]">
-                    -50%
+                    100%
                   </p>
                   <p className="text-xs text-[oklch(0.93_0.01_80)]/45">
-                    8h &rarr; 4h
+                    finish &rarr; stake back
                   </p>
                 </div>
-                <div className="text-2xl text-[oklch(0.93_0.01_80)]/35">=</div>
+                <div className="text-2xl text-[oklch(0.93_0.01_80)]/35">vs</div>
                 <div className="text-center">
                   <p className="font-mono text-3xl font-bold text-[oklch(0.60_0.12_150)]">
-                    -50%
+                    $0
                   </p>
                   <p className="text-xs text-[oklch(0.93_0.01_80)]/45">
-                    2h &rarr; 1h
+                    quit &rarr; forfeit
                   </p>
                 </div>
               </div>

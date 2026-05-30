@@ -6,7 +6,7 @@ const steps = [
     icon: Users,
     title: "Stake with friends",
     description:
-      "Create a focus session and invite friends. Everyone stakes real money into a shared pool before the session begins.",
+      "Create a focus session and invite friends. Everyone stakes their own money on their own goal before the clock starts. Nothing is pooled.",
   },
   {
     number: "02",
@@ -20,7 +20,7 @@ const steps = [
     icon: Trophy,
     title: "Earn it back",
     description:
-      "At the end, the pool redistributes based on who reduced their screen time the most. Stay focused, and you earn more than you staked.",
+      "Finish the session and your full stake comes back. Quit early and you forfeit it to the house. You're playing against your own worst impulses, not other people.",
   },
 ];
 
@@ -40,7 +40,7 @@ export function HowItWorks() {
           </h2>
           <p className="text-lg text-muted-foreground">
             The outcome is entirely in your hands. This is a skill-based
-            commitment contract — you decide whether you earn your stake back.
+            commitment contract. You decide whether you earn your stake back.
           </p>
         </div>
 

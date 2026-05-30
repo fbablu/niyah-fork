@@ -11,10 +11,10 @@ export default function LegalLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-4">
-          <Link href="/" className="flex items-center gap-2 font-semibold">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary font-bold text-primary-foreground">
-              N
-            </span>
+          <Link
+            href="/"
+            className="text-xl font-bold tracking-tight text-foreground"
+          >
             Niyah
           </Link>
           <nav className="flex gap-4 text-sm text-muted-foreground">
