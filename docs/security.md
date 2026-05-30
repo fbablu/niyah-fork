@@ -1,7 +1,8 @@
 # Security
 
 > Security measures, key management, and protection layers.
-> See also: [Development](./development.md) | [Architecture](./architecture.md)
+> **Operator runbook (what to click/run to activate each protection): [security-deploy-checklist.md](./security-deploy-checklist.md).**
+> See also: [Development](./development.md) | [Architecture](./architecture.md) | [STATUS](./STATUS.md)
 
 ## Overview
 
@@ -11,24 +12,46 @@ The repo is **public** (school requirement). Security cannot depend on hiding co
 
 ### Server-Side Validation (Cloud Functions)
 
-All 24 Cloud Functions validate:
+The ~40 callable Cloud Functions validate:
 
 - Firebase Auth token (`context.auth.uid`)
 - Request parameters (types, ranges, required fields)
 - Rate limiting on sensitive operations (deposits, withdrawals, session actions)
 - Amount bounds and balance checks
+- **App Check token** on money-path functions when enforced (see below)
 
 ### Firestore Security Rules
 
-Hardened rules in `firebase/firestore.rules` covering:
+Hardened rules in `firebase/firestore.rules`. Key collections (default-deny for anything unmatched):
 
-- `users` -- owner read/write, public read for select fields
-- `wallets` -- owner read only, no client writes (server-managed)
-- `sessions` -- owner read/write with field validation
-- `userFollows` -- owner write, read for social queries
-- Default deny for unmatched collections
+- `users` — **any signed-in user can read** any user doc; owner-write is gated by an
+  `affectedKeys().hasAny([...])` **denylist** for protected fields (KYC, Stripe IDs, phone, email,
+  merge state, `legalAccepted*`, `ageAttested18`). Those fields are **client-immutable** — only the
+  admin SDK (Cloud Functions) can write them. Sensitive PII (Plaid/Stripe tokens, KYC names,
+  `fcmTokens`) lives in separate `userPrivate` / `userPushTokens` collections, owner-read only.
+- `wallets` — owner **read**; client may **`create` a zero-balance wallet only**
+  (`balance == 0 && pendingBalance == 0`); all balance mutations are **admin-SDK only**. So
+  "edit the client to add money" is an operator/insider threat, not a user threat.
+- `sessions` — owner read; client `update` restricted to `['status','completedAt','updatedAt']`;
+  financial fields immutable.
+- `userFollows` — `allow write: if false`; follow/unfollow go through `followUserFn`/`unfollowUserFn` CFs.
+- Server-managed / admin-only: `transactions`, `groupSessions`, `groupInvites`, `revenue`,
+  `rateLimits`, `walletAudits`, `userMerges`, `migrations`, `deletions`, `config/featureFlags`,
+  `analytics_events`, `metrics`.
 
 **Deploy**: `firebase deploy --only firestore:rules`
+
+### Firebase App Check
+
+**Wired end-to-end, not a gap.** Client attestation via `src/config/appCheck.ts` (App Attest /
+DeviceCheck on iOS, reCAPTCHA Enterprise on web). Server enforcement via the `assertAppCheck` helper
+in `functions/src/index.ts`, gated by the `APP_CHECK_ENFORCED` env flag. The money-path functions
+(`createPlaidLinkToken`, `linkBankAccount`, `unlinkBankAccount`, `replaceBankAccount`,
+`requestWithdrawal`, `createGroupSession`, `requestAccountMerge`) **hard-enforce when the flag is on**.
+
+> ⚠️ **Keep `APP_CHECK_ENFORCED=false`** until Firebase Console → App Check → **Metrics** shows
+> ≥ 99% verified production traffic, or real users lock out. The flip is in
+> [security-deploy-checklist.md](./security-deploy-checklist.md) Phase 2.
 
 ### Client-Side Protections
 
@@ -40,7 +63,7 @@ Hardened rules in `firebase/firestore.rules` covering:
 
 ### Client-Side (`.env`)
 
-Read by `app.config.ts` at build time. Values are `EXPO_PUBLIC_*` prefixed (embedded in JS bundle -- these are NOT secrets, just config that shouldn't be hardcoded in source).
+Read by `app.config.js` at build time. Values are `EXPO_PUBLIC_*` prefixed (embedded in JS bundle -- these are NOT secrets, just config that shouldn't be hardcoded in source).
 
 See [Development > Environment Variables](./development.md#environment-variables) for the full list.
 
@@ -48,9 +71,10 @@ See [Development > Environment Variables](./development.md#environment-variables
 
 True secrets that never touch client code:
 
-- `STRIPE_SECRET_KEY` -- set via `firebase functions:secrets:set STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET` -- set via `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET`
-- `GCLOUD_PROJECT` / `GCP_PROJECT` -- auto-set by Firebase runtime
+- `STRIPE_SECRET_KEY` (**LIVE `sk_live_`**) / `STRIPE_WEBHOOK_SECRET` — `firebase functions:secrets:set ...`
+- `PLAID_CLIENT_ID` / `PLAID_SECRET` — Plaid production credentials
+- `ADMIN_API_KEY` — guards admin-only HTTP CFs (e.g. `migrateSensitiveFieldsToPrivate`, `mergeDuplicateUsers`); 32+ chars, constant-time compared
+- `GCLOUD_PROJECT` / `GCP_PROJECT` — auto-set runtime env vars, **not** Secret Manager entries
 
 ### Firebase Config Files
 
@@ -78,7 +102,9 @@ All keys were rotated after removing config files from the repo:
 
 ### Remaining Security Work
 
-- **Firebase App Check** -- biggest remaining gap. Without it, anyone with the project ID can call Cloud Functions. Needs Firebase Console setup + `context.app` check in functions.
-- **Android API key restriction** -- add SHA-256 fingerprint when first Android build is done via EAS.
-- **Delete old rotated keys** -- remove deprecated keys in GCP Console after confirming stability.
-- ~~Node.js runtime upgrade~~ -- Done. Cloud Functions upgraded to Node.js 22.
+- **App Check enforce flip** — implementation is done; only the `APP_CHECK_ENFORCED=true` flip
+  remains, gated on ≥99% verified token coverage in the Console Metrics tab (see above).
+- **Android API key restriction** — add SHA-256 fingerprint when first Android build is done via EAS.
+- **Delete old rotated keys** — remove deprecated keys in GCP Console after confirming stability.
+- **Universal-link AASA** — host `apple-app-site-association` on `niyah.live` (see [security-deploy-checklist.md](./security-deploy-checklist.md) "What's NOT done").
+- ~~Node.js runtime upgrade~~ — Done. Cloud Functions on Node.js 22.

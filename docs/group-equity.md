@@ -1,7 +1,14 @@
 # Group Equity (Cap-Target Payout Model)
 
-> Design doc for the post-demo group-fairness rework. Closes the "heavy vs light user mismatch is unfair" gap surfaced in TestFlight 1.0.0 (11).
-> See also: [Payments](./payments.md) | [Features](./features.md) | [Native Modules](./native-modules.md) | [Post-Demo Roadmap](./post-demo-roadmap.md)
+> ⚠️ **SUPERSEDED — design reference only, not the shipping model.** This cap-target/handicap design
+> assumes a **redistributable pool** split among completers. Niyah is now **de-pooled**: every
+> participant stakes their own money, completers get their own stake back, forfeiters forfeit to the
+> house, and stakes are **never** pooled or redistributed ([legal.md](./legal.md), [payments.md](./payments.md)).
+> Everything below describes the old pooled model. Revisit only if scored group competition returns
+> (which would re-open the gambling-classification question the de-pool closed).
+>
+> Original framing: post-demo group-fairness rework closing the "heavy vs light user mismatch is
+> unfair" gap from TestFlight 1.0.0 (11). See also: [Payments](./payments.md) | [Features](./features.md) | [Native Modules](./native-modules.md)
 
 ## Problem
 
@@ -9,7 +16,7 @@ Group sessions currently split the pool equally among completers (`src/utils/pay
 
 ## Decision (user-confirmed)
 
-**Total screen-time cap target per user**, set as a fraction of that user's measured baseline. Cap is verified at settlement time by the `NiyahDeviceActivityReport` extension (Lane B1 in [post-demo-roadmap.md](./post-demo-roadmap.md)). Strava-style — every participant runs against their own baseline.
+**Total screen-time cap target per user**, set as a fraction of that user's measured baseline. Cap is verified at settlement time by the `DeviceActivityReport` extension (`targets/report/`). Strava-style — every participant runs against their own baseline.
 
 ## Cap definition
 

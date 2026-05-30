@@ -80,7 +80,7 @@ niyah/
 │   └── __tests__/                # Test suites (unit + integration)
 ├── modules/
 │   └── niyah-screentime/         # Custom Expo module for iOS Screen Time API
-├── functions/                    # Firebase Cloud Functions (24 deployed)
+├── functions/                    # Firebase Cloud Functions (~40 exports)
 │   └── src/index.ts              # All function definitions
 ├── plugins/                      # Expo config plugins
 │   ├── withGoogleServicesPlist.js
@@ -99,7 +99,7 @@ niyah/
 │   └── firestore.rules           # Hardened security rules
 ├── CLAUDE.md                     # AI assistant project guide
 ├── README.md                     # Public-facing setup guide
-├── app.config.ts                 # Dynamic Expo config (replaced app.json)
+├── app.config.js                 # Dynamic Expo config (replaced app.json)
 ├── .env / .env.example           # Environment variables
 ├── package.json
 ├── tsconfig.json
@@ -111,7 +111,7 @@ niyah/
 
 ### Dynamic Expo Config
 
-`app.config.ts` replaced `app.json`. It reads environment variables at build time so no secrets or project identifiers are hardcoded in source. See [Development > Environment Variables](./development.md#environment-variables).
+`app.config.js` replaced `app.json`. It reads environment variables at build time so no secrets or project identifiers are hardcoded in source. See [Development > Environment Variables](./development.md#environment-variables).
 
 ### State Architecture
 
@@ -123,7 +123,7 @@ Expo Router file-based routing in `app/`. Groups `(auth)` and `(tabs)` define la
 
 ### Native Module Bridge
 
-Custom Expo modules in `modules/` use Swift bridged via ExpoModulesCore. Config plugins in `plugins/` inject entitlements, extension targets, and Firebase config at prebuild time. Module directory referenced via `nativeModulesDir: "modules"` in `app.config.ts`.
+Custom Expo modules in `modules/` use Swift bridged via ExpoModulesCore. iOS **app extensions** (Screen Time + Live Activity) live in top-level `targets/` and are registered by `@bacons/apple-targets` (entitlements + target registration via `targets/*/expo-target.config.json`). Config plugins in `plugins/` only inject Firebase static-framework + build fixes. Module directory referenced via `nativeModulesDir: "modules"` in `app.config.js`.
 
 ### Firebase Config Files
 

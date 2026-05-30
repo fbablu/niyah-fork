@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git merge:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(rm:*)",
+      "Bash(rm -rf:*)"
+    ]
+  },
+  "ignore": [
+    "node_modules/**",
+    "ios/**",
+    "android/**",
+    "functions/lib/**",
+    "functions/node_modules/**",
+    "landing-pg/node_modules/**",
+    "landing-pg/.next/**",
+    "landing-pg/out/**",
+    ".expo/**"
+  ]
+}

@@ -1,7 +1,10 @@
 # Niyah - Project Guide
 
-> Focus app with financial stakes. Users deposit money, stake it on focus sessions, and earn more for completing them. Quit early = lose your stake.
+> **De-pooled commitment-contract** focus app. Users deposit their **own** money and stake it on a
+> focus session; complete → get your stake back, quit early → forfeit it to the house. Stakes are
+> **never** pooled, shared, or redistributed between users. NOT gambling (see Legal below).
 >
+> **Current status (read first):** [docs/STATUS.md](docs/STATUS.md)
 > **Detailed docs**: [Architecture](docs/architecture.md) | [Development](docs/development.md) | [Features](docs/features.md) | [Native Modules](docs/native-modules.md) | [Security](docs/security.md) | [Roadmap](docs/roadmap.md) | [Payments](docs/payments.md) | [Legal](docs/legal.md) | [UI & Animation](docs/ui-animation.md)
 
 ## Tech Stack
@@ -14,8 +17,8 @@
 - **Build**: EAS Build (production), `expo-dev-client` (dev) -- NOT Expo Go
 - **Backend**: Firebase Auth + Firestore via `@react-native-firebase/*`
 - **Auth**: Google Sign-In, Apple Sign-In, Email magic link, Phone SMS OTP
-- **Payments**: Stripe (`@stripe/stripe-react-native`, Cloud Functions backend)
-- **Testing**: Jest + jest-expo (1018 tests)
+- **Payments**: Stripe + Plaid (`@stripe/stripe-react-native`, Cloud Functions backend)
+- **Testing**: Jest + jest-expo (client) + functions test suite
 - **Linting**: ESLint 9 + Prettier
 - **Package Manager**: pnpm
 
@@ -48,11 +51,14 @@ src/
   types/          # TypeScript type definitions
   constants/      # Colors, spacing, config (DEMO_MODE, cadences)
   utils/          # Formatting, payout algorithm, logger
-modules/          # Custom native Expo modules (Screen Time)
-functions/        # Firebase Cloud Functions (24 deployed)
-plugins/          # Expo config plugins (Firebase, Screen Time, entitlements)
-firebase/         # Config files (gitignored) + Firestore rules
-docs/             # Detailed documentation (architecture, roadmap, security, ...)
+modules/          # Custom native Expo module (niyah-screentime: Swift bridge)
+targets/          # iOS app extensions via @bacons/apple-targets (monitor, report,
+                  #   shieldaction, shieldconfig, widget) — Screen Time + Live Activity
+functions/        # Firebase Cloud Functions (~40 exports)
+plugins/          # Expo config plugins (Firebase frameworks/services, build fixes)
+firebase/         # Firestore rules + indexes (config plists gitignored)
+landing-pg/       # niyah.live marketing site + hosted /legal (Next.js, GitHub Pages)
+docs/             # Detailed documentation (STATUS, architecture, roadmap, security, ...)
 ```
 
 Full tree: [docs/architecture.md](docs/architecture.md)
@@ -89,8 +95,9 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 
 ### Native Modules
 
-- Custom modules in `modules/`, Swift via ExpoModulesCore
-- Config in `expo-module.config.json`, referenced via `nativeModulesDir: "modules"` in `app.config.ts`
+- Custom module in `modules/niyah-screentime/`, Swift via ExpoModulesCore
+- Config in `expo-module.config.json`, referenced via `nativeModulesDir: "modules"` in `app.config.js`
+- iOS app extensions live in `targets/` (registered by `@bacons/apple-targets`), NOT in plugins. See [docs/native-modules.md](docs/native-modules.md).
 
 ## Config & Secrets
 
@@ -101,27 +108,23 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 | Firebase config files | `firebase/` (gitignored, local only)    |
 | EAS cloud builds      | Upload config files as EAS file secrets |
 
-`app.config.ts` reads env vars at build time. No secrets hardcoded in source. See [docs/security.md](docs/security.md).
+`app.config.js` reads env vars at build time. No secrets hardcoded in source. See [docs/security.md](docs/security.md).
 
 ## Current Phase
 
-**Launch — App Store submission, targeting live by ~NYC arrival (early June 2026).** Real Stripe/Plaid money paths. The April 15 demo and the April–May campus finals launch already shipped. **Live status + the full phased next-steps plan are in [docs/may-26-resume.md](docs/may-26-resume.md) — read that first in a new session.**
+**Launch — App Store submission.** Working branch is `wallet-ledger` (de-pooled v1). Full
+current state, "remaining to submit," and post-submit dormant flips live in **[docs/STATUS.md](docs/STATUS.md)
+— read that first in a new session.** Phases/history: [docs/roadmap.md](docs/roadmap.md).
 
-Shipped to `launch` (pushed, NOT yet deployed as of 2026-05-25):
+## Gotchas (don't get burned)
 
-- In-app account deletion (`deleteAccount` CF + Profile UI) — App Store 5.1.1(v)
-- In-app Stripe bank management + `niyah.live/stripe/return` bounce → `niyah://stripe-return`
-- `requestWithdrawal` balance-integrity fix; `mergeOne` pagination; withdrawal eligibility gate removed
-- Plaid per-Item webhook URL; de-gamble copy ("Won"→"Earned", invite reframed)
-
-Key remaining (see may-26-resume.md for the phased plan):
-
-- **Deploy:** `firebase deploy --only firestore:rules,functions` + publish landing bounce (merge `launch`→`main`)
-- Live Stripe/Plaid keys; Apple APNs + `pnpm build:production`; App Store Connect listing (privacy labels, account-deletion disclosure) → submit
-- Keep `APP_CHECK_ENFORCED=false` until App Check Metrics ≥99% verified
-- FamilyControls Distribution already approved for all 5 extensions
-
-Roadmap: [docs/roadmap.md](docs/roadmap.md)
+- **`STRIPE_SECRET_KEY` is LIVE (`sk_live_`)** — real money moves. Deletion/withdrawal are irreversible live paths.
+- **Keep `APP_CHECK_ENFORCED=false`** until App Check Metrics ≥ 99% verified, or users lock out.
+- **Run `/vibe-security`** on auth/payments/rules diffs before commit; fix Critical + High first.
+- **Fardeen runs all git/deploy/outward actions** — supply commit messages only; never push/merge/deploy.
+- **Commit style:** one-liner subject, no body, no Co-Authored-By trailer.
+- **Drifted test account `cMtHvQkJJZOgU6pgYARj8nN5Wpf1` stays frozen** — don't reuse for clean tests.
+- **No VAIL / Dr. White references** — purged, never re-add.
 
 ## Demo Mode
 

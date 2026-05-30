@@ -55,7 +55,7 @@ npx expo start --clear # Clear cache and start
 ### Testing
 
 ```bash
-pnpm test              # All tests once (1018 tests, 48 suites)
+pnpm test              # All client tests once (Jest)
 pnpm test:watch        # Watch mode
 pnpm test:coverage     # Coverage report
 pnpm test:integration  # Integration tests only
@@ -118,7 +118,7 @@ pnpm doctor            # prints state of USB, DDI, network, pods; recommends com
 
 ## Cloud Functions
 
-24 Cloud Functions deployed to Firebase:
+~40 Cloud Function exports deployed to Firebase (representative subset below; full money-path list in [payments.md](./payments.md)):
 
 | Function                   | Purpose                                       |
 | -------------------------- | --------------------------------------------- |
