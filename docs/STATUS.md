@@ -4,14 +4,26 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-05-29.**
+> Last updated: **2026-05-30.**
 
 ## Right now
 
 - **Branch:** `wallet-ledger` — **22 commits ahead of `main`**, clean fast-forward (no divergence).
   All de-pool / legal / dead-code / privacy-manifest work is **committed** on this branch.
+  - **2026-05-30 legal-UX polish (staged, not yet committed):** acceptance overlay redesigned;
+    legal gate moved to fire right after sign-in (before profile setup); the permission-denied on
+    accept fixed; `acceptLegalTerms` CF made idempotent. Detail in the **Legal** bullet below. The
+    CF change needs the functions deploy to fully persist a new user's acceptance.
+  - **2026-05-30 money-path security hardening (staged, not yet committed):** `/vibe-security` run on
+    the branch → all findings fixed across 3 adversarial verification rounds. The bucket ledger
+    (`balance == Σbuckets`) is now enforced **everywhere money moves**: withdrawal is bucket-aware;
+    promo → `bonus`; delete refunds `deposited`-to-card only (+ pays/holds withdrawable house money,
+    records forfeits, guards frozen/drifted wallets); group cancel/timeout refunds + account merge
+    move buckets in lockstep; group refunds are now **idempotent**. Detail in **Audit findings**
+    below. **Needs the functions + rules deploy to take effect.**
 - **NOT merged, NOT pushed to `main`, NOT deployed.** Nothing live yet from this branch.
-- **Tests green:** ~796 client (Jest) + 38/38 functions. `tsc` clean both sides, eslint 0 errors.
+- **Tests green:** ~796 client (Jest) + **52/52 functions** (new `wallet.test.ts` — 14
+  bucket/withdrawal/deletion contract tests). `tsc` clean both sides, eslint 0 errors.
 - **Deployed today:** the previously-shipped `launch` security/payments work (rules + functions
   deploy ran; migration ran 16 processed / 9 migrated). The landing `niyah.live/stripe/return`
   bounce is live. The `wallet-ledger` changes are **not** part of that — they ship at the next deploy.
@@ -41,6 +53,17 @@ like stickK (complete → get your exact stake back, `SOLO_COMPLETION_MULTIPLIER
   (re-prompts every user, backfills `ageAttested18`). Hosted ToS/Privacy as Next.js routes in
   `landing-pg/app/legal/{privacy,terms}/page.tsx` → `niyah.live/legal/{privacy,terms}`
   (build-verified; auto-deploys on merge to `main`). Governing law = **Delaware**.
+  - **Acceptance UX (2026-05-30):** `LegalAcceptanceOverlay` is now a centered card with a 4-bullet
+    plain-words summary + clean "Read full Terms / Privacy" links (`LEGAL_TERMS_URL` /
+    `LEGAL_PRIVACY_URL` → hosted pages) instead of the full text inline. Acceptance now fires **right
+    after sign-in, before profile-setup** — all sign-in paths (`auth-entry` Google/Apple,
+    `verify-phone`) route through `/`, and `app/index.tsx` gates **legal → profile → tabs**. The dead
+    client-side direct write of the legal fields (always blocked by the rules denylist →
+    `permission-denied`) was removed from `authStore.acceptLegal`; `acceptLegalTerms` CF is the sole
+    writer and is now **idempotent** (`.update` → `.set(merge)`) so it persists even before the
+    profile doc exists. **Needs the functions deploy to take effect for new users** — until then a
+    fresh account shows the right order but re-prompts once on next launch. Hosted-legal links 404
+    until `landing-pg` is deployed.
 - **Language sweep:** all user-facing "bet/wager/gamble/win"/overstated-payout copy replaced with
   stake/commitment/goal/complete/Earned (onboarding carousel, `select`, `complete`, `waiting-room`;
   crypto art dropped). See [legal.md](./legal.md) for the terminology rule.
@@ -73,6 +96,61 @@ actions** — Claude supplies messages only.
 > App Store when the review can be babysat. Do **not** hand out "deposit $5 / earn $5" promo cards
 > before the engagement gate is live (it's the anti-fraud lever).
 
+## Audit findings (2026-05-30 — money/auth sweep)
+
+A 4-agent docs-vs-code sweep ran 2026-05-30. The auth surface + core money path are **solid**
+(every money/user-mutation CF verifies the ID token; deposit crediting is idempotent via a
+deterministic txn doc-id, race-safe vs the webhook; stake/`endsAt` re-derived server-side from the
+cadence table; Stripe webhook verifies sig + IP; rules lock wallet/txn/group/server-owned-user
+fields to admin-SDK-only). Findings:
+
+**Fixed this session (pre-submit, client-only, no deploy):**
+- **Solo `completeSession` race → dropped payout (was a money-loss BLOCKER).** `sessionStore.ts`
+  `completeSession` wrote `status:"completed"` to Firestore unconditionally, then fired
+  `cloudComplete`. The CF rejects if status ≠ active (`index.ts` handleSessionComplete:3066), so the
+  client write usually won the race and the payout transaction never ran — user completes, stake
+  never returns. `surrenderSession` was already fixed for this; complete was not. Now gated behind
+  `DEMO_MODE` (CF is sole status writer), mirroring surrender. Test flipped to pin the new contract.
+  **Needs device re-test of solo complete → payout once deployed.**
+
+**Pre-submit decisions / checks (Fardeen — not code bugs):**
+- ~~**Confirm `FINALS_PROMO_CENTS=0`**~~ — **DONE (2026-05-30).** Code default flipped 500 → **0**,
+  and `functions/.env.production` pins `FINALS_PROMO_CENTS=0` explicitly. The promo is now safe even
+  if re-enabled: it credits the gated `bonus` bucket and bucket-aware withdrawal won't release it
+  before the engagement gate. The original "$5 of house money withdrawable per qualifying user" risk
+  is closed.
+- **Consider `SCREEN_PROTECTION_ENABLED=true`** (`src/hooks/useScreenProtection.ts:33`, currently
+  `false` as a demo workaround) for the 6 sensitive payment screens (deposit/withdraw/bank-setup/
+  verify-identity/stripe-onboarding/profile). It blanks during AirPlay/mirroring — verify it won't
+  break investor screen-share demos before flipping.
+- **`acceptLegal` advances the local 18+/ToS gate even if the `acceptLegalTerms` CF fails**
+  (best-effort, re-prompts next launch). Decide whether to block deposit/stake until the server
+  durably records acceptance (legal-state hardening for an 18+ money app).
+
+**Money-path bugs — FIXED 2026-05-30 (`/vibe-security` + 3 adversarial verification rounds):**
+- ✅ `maybeAwardFinalsPromo` now credits `bonusBalance` in lockstep with `balance` (invariant holds).
+- ✅ **`requestWithdrawal` is bucket-aware** — gates on `computeWithdrawable(buckets, gateMet)`, draws
+  buckets down on debit via `withdrawDrawOrder`, and one `restoreWithdrawalReservation` helper puts
+  buckets back across all 6 abort paths. The previously-dead `computeWithdrawable`/draw-order helpers
+  are now wired. This also gated the **live $5 first-surrender forgiveness** bonus (was withdrawable
+  with no gate).
+- ✅ `deleteAccount` refund basis is now the `deposited` bucket only (`cardRefundableCents`); gate-met
+  withdrawable bonus is paid via the ACH/hold path; all forfeits recorded; added a frozen/drift guard
+  (holds full balance for manual review, still deletes for App Store compliance) + an up-front split
+  record so legs survive a mid-deletion crash.
+- ✅ **Group cancel/timeout refunds** restore `depositedBalance` in lockstep AND are **idempotent**
+  (deterministic `group_refund_<sid>_<uid>` doc id); `cancelGroupSession` now rejects already-
+  `cancelled` sessions. Closes a double-refund cash leak. ✅ **Account merge** moves all 4 buckets in
+  lockstep (no lockout of merged-in funds).
+- ⏳ **STILL OPEN:** withdrawal idempotency key buckets by minute → two genuine same-amount
+  withdrawals in one minute double-debit the wallet but fire one Stripe transfer. Mitigated by 3/hr
+  rate limit; **not** addressed this session. The ACH-payout + held-earnings email TODOs in
+  `deleteAccount` remain (unreachable in deposit-only v1).
+
+> **Group-refund bucket note:** cancel/timeout refunds (and `recordGroupSessionPayout`) restore stake
+> to `depositedBalance` regardless of source bucket — the documented pilot convention (no
+> bonus/earned-funded group stakes pre-promo). When the group multiplier/promo land, split source.
+
 ## Post-submit dormant flips (NOT before submit)
 
 The earn-more multiplier + "$5/$5" promo are **core but sequenced post-approval** — flipped
@@ -83,17 +161,26 @@ binary ships now; the gate is the enabler.
 
 - **Backfill + reconcile** bucket invariant MUST run first (maps txn-log → `deposited`/`earned`;
   unexplained residual is **flagged/frozen for manual review**, never auto-bucketed to `credit`).
-- **Engagement gate LIVE** — re-enable `assertWithdrawalEligibility` (currently returns `{ok:true}`),
-  made bucket-aware. Proposed gate: account age ≥ 5 days, ≥ 3 completed sessions, ≥ ~8–12 focus-hrs,
-  ≥ 120-min min session to count; **drop** the distinct-partners requirement (kills solo users).
-  Without it, promo = deposit-$5 / withdraw-$5 / churn.
+  ⚠️ `reconcileWalletBalances` currently checks `balance` vs **transaction-sum**, NOT vs **Σbuckets** —
+  extending it to also freeze on bucket drift is the right defense-in-depth, but would false-freeze
+  un-backfilled legacy wallets, so **gate that change on the backfill being confirmed complete**.
+- **Engagement gate — MECHANISM BUILT, CRITERIA is Fardeen's call.** Bucket-aware withdrawal is LIVE
+  and currently derives `gateMet` from `getWithdrawalEligibilityStats` = **≥5 completed sessions AND
+  ≥2 distinct partners** (the old finals-promo gate). ⚠️ This **conflicts with the plan to drop the
+  distinct-partners requirement** (it kills solo users). Today it only affects bonus/earned
+  withdrawal — deposits are always withdrawable, and the only gated $ in v1.0 is the $5 forgiveness
+  bonus — but finalize the definition: proposed account age ≥ 5 days, ≥ 3 completed sessions,
+  ≥ ~8–12 focus-hrs, ≥ 120-min min session, **no** distinct-partners. Change in one place: the
+  `gateMet` computation (now in `requestWithdrawal`, `deleteAccount`, and `maybeAwardFinalsPromo`).
+  The old `assertWithdrawalEligibility` (returns `{ok:true}`) is now superseded by this bucket gate.
 - **Surplus cap** built — `min(1× net deposits, $50)` — before any multiplier > 1.
 
-Dormant work still to build (behind flags): bucket-aware `requestWithdrawal`; `deleteAccount` bucket
-rewrite (refund `deposited` to card / ACH-or-forfeit `earned`+`bonus` / always-forfeit `credit`);
-soft `deactivate`/pause path (App Store 5.1.1(v) keeps hard-delete irreversible, so restore-on-return
-needs a separate path); client withdrawable-balance UI. Then `/vibe-security` the full diff →
-backfill → flip flags.
+✅ **Built this session (2026-05-30):** bucket-aware `requestWithdrawal`; `deleteAccount` bucket
+rewrite (refund `deposited` to card / pay-or-hold withdrawable `earned`+`bonus` / forfeit-and-record
+non-withdrawable bonus + always-forfeit `credit`); group cancel/timeout + merge bucket consistency.
+**Still to build (behind flags):** soft `deactivate`/pause path (App Store 5.1.1(v) keeps hard-delete
+irreversible, so restore-on-return needs a separate path); client withdrawable-balance UI; the
+backfill + reconcile-Σbuckets job above. Then finalize the gate criteria → backfill → flip flags.
 
 Group payout currently credits `depositedBalance` (pilot assumption: no bonus/earned-funded group
 stakes pre-promo). When the group multiplier/promo land, split surplus → `earnedBalance`.

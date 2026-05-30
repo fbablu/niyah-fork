@@ -282,8 +282,16 @@ service cloud.firestore {
     // null for pre-auth events (e.g. install/app_open before sign-in).
     match /analytics_events/{eventId} {
       allow read: if false;
+      // Shape-locked create: only the four fields the client analytics writer
+      // emits (name, userId, props, createdAt), a bounded event name, and a
+      // userId that is null or the caller's own uid. Without the field
+      // allowlist + size cap any signed-in user could write unbounded ~1 MiB
+      // docs of arbitrary shape — storage/billing abuse that also pollutes the
+      // aggregateDailyMetrics rollup.
       allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['name', 'userId', 'props', 'createdAt'])
         && request.resource.data.name is string
+        && request.resource.data.name.size() <= 64
         && (request.resource.data.userId == null
             || request.resource.data.userId == request.auth.uid);
       allow update, delete: if false;

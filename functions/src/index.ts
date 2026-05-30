@@ -18,7 +18,12 @@ import {
   toComposition,
   readComposition,
   sumComposition,
+  sumBuckets,
+  computeWithdrawable,
+  withdrawDrawOrder,
+  cardRefundableCents,
   STAKE_DRAW_ORDER,
+  type Buckets,
 } from "./wallet";
 import Stripe from "stripe";
 import {
@@ -690,6 +695,51 @@ async function recordGroupSessionPayout(
       description: "Group session payout",
       sessionId,
       stripeTransferId: stripeTransferId ?? null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+/**
+ * Idempotently refund a group-session stake to a participant. Uses a
+ * deterministic transaction doc id (`group_refund_<sessionId>_<userId>`) checked
+ * INSIDE the transaction, so a re-fired cancel / decline-cancel / auto-timeout —
+ * or a user double-tapping cancel, or a partially-failed batch being retried —
+ * can NEVER double-credit. Restores the stake to depositedBalance in lockstep
+ * with balance (the documented group-money convention; recordGroupSessionPayout
+ * does the same; pilot assumption: no bonus/earned-funded group stakes
+ * pre-promo), so balance == Σbuckets holds and the bucket-aware withdrawal gate
+ * doesn't lock the user out of their refund.
+ */
+async function refundGroupStake(
+  userId: string,
+  sessionId: string,
+  amount: number,
+  description: string,
+): Promise<void> {
+  if (!(amount > 0)) return;
+  const walletRef = db.collection("wallets").doc(userId);
+  const txnRef = db
+    .collection("transactions")
+    .doc(`group_refund_${sessionId}_${userId}`);
+  await db.runTransaction(async (txn) => {
+    const txnSnap = await txn.get(txnRef);
+    if (txnSnap.exists) return; // already refunded — idempotent no-op
+    txn.set(
+      walletRef,
+      {
+        balance: admin.firestore.FieldValue.increment(amount),
+        depositedBalance: admin.firestore.FieldValue.increment(amount),
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    txn.set(txnRef, {
+      userId,
+      type: "refund",
+      amount,
+      description,
+      sessionId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   });
@@ -3451,6 +3501,25 @@ export const getWithdrawalEligibility = onRequest(
  *
  * Returns: { success, transferId, payoutId?, estimatedArrival }
  */
+/**
+ * Put a withdrawal reservation back after a post-debit failure: restores the
+ * raw balance AND the exact buckets `drawDown` removed, so the ledger invariant
+ * (balance == Σbuckets) is preserved on every abort path. Atomic via
+ * FieldValue.increment — no read-modify-write race with concurrent CF writes.
+ */
+async function restoreWithdrawalReservation(
+  walletRef: FirebaseFirestore.DocumentReference,
+  amount: number,
+  reserved: Buckets,
+): Promise<void> {
+  await walletRef.update({
+    balance: admin.firestore.FieldValue.increment(amount),
+    depositedBalance: admin.firestore.FieldValue.increment(reserved.deposited),
+    earnedBalance: admin.firestore.FieldValue.increment(reserved.earned),
+    bonusBalance: admin.firestore.FieldValue.increment(reserved.bonus),
+  });
+}
+
 export const requestWithdrawal = onRequest(
   PUBLIC_STRIPE_HTTP_OPTIONS,
   async (req, res) => {
@@ -3561,6 +3630,9 @@ export const requestWithdrawal = onRequest(
     const txnRef = db.collection("transactions").doc();
     let txnPersisted = false;
     let stripeTransferId: string | undefined;
+    // Buckets drawn down by the debit, captured so every restore path puts back
+    // exactly what was reserved. Non-null once the debit transaction commits.
+    let reserved: Buckets | null = null;
 
     try {
       const walletRef = db.collection("wallets").doc(uid);
@@ -3576,17 +3648,59 @@ export const requestWithdrawal = onRequest(
         return;
       }
 
-      if ((walletPre.balance ?? 0) < amount) {
-        sendError(res, 400, "Insufficient balance");
+      // Bucket-aware withdrawable gate. Deposits (card principal) are always
+      // withdrawable; earned (winnings) and bonus (promo + first-surrender
+      // forgiveness) only AFTER the engagement gate (>=5 completed sessions
+      // with >=2 distinct partners); credit never. This is what stops
+      // house-funded grants from being cashed out as free money before the user
+      // has real engagement — gating raw `balance` did not (it counted house
+      // money as withdrawable on the first session).
+      const eligStats = await getWithdrawalEligibilityStats(uid);
+      const gateMet =
+        eligStats.completedSessions >= eligStats.requiredSessions &&
+        eligStats.distinctPartners >= eligStats.requiredPartners;
+      const preBuckets = readBucketsOrInit(
+        walletPre,
+        typeof walletPre.balance === "number" ? walletPre.balance : 0,
+      );
+      if (computeWithdrawable(preBuckets, gateMet) < amount) {
+        sendError(
+          res,
+          400,
+          gateMet
+            ? "Insufficient balance"
+            : "Some of your balance unlocks after 5 completed sessions with 2+ friends",
+        );
         return;
       }
 
-      // Atomically deduct balance from wallets collection
+      // Atomically deduct balance AND draw the amount down across buckets in
+      // the gate-aware order, so the ledger invariant holds and a later
+      // withdrawal can't re-spend the same gated funds. `reserved` is exactly
+      // what we drew — every restore path below puts these buckets back.
       await db.runTransaction(async (txn) => {
         const snap = await txn.get(walletRef);
-        const current: number = snap.data()?.balance ?? 0;
+        const data = snap.data() ?? {};
+        const current: number =
+          typeof data.balance === "number" ? data.balance : 0;
         if (current < amount) throw new Error("Insufficient balance");
-        txn.update(walletRef, { balance: current - amount });
+        const buckets = readBucketsOrInit(data, current);
+        const { drawn, shortfall } = drawDown(
+          buckets,
+          amount,
+          withdrawDrawOrder(gateMet),
+        );
+        // Defensive: the gate above already proved enough withdrawable funds,
+        // so a shortfall here means a concurrent debit raced us — refuse
+        // rather than overdraw a gated bucket.
+        if (shortfall > 0) throw new Error("Insufficient withdrawable balance");
+        reserved = drawn;
+        txn.update(walletRef, {
+          balance: current - amount,
+          depositedBalance: buckets.deposited - drawn.deposited,
+          earnedBalance: buckets.earned - drawn.earned,
+          bonusBalance: buckets.bonus - drawn.bonus,
+        });
         txn.set(txnRef, {
           userId: uid,
           type: "withdrawal",
@@ -3609,12 +3723,10 @@ export const requestWithdrawal = onRequest(
       const connectedAccountId: string =
         (merged.stripeAccountId as string | undefined) ?? "";
       if (!connectedAccountId) {
-        // Restore balance since Stripe transfer can't proceed
-        await db.runTransaction(async (txn) => {
-          const snap = await txn.get(walletRef);
-          const current: number = snap.data()?.balance ?? 0;
-          txn.update(walletRef, { balance: current + amount });
-        });
+        // Restore the reservation since the Stripe transfer can't proceed
+        if (reserved) {
+          await restoreWithdrawalReservation(walletRef, amount, reserved);
+        }
         await txnRef.delete();
         sendError(
           res,
@@ -3624,12 +3736,10 @@ export const requestWithdrawal = onRequest(
         return;
       }
       if (merged.stripeAccountStatus !== "active") {
-        // Restore balance since Stripe transfer can't proceed
-        await db.runTransaction(async (txn) => {
-          const snap = await txn.get(walletRef);
-          const current: number = snap.data()?.balance ?? 0;
-          txn.update(walletRef, { balance: current + amount });
-        });
+        // Restore the reservation since the Stripe transfer can't proceed
+        if (reserved) {
+          await restoreWithdrawalReservation(walletRef, amount, reserved);
+        }
         await txnRef.delete();
         sendError(
           res,
@@ -3647,11 +3757,9 @@ export const requestWithdrawal = onRequest(
       try {
         const liveAccount = await stripe.accounts.retrieve(connectedAccountId);
         if (!liveAccount.payouts_enabled || !liveAccount.charges_enabled) {
-          await db.runTransaction(async (txn) => {
-            const snap = await txn.get(walletRef);
-            const current: number = snap.data()?.balance ?? 0;
-            txn.update(walletRef, { balance: current + amount });
-          });
+          if (reserved) {
+            await restoreWithdrawalReservation(walletRef, amount, reserved);
+          }
           await txnRef.delete();
           sendError(
             res,
@@ -3673,22 +3781,18 @@ export const requestWithdrawal = onRequest(
           .trim()
           .toUpperCase();
         if (payoutState && WITHDRAWAL_EXCLUDED_STATES.has(payoutState)) {
-          await db.runTransaction(async (txn) => {
-            const snap = await txn.get(walletRef);
-            const current: number = snap.data()?.balance ?? 0;
-            txn.update(walletRef, { balance: current + amount });
-          });
+          if (reserved) {
+            await restoreWithdrawalReservation(walletRef, amount, reserved);
+          }
           await txnRef.delete();
           sendError(res, 403, "Withdrawals aren't available in your state yet.");
           return;
         }
       } catch (err) {
         console.error("Stripe account retrieve failed:", err);
-        await db.runTransaction(async (txn) => {
-          const snap = await txn.get(walletRef);
-          const current: number = snap.data()?.balance ?? 0;
-          txn.update(walletRef, { balance: current + amount });
-        });
+        if (reserved) {
+          await restoreWithdrawalReservation(walletRef, amount, reserved);
+        }
         await txnRef.delete();
         sendError(res, 502, "Could not verify payout account with Stripe");
         return;
@@ -3806,11 +3910,9 @@ export const requestWithdrawal = onRequest(
       }
       try {
         const walletRestoreRef = db.collection("wallets").doc(uid);
-        await db.runTransaction(async (txn) => {
-          const snap = await txn.get(walletRestoreRef);
-          const current: number = snap.data()?.balance ?? 0;
-          txn.update(walletRestoreRef, { balance: current + amount });
-        });
+        if (reserved) {
+          await restoreWithdrawalReservation(walletRestoreRef, amount, reserved);
+        }
         await txnRef.delete();
       } catch (restoreErr) {
         console.error(
@@ -4249,18 +4351,54 @@ const STRIPE_WEBHOOK_IPS = new Set<string>([
 ]);
 
 /**
- * Returns the immediate-upstream client IP from the X-Forwarded-For chain
- * Cloud Run injects. Cloud Run guarantees the rightmost entry is the GFE,
- * so the leftmost-but-one is the actual client. We read the leftmost and
- * tolerate proxies that report only one hop. Returns "" when unknown.
+ * True for a routable public IP (v4 or v6). Used to skip trusted-proxy /
+ * private hops when picking the real client IP out of X-Forwarded-For.
+ */
+function isPublicIp(ip: string): boolean {
+  if (!ip) return false;
+  if (ip.includes(":")) {
+    const v6 = ip.toLowerCase();
+    if (v6 === "::1") return false; // loopback
+    if (v6.startsWith("fe80")) return false; // link-local
+    if (v6.startsWith("fc") || v6.startsWith("fd")) return false; // unique-local fc00::/7
+    if (v6.startsWith("::ffff:")) return isPublicIp(v6.slice(7)); // IPv4-mapped
+    return true;
+  }
+  const parts = ip.split(".");
+  if (parts.length !== 4) return false;
+  const nums = parts.map((p) => Number(p));
+  if (nums.some((nn) => !Number.isInteger(nn) || nn < 0 || nn > 255)) return false;
+  const [a, b] = nums;
+  if (a === 0 || a === 10 || a === 127) return false; // this-network / private / loopback
+  if (a === 172 && b >= 16 && b <= 31) return false; // 172.16.0.0/12
+  if (a === 192 && b === 168) return false; // 192.168.0.0/16
+  if (a === 169 && b === 254) return false; // link-local
+  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT 100.64.0.0/10
+  return true;
+}
+
+/**
+ * The real client IP from the X-Forwarded-For chain. The rightmost hops are
+ * appended by trusted infrastructure (Cloud Run / Google front end) and cannot
+ * be forged by the client, so we scan RIGHT-to-LEFT and return the first public
+ * address — the closest-to-platform IP the client could not have spoofed. A
+ * client that injects a fake XFF only prepends entries to the LEFT of the
+ * platform-observed value, so those forged hops are skipped; private /
+ * link-local hops (load-balancer internals) are skipped too. Returns "" when
+ * no public IP is visible (e.g. local emulator). NOTE: reading the LEFTMOST
+ * entry (the previous behaviour) is fully client-controlled — an attacker
+ * rotates it to scatter past the per-IP rate limiter.
  */
 function getCallerIp(req: Request): string {
   const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.length > 0) {
-    return xff.split(",")[0]?.trim() ?? "";
-  }
-  if (Array.isArray(xff) && xff.length > 0) {
-    return xff[0].split(",")[0]?.trim() ?? "";
+  const raw = Array.isArray(xff) ? xff.join(",") : xff;
+  if (typeof raw !== "string" || raw.length === 0) return "";
+  const hops = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (let i = hops.length - 1; i >= 0; i--) {
+    if (isPublicIp(hops[i])) return hops[i];
   }
   return "";
 }
@@ -4636,6 +4774,13 @@ export const plaidWebhook = onRequest(
  * Writes `legalAcceptanceVersion` and `legalAcceptedAt` (server timestamp)
  * to the user document for tamper-resistance.
  */
+// Legal versions the app actually ships (client sends CURRENT_LEGAL_VERSION;
+// "1.0.0" is the prior version kept for users mid-migration). Bumping the
+// client's CURRENT_LEGAL_VERSION requires adding the new value here. An
+// allowlist (not just "non-empty string") stops arbitrary/oversized junk being
+// written to the audit field that the rules denylist makes admin-only.
+const ACCEPTED_LEGAL_VERSIONS = new Set(["1.0.0", "2.0.0"]);
+
 export const acceptLegalTerms = onRequest(
   PUBLIC_HTTP_OPTIONS,
   async (req: Request, res: Response) => {
@@ -4648,7 +4793,7 @@ export const acceptLegalTerms = onRequest(
       const uid = await verifyAuth(req);
       const { version } = req.body;
 
-      if (!version || typeof version !== "string") {
+      if (typeof version !== "string" || !ACCEPTED_LEGAL_VERSIONS.has(version)) {
         sendError(res, 400, "Missing or invalid version");
         return;
       }
@@ -4663,21 +4808,29 @@ export const acceptLegalTerms = onRequest(
         return;
       }
 
-      await db.collection("users").doc(uid).update({
-        legalAcceptanceVersion: version,
-        legalAcceptedAt: admin.firestore.FieldValue.serverTimestamp(),
-        // In-app acceptance requires affirming 18+ (LegalAcceptanceOverlay gates
-        // Continue on it), so record the attestation alongside. No DOB stored —
-        // Stripe KYC verifies actual age at money-out.
-        ageAttested18: true,
-        // PII leak fix: email/phone are no longer stored on the world-readable
-        // users/{uid} doc. Strip any legacy values here — admin SDK bypasses the
-        // client-write denylist. The auth-verified copies go to userPrivate
-        // below. Runs for every user at acceptance + all users on the 2.0.0
-        // re-prompt, so this also migrates existing docs off the public leak.
-        email: admin.firestore.FieldValue.delete(),
-        phone: admin.firestore.FieldValue.delete(),
-      });
+      // set+merge, not update: legal acceptance now fires right after sign-in,
+      // BEFORE profile-setup creates the user doc, so the doc may not exist yet.
+      // merge creates-or-updates and makes the field-deletes below safe no-ops
+      // on a fresh doc. (The doc carries no profileComplete, so the client still
+      // routes the user on to profile setup.)
+      await db.collection("users").doc(uid).set(
+        {
+          legalAcceptanceVersion: version,
+          legalAcceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+          // In-app acceptance requires affirming 18+ (LegalAcceptanceOverlay gates
+          // Continue on it), so record the attestation alongside. No DOB stored —
+          // Stripe KYC verifies actual age at money-out.
+          ageAttested18: true,
+          // PII leak fix: email/phone are no longer stored on the world-readable
+          // users/{uid} doc. Strip any legacy values here — admin SDK bypasses the
+          // client-write denylist. The auth-verified copies go to userPrivate
+          // below. Runs for every user at acceptance + all users on the 2.0.0
+          // re-prompt, so this also migrates existing docs off the public leak.
+          email: admin.firestore.FieldValue.delete(),
+          phone: admin.firestore.FieldValue.delete(),
+        },
+        { merge: true },
+      );
 
       // Maintain the owner-only contact index (userPrivate/{uid}) that
       // findContactsOnNiyah matches against — written from auth-verified
@@ -5358,40 +5511,27 @@ export const respondToGroupInvite = onRequest(
           sessionData.stakePerParticipant * updatedParticipantIds.length;
 
         if (updatedParticipantIds.length < 2) {
-          // Cancel session and refund all accepted participants
-          const refundBatch = db.batch();
-
+          // Cancel session and refund all accepted participants. Each refund is
+          // idempotent (deterministic doc id), so even if this session is later
+          // re-cancelled / times out, no participant is double-credited.
           for (const pid of updatedParticipantIds) {
             if (updatedParticipants[pid]?.accepted) {
-              const refundWalletRef = db.collection("wallets").doc(pid);
-              const refundTxnRef = db.collection("transactions").doc();
-
-              // Note: using batch, not transaction — acceptable for refunds
-              refundBatch.update(refundWalletRef, {
-                balance: admin.firestore.FieldValue.increment(
-                  sessionData.stakePerParticipant,
-                ),
-              });
-              refundBatch.set(refundTxnRef, {
-                userId: pid,
-                type: "refund",
-                amount: sessionData.stakePerParticipant,
-                description: "Group session cancelled — stake refunded",
-                sessionId: inviteData.sessionId,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+              await refundGroupStake(
+                pid,
+                inviteData.sessionId,
+                sessionData.stakePerParticipant,
+                "Group session cancelled — stake refunded",
+              );
             }
           }
 
-          refundBatch.update(sessionRef, {
+          await sessionRef.update({
             status: "cancelled",
             participantIds: updatedParticipantIds,
             participants: updatedParticipants,
             poolTotal: updatedPoolTotal,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
-
-          await refundBatch.commit();
 
           console.log(
             `respondToGroupInvite: session=${inviteData.sessionId} cancelled (< 2 participants)`,
@@ -6127,9 +6267,14 @@ export const cancelGroupSession = onRequest(
         return;
       }
 
+      // Reject already-terminal sessions. Blocking `cancelled` (not just
+      // active/completed) closes a double-refund: a prior decline-cancel or
+      // auto-timeout already refunded these participants, and re-running cancel
+      // would pay them again.
       if (
         sessionData.status === "active" ||
-        sessionData.status === "completed"
+        sessionData.status === "completed" ||
+        sessionData.status === "cancelled"
       ) {
         sendError(
           res,
@@ -6139,31 +6284,23 @@ export const cancelGroupSession = onRequest(
         return;
       }
 
-      // Refund all accepted participants
-      const batch = db.batch();
+      // Refund all accepted participants. Each refund is idempotent
+      // (deterministic doc id), so a double-tapped cancel or a retry can't
+      // double-credit even before the status guard above takes effect.
       let refundedCount = 0;
-
       for (const pid of sessionData.participantIds) {
         if (sessionData.participants[pid]?.accepted) {
-          const walletRef = db.collection("wallets").doc(pid);
-          const txnRef = db.collection("transactions").doc();
-
-          batch.update(walletRef, {
-            balance: admin.firestore.FieldValue.increment(
-              sessionData.stakePerParticipant,
-            ),
-          });
-          batch.set(txnRef, {
-            userId: pid,
-            type: "refund",
-            amount: sessionData.stakePerParticipant,
-            description: "Group session cancelled — stake refunded",
+          await refundGroupStake(
+            pid,
             sessionId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
+            sessionData.stakePerParticipant,
+            "Group session cancelled — stake refunded",
+          );
           refundedCount++;
         }
       }
+
+      const batch = db.batch();
 
       // Expire all pending invites for this session
       const invitesSnap = await db
@@ -6241,29 +6378,21 @@ export const autoTimeoutGroupSessions = onSchedule(
         const sessionId = sessionDoc.id;
 
         try {
-          const batch = db.batch();
-
-          // Refund all accepted participants
+          // Refund all accepted participants. Idempotent per participant, so a
+          // partially-failed run that re-selects this still-`ready` session on
+          // the next tick can't double-credit anyone.
           for (const pid of sessionData.participantIds) {
             if (sessionData.participants[pid]?.accepted) {
-              const walletRef = db.collection("wallets").doc(pid);
-              const txnRef = db.collection("transactions").doc();
-
-              batch.update(walletRef, {
-                balance: admin.firestore.FieldValue.increment(
-                  sessionData.stakePerParticipant,
-                ),
-              });
-              batch.set(txnRef, {
-                userId: pid,
-                type: "refund",
-                amount: sessionData.stakePerParticipant,
-                description: "Group session timed out — stake refunded",
+              await refundGroupStake(
+                pid,
                 sessionId,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+                sessionData.stakePerParticipant,
+                "Group session timed out — stake refunded",
+              );
             }
           }
+
+          const batch = db.batch();
 
           // Expire pending invites
           const invitesSnap = await db
@@ -6405,10 +6534,16 @@ export const sessionProgressNudges = onSchedule(
 // a one-time $5 credit. Same mechanism as the "first 100 signups" promo on
 // niyah.live, but gated so two friends can't cycle money and cash out.
 
+// Default OFF. The promo is deferred to the post-approval server flip (see
+// docs/STATUS.md) — turning it on is an explicit FINALS_PROMO_CENTS=<cents> env
+// set, never an untracked default. Safe-state is the default so a missing env
+// file can't silently ship withdrawable house money. When it IS enabled the
+// credit lands in the `bonus` bucket (see maybeAwardFinalsPromo), which the
+// bucket-aware withdrawal gate only releases after the engagement gate.
 const FINALS_PROMO_CENTS: number = (() => {
   const raw = process.env.FINALS_PROMO_CENTS;
-  const parsed = raw ? parseInt(raw, 10) : 500;
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
+  const parsed = raw ? parseInt(raw, 10) : 0;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 })();
 
 // One-time refund applied the first time a user surrenders (solo sessions
@@ -6442,11 +6577,17 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
 
     const walletSnap = await txn.get(walletRef);
     const currentBalance: number = walletSnap.data()?.balance ?? 0;
+    const currentBonus: number = walletSnap.data()?.bonusBalance ?? 0;
     const newBalance = currentBalance + FINALS_PROMO_CENTS;
 
     if (walletSnap.exists) {
       txn.update(walletRef, {
         balance: newBalance,
+        // House-funded promo -> bonus bucket, in lockstep with balance so the
+        // ledger invariant (balance == Σbuckets) holds. bonus is withdrawable
+        // only after the engagement gate and never refundable to a card, so
+        // this $ can't be cashed out as free money before real engagement.
+        bonusBalance: currentBonus + FINALS_PROMO_CENTS,
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else {
@@ -6455,6 +6596,7 @@ async function maybeAwardFinalsPromo(uid: string): Promise<void> {
         {
           balance: newBalance,
           pendingBalance: 0,
+          bonusBalance: currentBonus + FINALS_PROMO_CENTS,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -7326,12 +7468,25 @@ async function mergeOne(
     const newBal = typeof newData.balance === "number" ? newData.balance : 0;
     const newPending =
       typeof newData.pendingBalance === "number" ? newData.pendingBalance : 0;
+    // Move the four buckets in lockstep with balance so the surviving wallet
+    // keeps balance == Σbuckets. Without this, the merged-in balance has no
+    // backing bucket and the bucket-aware withdrawal gate would lock the user
+    // out of their own merged funds. readBucketsOrInit treats a legacy
+    // un-bucketed source wallet as all-deposited (correct: its balance is
+    // card principal).
+    const newBuckets = readBucketsOrInit(newData, newBal);
     summary.walletCents = newBal;
     summary.pendingCents = newPending;
     if (existingSnap.exists) {
       txn.update(existingWalletRef, {
         balance: admin.firestore.FieldValue.increment(newBal),
         pendingBalance: admin.firestore.FieldValue.increment(newPending),
+        depositedBalance: admin.firestore.FieldValue.increment(
+          newBuckets.deposited,
+        ),
+        earnedBalance: admin.firestore.FieldValue.increment(newBuckets.earned),
+        bonusBalance: admin.firestore.FieldValue.increment(newBuckets.bonus),
+        creditBalance: admin.firestore.FieldValue.increment(newBuckets.credit),
         mergeInProgress: admin.firestore.FieldValue.delete(),
         mergeStartedAt: admin.firestore.FieldValue.delete(),
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
@@ -7340,6 +7495,10 @@ async function mergeOne(
       txn.set(existingWalletRef, {
         balance: newBal,
         pendingBalance: newPending,
+        depositedBalance: newBuckets.deposited,
+        earnedBalance: newBuckets.earned,
+        bonusBalance: newBuckets.bonus,
+        creditBalance: newBuckets.credit,
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
@@ -7348,6 +7507,12 @@ async function mergeOne(
       {
         balance: 0,
         pendingBalance: 0,
+        // Zero the buckets too — the defunct wallet must also satisfy
+        // balance == Σbuckets (all money moved to the surviving wallet).
+        depositedBalance: 0,
+        earnedBalance: 0,
+        bonusBalance: 0,
+        creditBalance: 0,
         mergedInto: existingUid,
         mergedAt: admin.firestore.FieldValue.serverTimestamp(),
         mergeInProgress: admin.firestore.FieldValue.delete(),
@@ -7664,16 +7829,79 @@ export const deleteAccount = onRequest(
       const walletData = walletSnap.exists ? walletSnap.data() ?? {} : {};
       const balanceCents =
         typeof walletData.balance === "number" ? walletData.balance : 0;
-      // earnedBalance is the post-launch field that splits "money the user
-      // deposited" from "money the user won." Until handleSessionComplete /
-      // distributeGroupPayouts write it, every cent is treated as
-      // refundable principal — correct behaviour for v1.0.
-      const earnedCents =
-        typeof walletData.earnedBalance === "number"
-          ? walletData.earnedBalance
+      // Split the balance by source so deletion treats each bucket exactly like
+      // a withdrawal would — using the SAME definition of "withdrawable" so the
+      // two paths can never disagree:
+      //   deposited -> card-refundable principal (the ONLY money a card refund
+      //                may touch — refunding house money mints free cash).
+      //   earned + bonus (only once the engagement gate is met) -> the user's
+      //                withdrawable funds; paid out via the ACH / 30-day-hold
+      //                path below, never silently destroyed.
+      //   earned + bonus (gate NOT met), and credit (never withdrawable by
+      //                design) -> house money the user could not have withdrawn;
+      //                forfeited to the house, but RECORDED in the audit row so
+      //                no cent vanishes untraced.
+      // A legacy un-bucketed wallet is treated as all-deposited by
+      // readBucketsOrInit (correct for v1.0, where every cent is a card deposit).
+      const deleteBuckets = readBucketsOrInit(walletData, balanceCents);
+      // On a frozen or drifted wallet (balance != Σbuckets) the bucket split is
+      // untrustworthy — auto-refunding from it could destroy or mint money. Hold
+      // the FULL balance for manual operator resolution and move nothing
+      // automatically. The account still deletes (App Store compliance) and the
+      // held amount is recorded, so an operator can settle it by hand.
+      const walletDrifted =
+        walletData.frozen === true ||
+        sumBuckets(deleteBuckets) !== balanceCents;
+      const delEligStats = await getWithdrawalEligibilityStats(uid);
+      const delGateMet =
+        delEligStats.completedSessions >= delEligStats.requiredSessions &&
+        delEligStats.distinctPartners >= delEligStats.requiredPartners;
+      // deposited -> card refund (principal). Withdrawable house money (earned +
+      // gate-met bonus) -> ACH / 30-day hold. Non-withdrawable house money +
+      // credit -> forfeited, recorded. All zero on a drifted wallet (held for
+      // manual review instead).
+      const pendingRefundCents = walletDrifted
+        ? 0
+        : cardRefundableCents(deleteBuckets);
+      const earnedPayoutCents = walletDrifted
+        ? 0
+        : delGateMet
+          ? Math.max(0, deleteBuckets.earned + deleteBuckets.bonus)
           : 0;
-      const pendingRefundCents = Math.max(0, balanceCents - earnedCents);
-      const earnedPayoutCents = Math.max(0, earnedCents);
+      const earnedForfeitedCents =
+        walletDrifted || delGateMet ? 0 : Math.max(0, deleteBuckets.earned);
+      const bonusForfeitedCents =
+        walletDrifted || delGateMet ? 0 : Math.max(0, deleteBuckets.bonus);
+      const creditForfeitedCents = walletDrifted
+        ? 0
+        : Math.max(0, deleteBuckets.credit);
+      const manualReviewHeldCents = walletDrifted
+        ? Math.max(0, balanceCents)
+        : 0;
+
+      // Record the planned money split UP FRONT — before any Stripe refund or
+      // the wallet delete — so the forfeiture / hold legs survive a crash
+      // mid-deletion. (The refund leg is independently traceable via Stripe
+      // metadata; only the forfeit/hold legs live solely in this record.) The
+      // final audit row merges in the actual outcomes.
+      await db
+        .collection("deletions")
+        .doc(uid)
+        .set(
+          {
+            splitRecordedAt: admin.firestore.FieldValue.serverTimestamp(),
+            walletBalanceCents: balanceCents,
+            gateMet: delGateMet,
+            walletDrifted,
+            cardRefundPlannedCents: pendingRefundCents,
+            withdrawablePayoutPlannedCents: earnedPayoutCents,
+            earnedForfeitedCents,
+            bonusForfeitedCents,
+            creditForfeitedCents,
+            manualReviewHeldCents,
+          },
+          { merge: true },
+        );
 
       // ─── 2. Stripe refunds against original PaymentIntents ──────────────
       // Walk this user's successful deposit transactions newest-first and
@@ -7731,10 +7959,12 @@ export const deleteAccount = onRequest(
         }
       }
 
-      // ─── 3. Earned-payout via ACH or 30-day hold ────────────────────────
-      // v1.0 fast-path: earnedBalance is always 0 until the post-launch
-      // ledger split lands, so this branch is a no-op for the demo. The
-      // skeleton is wired so flipping on the ledger doesn't require
+      // ─── 3. Withdrawable-house-money payout via ACH or 30-day hold ──────
+      // earnedPayoutCents is the user's withdrawable house money (winnings +
+      // gate-met bonus). In v1.0 winnings are dormant (multiplier 1.0×), so this
+      // is only nonzero for a user who got first-surrender forgiveness AND
+      // cleared the engagement gate — small, but it must be paid/held, never
+      // dropped. The skeleton is wired so flipping on winnings doesn't require
       // touching deleteAccount again.
       let earnedPaidCents = 0;
       let earnedHeldCents = 0;
@@ -7865,6 +8095,12 @@ export const deleteAccount = onRequest(
             refundShortfallCents,
             earnedPaidCents,
             earnedHeldCents,
+            // House money forfeited to the house on deletion — recorded so the
+            // ledger always accounts for every cent (refund + payout + forfeit
+            // == balance), never a silent destruction.
+            earnedForfeitedCents,
+            bonusForfeitedCents,
+            creditForfeitedCents,
             bankLinked: linkedBank,
             stripeConnectDeleted: Boolean(stripeAccountId),
             plaidItemRemoved: Boolean(plaidAccessToken),

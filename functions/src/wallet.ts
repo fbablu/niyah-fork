@@ -89,6 +89,18 @@ export function computeWithdrawable(b: Buckets, gateMet: boolean): number {
 }
 
 /**
+ * Cents refundable to the original payment **card** on account deletion: ONLY
+ * the deposited (card-principal) bucket. earned/bonus are house-funded grants
+ * (winnings / promo / forgiveness) that never originated from a card and must
+ * never be refunded to one — refunding them mints free money out of the
+ * platform. credit is never withdrawable or refundable. earned is paid out via
+ * ACH / 30-day hold by the caller, not here.
+ */
+export function cardRefundableCents(b: Buckets): number {
+  return Math.max(0, b.deposited);
+}
+
+/**
  * Draw `amount` from buckets in `order`, returning how much came from each and
  * any shortfall that could not be covered. Buckets not named in `order` are
  * untouchable (omit "credit" to keep it undrawable). Pure — does not mutate `b`.
@@ -113,6 +125,18 @@ export function drawDown(
 export const STAKE_DRAW_ORDER: BucketName[] = ["deposited", "bonus", "earned"];
 /** Withdrawals pull deposits first, then earned, then bonus (never credit). */
 export const WITHDRAW_DRAW_ORDER: BucketName[] = ["deposited", "earned", "bonus"];
+
+/**
+ * Bucket draw order for a withdrawal, honoring the engagement gate: deposits
+ * are always withdrawable; earned + bonus only once the gate is met; credit
+ * never. This MIRRORS `computeWithdrawable` exactly — drawing `amount` in this
+ * order can never pull more than `computeWithdrawable(b, gateMet)` covers, so
+ * the eligibility check and the actual debit can never disagree (which would
+ * let gated house money leak out, or strand a legitimate withdrawal).
+ */
+export function withdrawDrawOrder(gateMet: boolean): BucketName[] {
+  return gateMet ? WITHDRAW_DRAW_ORDER : ["deposited"];
+}
 
 /** The withdrawable subset of a draw result, as a stake composition. */
 export function toComposition(drawn: Buckets): StakeComposition {

@@ -59,6 +59,23 @@ in `functions/src/index.ts`, gated by the `APP_CHECK_ENFORCED` env flag. The mon
 - **Screen Protection** (`src/hooks/useScreenProtection.ts`) -- prevents screenshots, screen recording, and blurs app switcher preview. Uses `expo-screen-capture` with graceful fallback if unavailable.
 - Both modules use lazy `require()` with try/catch for graceful failure.
 
+### 2026-05-30 `/vibe-security` audit (wallet-ledger)
+
+Full money/auth/rules sweep + 3 adversarial verification rounds. All findings fixed (see
+[STATUS.md](./STATUS.md) "Audit findings"). Headline items:
+
+- **Bucket ledger now enforced everywhere money moves** (`balance == Σbuckets`): bucket-aware
+  `requestWithdrawal` (gates on `computeWithdrawable`, draws buckets down, restores on every abort
+  path); promo → `bonus` bucket; `deleteAccount` refunds `deposited`-to-card only and pays/holds
+  withdrawable house money; group cancel/timeout refunds + account merge move buckets in lockstep.
+- **Group refunds idempotent** (deterministic `group_refund_<sid>_<uid>` doc id) + `cancelGroupSession`
+  rejects terminal sessions — closes a double-refund cash leak.
+- **`getCallerIp`** now returns the rightmost **public** IP (infra-appended, unspoofable) instead of
+  the client-controlled leftmost XFF entry — hardens the per-IP money-path rate limiter.
+- **`acceptLegalTerms`** version is allowlisted; **`analytics_events`** rules add a field allowlist +
+  name size cap.
+- New `functions/src/wallet.test.ts` pins the gate↔debit and deletion-conservation contracts.
+
 ## Environment Variables & Secrets
 
 ### Client-Side (`.env`)
