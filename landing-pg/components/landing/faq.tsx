@@ -11,37 +11,37 @@ const faqs = [
   {
     question: "Is this gambling?",
     answer:
-      "No. Niyah is a commitment contract — the same model used by stickK and Beeminder for over 10 years. Whether you keep your money is entirely determined by your own effort and discipline, not luck or chance. The outcome is skill-based: you choose to stay focused or you choose to surrender. The app is categorized as Productivity, not Games.",
+      "No. Niyah is a commitment contract, the same model used by stickK and Beeminder for over 10 years. Whether you keep your money is entirely determined by your own effort and discipline, not luck or chance. The outcome is skill-based: you choose to stay focused or you choose to surrender. The app is categorized as Productivity, not Games.",
   },
   {
     question: "How does the app actually block my apps?",
     answer:
-      "Niyah uses Apple's Screen Time API (FamilyControls) to block apps at the system level. This isn't a \"are you sure?\" nudge — it's a real block. You either pick which apps to block or let Niyah auto-select your most-used distracting apps. Once a session starts, those apps show a branded block screen. Even deleting the app won't bypass the block because FamilyControls persists independently.",
+      "Niyah uses Apple's Screen Time API (FamilyControls) to block apps at the system level. This isn't a \"are you sure?\" nudge. It's a real block. You either pick which apps to block or let Niyah auto-select your most-used distracting apps. Once a session starts, those apps show a branded block screen. Even deleting the app won't bypass the block because FamilyControls persists independently.",
   },
   {
     question: "What happens if I quit a session early?",
     answer:
-      "If you surrender during a session, you forfeit part or all of your stake. That money gets redistributed to the people who stayed focused. The only way out of the app block is to surrender — there's no other bypass. This is what makes the commitment real.",
+      "If you surrender during a session, you forfeit part or all of your stake to Niyah. It's never paid to other users and never pooled. The only way out of the app block is to surrender, and that's the point: the stake is what makes the commitment real.",
   },
   {
-    question: "Is the competition fair for heavy vs. light phone users?",
+    question: "Where does my forfeited money go?",
     answer:
-      "Yes. Payouts use normalized screen time reduction, not raw numbers. Someone who normally uses their phone 8 hours a day and cuts to 4 is rewarded equally to someone who goes from 2 hours to 1. The metric is percentage improvement relative to your own habits.",
+      "Straight to Niyah, the house. It's never redistributed to other users, never pooled, and there are no peer-to-peer payments between users. That's a core part of what keeps Niyah a commitment contract and not gambling.",
   },
   {
     question: "How do payments work?",
     answer:
-      "For the initial launch, settlement happens via Venmo between friends — simple and straightforward. All in-app payment infrastructure is built on Stripe, so your financial data is never handled directly by the app.",
+      "Deposits, stakes, and payouts all run through Stripe, with Plaid for linking your bank to withdraw. Your money is handled by those providers, never directly by the app. No Venmo, no peer-to-peer settlement, no IOUs between friends.",
   },
   {
     question: "Can I use Niyah solo?",
     answer:
-      "Solo mode exists, but group sessions are where Niyah really shines. Financial stakes plus social accountability together create a fundamentally different incentive structure. Start by inviting a few friends — that's the strongest path to actually changing your habits.",
+      "Solo mode exists, but group sessions are where Niyah really shines. Financial stakes plus social accountability together create a fundamentally different incentive structure. Start by inviting a few friends, that's the strongest path to actually changing your habits.",
   },
   {
     question: "How much should I stake?",
     answer:
-      "That's entirely up to you. Small daily stakes ($1–5) work great for building habits. Larger weekly or monthly stakes ($10–50) are better for serious commitments. The key is that the amount needs to be meaningful enough to you that you'll actually follow through.",
+      "That's entirely up to you. Small daily stakes ($1 to $5) work great for building habits. Larger weekly or monthly stakes ($10 to $50) are better for serious commitments. The key is that the amount needs to be meaningful enough to you that you'll actually follow through.",
   },
 ];
 

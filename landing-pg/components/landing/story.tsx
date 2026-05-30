@@ -29,13 +29,13 @@ export function Story() {
           <p className="text-foreground">
             So we designed something different: a system where your money and
             your reputation are on the line. Where your friends can see whether
-            you followed through. Where the apps are actually blocked — not
+            you followed through. Where the apps are actually blocked, not just
             suggested to be avoided.
           </p>
 
           <p className="text-muted-foreground">
             Loss aversion is stronger than motivation. That&apos;s not a bug in
-            human psychology — it&apos;s a feature. And Niyah is the first app
+            human psychology. It&apos;s a feature. And Niyah is the first app
             that uses it honestly, with friends, to help you take back your
             attention.
           </p>

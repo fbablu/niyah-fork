@@ -19,7 +19,7 @@ export function Footer() {
             </Link>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               Focus sessions with real financial stakes. A commitment contract
-              app — not a gamble.
+              app, not a gamble.
             </p>
           </div>
 
@@ -74,7 +74,21 @@ export function Footer() {
 
         <div className="mt-10 flex flex-col gap-4 border-t border-border pt-8 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
           <p>&copy; {new Date().getFullYear()} Niyah. All rights reserved.</p>
-          <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+            <div className="flex gap-4">
+              <Link
+                href="/legal/privacy"
+                className="transition-colors hover:text-foreground"
+              >
+                Privacy
+              </Link>
+              <Link
+                href="/legal/terms"
+                className="transition-colors hover:text-foreground"
+              >
+                Terms
+              </Link>
+            </div>
             <p>App Store Category: Productivity &middot; Payments via Stripe</p>
           </div>
         </div>

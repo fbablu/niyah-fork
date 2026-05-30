@@ -10,9 +10,9 @@ const features = [
   },
   {
     icon: BarChart3,
-    title: "Fair competition",
+    title: "Your stake, never pooled",
     description:
-      "Payouts use normalized screen time reduction. Heavy and casual phone users compete on a level playing field.",
+      "You stake your own money on your own goal. Finish and it comes back. Quit early and you forfeit it to the house, never to another user.",
     highlight: false,
   },
   {

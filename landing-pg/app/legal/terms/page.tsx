@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "Terms of Service — Niyah",
+  title: "Terms of Service - Niyah",
   description:
     "The agreement between you and Niyah, Inc. for using the Niyah app.",
 };
@@ -41,7 +41,7 @@ export default function TermsPage() {
       <P>
         These Terms of Service (“Terms”) are the agreement between you and Niyah,
         Inc. (“Niyah,” “we,” “us”). By creating an account or using the Niyah app
-        (the “Service”), you accept these Terms — this has the same legal effect as
+        (the “Service”), you accept these Terms. This has the same legal effect as
         signing them. If you don’t agree, please don’t use Niyah.
       </P>
 
@@ -54,7 +54,7 @@ export default function TermsPage() {
           </li>
           <li>
             <strong>Finish your session, your stake comes back. Quit early, you
-            forfeit it</strong> to Niyah — never to another user.
+            forfeit it</strong> to Niyah, never to another user.
           </li>
           <li>
             Group sessions are <strong>individual</strong>: everyone stakes their
@@ -88,7 +88,7 @@ export default function TermsPage() {
         Niyah is a productivity and commitment-contract service. You stake your own
         money as a commitment device to support your personal focus goals. The
         outcome of every session depends entirely on your own actions during the
-        session — not on chance, luck, other people, or any random event.
+        session, not on chance, luck, other people, or any random event.
       </P>
 
       <H2>Not Gambling</H2>
@@ -104,7 +104,7 @@ export default function TermsPage() {
         stake an amount on your focus goal. Complete the session and your stake is
         returned to you. Surrender early and your stake is forfeited. In group
         sessions, each participant stakes individually and is accountable only for
-        their own goal — stakes are never pooled, shared, or redistributed. What
+        their own goal. Stakes are never pooled, shared, or redistributed. What
         you do affects only your own stake.
       </P>
 
@@ -122,9 +122,9 @@ export default function TermsPage() {
         (amounts on top of your returned stake) or promotional credits (such as a
         deposit-matching bonus). These are funded by Niyah. Rewards, promotional
         credits, and any balance beyond what you’ve deposited may require
-        eligibility conditions — like a minimum amount of account activity, a
-        minimum account age, and identity verification — before you can withdraw
-        them. Promotions may be limited per person, changed or ended at any time,
+        eligibility conditions before you can withdraw them, such as a minimum
+        amount of account activity, a minimum account age, and identity
+        verification. Promotions may be limited per person, changed or ended at any time,
         and revoked in cases of abuse or fraud. Nothing here guarantees any reward
         or promotion.
       </P>
@@ -210,7 +210,7 @@ export default function TermsPage() {
 
       <H2>Apple App Store</H2>
       <P>
-        These Terms are between you and Niyah only — not Apple. Apple has no
+        These Terms are between you and Niyah only, not Apple. Apple has no
         responsibility for the app or its content and is not obligated to provide
         any maintenance or support for it. Apple makes no warranties regarding the
         app and, to the maximum extent permitted by law, is not responsible for any

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "Privacy Policy — Niyah",
+  title: "Privacy Policy - Niyah",
   description: "How Niyah collects, uses, and protects your information.",
 };
 
@@ -38,7 +38,7 @@ export default function PrivacyPage() {
             sessions, and to move your money safely.
           </li>
           <li>
-            Real money is handled by our partners — <strong>Stripe</strong>{" "}
+            Real money is handled by our partners: <strong>Stripe</strong>{" "}
             (payments and identity checks) and <strong>Plaid</strong> (linking
             your bank so you can withdraw). We never store your full card or
             bank-account numbers.
@@ -73,39 +73,39 @@ export default function PrivacyPage() {
       <H2>What We Collect</H2>
       <ul className="mb-4 list-disc space-y-2 pl-5">
         <li>
-          <strong>Account info</strong> — your name, email, and phone number, so
+          <strong>Account info</strong>: your name, email, and phone number, so
           you can sign in and we can reach you.
         </li>
         <li>
-          <strong>Profile</strong> — your display name and photo, so they show up
+          <strong>Profile</strong>: your display name and photo, so they show up
           on your devices and to friends you invite.
         </li>
         <li>
-          <strong>Session activity</strong> — the focus sessions you create, your
-          stakes, completions and surrenders, and streaks — the data needed to
-          run the app.
+          <strong>Session activity</strong>: the focus sessions you create, your
+          stakes, completions and surrenders, and streaks (the data we need to
+          run the app).
         </li>
         <li>
-          <strong>Friends &amp; partners</strong> — people you add or invite for
+          <strong>Friends &amp; partners</strong>: people you add or invite for
           group sessions, including contacts you choose to match, so we can
           connect you.
         </li>
         <li>
-          <strong>Payment identifiers</strong> — IDs from Stripe and Plaid (like
+          <strong>Payment identifiers</strong>: IDs from Stripe and Plaid (like
           your Stripe customer and connected-account IDs) needed to process
           deposits, stakes, and withdrawals. Full card and bank numbers live with
           those providers, not with us.
         </li>
         <li>
-          <strong>Identity-verification status</strong> — whether you’ve passed
+          <strong>Identity-verification status</strong>: whether you’ve passed
           the identity check (KYC) required to withdraw, handled by Stripe.
         </li>
         <li>
-          <strong>Legal records</strong> — that you accepted these terms, which
+          <strong>Legal records</strong>: that you accepted these terms, which
           version, and your affirmation that you’re 18 or older.
         </li>
         <li>
-          <strong>Device &amp; diagnostics</strong> — app version, device type,
+          <strong>Device &amp; diagnostics</strong>: app version, device type,
           and crash/error reports, so we can keep things working.
         </li>
       </ul>
@@ -118,7 +118,7 @@ export default function PrivacyPage() {
 
       <H2>How We Use It</H2>
       <P>
-        We use your information only to run and improve Niyah — to sign you in,
+        We use your information only to run and improve Niyah: to sign you in,
         run your focus sessions, manage your wallet and payments, connect you with
         friends, verify identity for withdrawals, prevent fraud, meet legal
         obligations, and provide support.
@@ -129,7 +129,7 @@ export default function PrivacyPage() {
         We don’t custody your money or move it between users. Deposits, refunds,
         and payouts run through <strong>Stripe</strong>; <strong>Plaid</strong>{" "}
         securely links your bank account for withdrawals. To pay out money, the
-        law requires us to verify your identity — Stripe handles that check. These
+        law requires us to verify your identity; Stripe handles that check. These
         partners process your information under their own privacy policies.
       </P>
 
@@ -145,23 +145,23 @@ export default function PrivacyPage() {
       </P>
       <ul className="mb-4 list-disc space-y-2 pl-5">
         <li>
-          <strong>Google Firebase (Google Cloud)</strong> — sign-in, database, and
+          <strong>Google Firebase (Google Cloud)</strong>: sign-in, database, and
           infrastructure.
         </li>
         <li>
-          <strong>Stripe</strong> — payments, identity verification, and bank
+          <strong>Stripe</strong>: payments, identity verification, and bank
           payouts.
         </li>
         <li>
-          <strong>Plaid</strong> — secure bank-account linking for withdrawals.
+          <strong>Plaid</strong>: secure bank-account linking for withdrawals.
         </li>
         <li>
-          <strong>Apple Push Notification service</strong> — notifications you turn
+          <strong>Apple Push Notification service</strong>: notifications you turn
           on.
         </li>
         <li>
-          <strong>Google reCAPTCHA Enterprise and Apple App Attest / DeviceCheck</strong>{" "}
-          — confirming requests come from a genuine app install (abuse
+          <strong>Google reCAPTCHA Enterprise and Apple App Attest / DeviceCheck</strong>:{" "}
+          confirming requests come from a genuine app install (abuse
           prevention).
         </li>
       </ul>
@@ -176,7 +176,7 @@ export default function PrivacyPage() {
       <P>
         We use industry-standard safeguards, including encryption in transit and at
         rest and strict access controls on our systems. No system is perfectly
-        secure, so we can’t promise absolute security — but we treat your data
+        secure, so we can’t promise absolute security, but we treat your data
         carefully.
       </P>
 
