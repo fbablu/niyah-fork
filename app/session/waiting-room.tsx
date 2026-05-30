@@ -424,7 +424,7 @@ function WaitingRoomScreenInner() {
     if (!sessionId) return;
     try {
       await Share.share({
-        message: `Join my Niyah focus session! https://niyah.app/join/${sessionId}`,
+        message: `Join my Niyah focus session! https://niyah.live/join/${sessionId}`,
       });
     } catch {
       // User cancelled share sheet
