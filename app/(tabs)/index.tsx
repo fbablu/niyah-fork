@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useEffect } from "react";
 import BlobsBackground from "../../src/components/BlobsBackground";
 import {
   View,
@@ -145,9 +145,38 @@ const StatCard: React.FC<StatCardProps> = ({ value, label, color }) => {
     [Colors],
   );
 
+  // Pop the value in on mount and re-pop whenever it changes (e.g. the streak
+  // ticks up after a completed session) so the stat feels alive, not static.
+  const scale = useRef(new Animated.Value(0.8)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    scale.setValue(0.8);
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: 1,
+        tension: 120,
+        friction: 6,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [value, scale, opacity]);
+
   return (
     <View style={styles.statCard}>
-      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
+      <Animated.Text
+        style={[
+          styles.statValue,
+          color ? { color } : null,
+          { opacity, transform: [{ scale }] },
+        ]}
+      >
+        {value}
+      </Animated.Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
