@@ -126,6 +126,17 @@ actions** — Claude supplies messages only.
    script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**.
 7. **Submit** — be ready to explain in App Review notes: Stripe (not IAP) because deposits/stakes/
    withdrawals are the user's own funds; commitment-contract (not gambling), Productivity category.
+8. **External TestFlight public QR (tech-week track):** after `eas submit`, ASC → TestFlight →
+   create an **external group** → enable the **public link** → triggers **Beta App Review**
+   (~24–48h, lighter than App Store). The join URL → the sticker QR. The App Store submit (step 7)
+   is a separate, slower track on the same binary. APNs `.p8` (step 5) is required for the live
+   non-demo build, or ship Google/Apple-only via `EXPO_PUBLIC_DISABLE_PHONE_AUTH=true`.
+
+> **Tech-week track (NYC 6/1–6/7):** the dual goal (external TestFlight public QR **and** App Store
+> submit), the critical path, the five lanes, and the **live-money-with-strangers** risk +
+> mitigations (no effective deposit gate, withdrawal-idempotency double-debit edge, billing
+> kill-switch) live in **[techweek-2026-06-launch.md](./techweek-2026-06-launch.md)**. A
+> `EXPO_PUBLIC_DEMO_MODE=true` build is the day-1 fallback if the live build is still in Beta review.
 
 > **Strategic note (from the trip sessions):** a real-money app has high first-pass rejection risk.
 > Realistic near-term deliverable is a **TestFlight build + deck + cohort metrics**; submit to public
