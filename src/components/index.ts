@@ -5,6 +5,7 @@ export { Balance, CompactBalance, AnimatedDigit } from "./Balance";
 export { Timer, InlineTimer } from "./Timer";
 export { NumPad, AmountDisplay } from "./NumPad";
 export { Confetti } from "./Confetti";
+export { MoneySuccessOverlay } from "./MoneySuccessOverlay";
 export { MoneyPlant } from "./MoneyPlant";
 export { PeachAvatar } from "./PeachAvatar";
 export { BlobAvatar } from "./BlobAvatar";

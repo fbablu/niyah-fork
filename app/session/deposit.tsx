@@ -31,6 +31,7 @@ import {
   Button,
   NumPad,
   AmountDisplay,
+  MoneySuccessOverlay,
   SessionScreenScaffold,
   withErrorBoundary,
 } from "../../src/components";
@@ -208,6 +209,8 @@ function DepositScreenInner() {
   // Store paymentIntentId for retry if verify fails after payment succeeds
   const [pendingVerifyId, setPendingVerifyId] = useState<string | null>(null);
   const [pendingVerifyAmount, setPendingVerifyAmount] = useState<number>(0);
+  // Set to the credited amount (cents) to show the celebratory success overlay.
+  const [successAmount, setSuccessAmount] = useState<number | null>(null);
 
   // Guard against setState after unmount + double router.back() crashes when
   // Stripe sheet dismisses mid-navigation ("every other time" black screen).
@@ -289,7 +292,8 @@ function DepositScreenInner() {
           text: "Confirm",
           onPress: () => {
             deposit(finalAmount);
-            safeBack();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setSuccessAmount(finalAmount);
           },
         },
       ],
@@ -395,11 +399,7 @@ function DepositScreenInner() {
         deposit(finalAmount, result.newBalance);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         logEvent("deposit_completed", { amountCents: finalAmount });
-        Alert.alert(
-          "Funds Added",
-          `${formatMoney(finalAmount)} added to your Niyah balance.`,
-          [{ text: "Done", onPress: safeBack }],
-        );
+        setSuccessAmount(finalAmount);
       }
     } catch (err) {
       logger.error("Deposit error:", err);
@@ -446,11 +446,7 @@ function DepositScreenInner() {
       } else {
         deposit(pendingVerifyAmount, result.newBalance);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert(
-          "Funds Added",
-          `${formatMoney(pendingVerifyAmount)} added to your Niyah balance.`,
-          [{ text: "Done", onPress: safeBack }],
-        );
+        setSuccessAmount(pendingVerifyAmount);
       }
     } catch (err) {
       logger.error("Retry verify error:", err);
@@ -473,90 +469,102 @@ function DepositScreenInner() {
   const handleDeposit = DEMO_MODE ? handleDemoDeposit : handleStripeDeposit;
 
   return (
-    <SessionScreenScaffold
-      headerVariant="centered"
-      headerTitle="Add Funds"
-      scrollable={false}
-    >
-      {/* Balance Info */}
-      <View style={styles.balanceInfo}>
-        <Text style={styles.balanceLabel}>Current Balance</Text>
-        <Text style={styles.balanceAmount}>{formatMoney(balance)}</Text>
-      </View>
+    <>
+      <SessionScreenScaffold
+        headerVariant="centered"
+        headerTitle="Add Funds"
+        scrollable={false}
+      >
+        {/* Balance Info */}
+        <View style={styles.balanceInfo}>
+          <Text style={styles.balanceLabel}>Current Balance</Text>
+          <Text style={styles.balanceAmount}>{formatMoney(balance)}</Text>
+        </View>
 
-      {/* Amount Display */}
-      <AmountDisplay
-        amount={displayAmount}
-        label="Enter amount"
-        placeholder="$0"
-      />
-
-      {/* Quick Amounts */}
-      <View style={styles.quickAmountsContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.quickAmounts}
-        >
-          {QUICK_AMOUNTS.map((amount) => (
-            <QuickAmountButton
-              key={amount}
-              amount={amount}
-              onPress={handleQuickAmount}
-              isSelected={selectedQuickAmount === amount}
-            />
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* NumPad */}
-      <View style={styles.numPadContainer}>
-        <NumPad
-          onKeyPress={handleKeyPress}
-          onBackspace={handleBackspace}
-          showDecimal={true}
+        {/* Amount Display */}
+        <AmountDisplay
+          amount={displayAmount}
+          label="Enter amount"
+          placeholder="$0"
         />
-      </View>
 
-      {/* CTA */}
-      <View style={styles.footer}>
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={Colors.primary} />
-            <Text style={styles.loadingText}>Processing payment...</Text>
-          </View>
-        ) : (
-          <Button
-            title={
-              depositsPaused
-                ? "Deposits paused"
-                : paymentsUnavailable
-                  ? "Payments unavailable"
-                  : isValidAmount
-                    ? `Add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
-                    : "Enter an amount"
-            }
-            onPress={handleDeposit}
-            disabled={
-              !isValidAmount ||
-              isLoading ||
-              paymentsUnavailable ||
-              depositsPaused
-            }
-            size="large"
+        {/* Quick Amounts */}
+        <View style={styles.quickAmountsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickAmounts}
+          >
+            {QUICK_AMOUNTS.map((amount) => (
+              <QuickAmountButton
+                key={amount}
+                amount={amount}
+                onPress={handleQuickAmount}
+                isSelected={selectedQuickAmount === amount}
+              />
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* NumPad */}
+        <View style={styles.numPadContainer}>
+          <NumPad
+            onKeyPress={handleKeyPress}
+            onBackspace={handleBackspace}
+            showDecimal={true}
           />
-        )}
-        {(DEMO_MODE || paymentsUnavailable || depositsPaused) && (
-          <Text style={styles.disclaimer}>
-            {depositsPaused
-              ? "Deposits are temporarily paused. Try again soon."
-              : DEMO_MODE
-                ? "Demo mode - no real money"
-                : "Payments unavailable in this build"}
-          </Text>
-        )}
-      </View>
-    </SessionScreenScaffold>
+        </View>
+
+        {/* CTA */}
+        <View style={styles.footer}>
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.loadingText}>Processing payment...</Text>
+            </View>
+          ) : (
+            <Button
+              title={
+                depositsPaused
+                  ? "Deposits paused"
+                  : paymentsUnavailable
+                    ? "Payments unavailable"
+                    : isValidAmount
+                      ? `Add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
+                      : "Enter an amount"
+              }
+              onPress={handleDeposit}
+              disabled={
+                !isValidAmount ||
+                isLoading ||
+                paymentsUnavailable ||
+                depositsPaused
+              }
+              size="large"
+            />
+          )}
+          {(DEMO_MODE || paymentsUnavailable || depositsPaused) && (
+            <Text style={styles.disclaimer}>
+              {depositsPaused
+                ? "Deposits are temporarily paused. Try again soon."
+                : DEMO_MODE
+                  ? "Demo mode - no real money"
+                  : "Payments unavailable in this build"}
+            </Text>
+          )}
+        </View>
+      </SessionScreenScaffold>
+      <MoneySuccessOverlay
+        visible={successAmount !== null}
+        amountCents={successAmount ?? 0}
+        title="Funds Added"
+        subtitle="Added to your Niyah balance"
+        onDone={() => {
+          setSuccessAmount(null);
+          safeBack();
+        }}
+      />
+    </>
   );
 }
 
