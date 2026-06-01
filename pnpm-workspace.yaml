@@ -1,0 +1,18 @@
+# Migrated from package.json "pnpm" field (pnpm 11 no longer reads it).
+overrides:
+  tar: 7.5.10
+  minimatch@5: 5.1.8
+  ajv@8: 8.18.0
+  node-forge: '>=1.3.2'
+
+patchedDependencies:
+  '@bacons/apple-targets@4.0.7': patches/@bacons__apple-targets@4.0.7.patch
+
+# Build scripts that ran under pnpm 10 — keep enabled.
+allowBuilds:
+  '@firebase/util': true
+  '@sentry/cli': true
+  dtrace-provider: true
+  esbuild: true
+  protobufjs: true
+  unrs-resolver: true
