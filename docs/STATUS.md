@@ -4,7 +4,25 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-05-30** (PM — PR #7 merged to `main`, pre-deploy pre-flight green, smoke pending).
+> Last updated: **2026-06-01** — submit-readiness audited 2026-05-31 (see
+> [submit-and-ai-plan.md](./submit-and-ai-plan.md)). Prior: 2026-05-30 PM — PR #7 merged to `main`,
+> pre-deploy pre-flight green, smoke pending.
+>
+> **2026-06-01 deltas (audit close-out):**
+> - **APNs `.p8`** (Apple Team `4R55F73KCP`) → Firebase Console → Cloud Messaging is an **explicit submit
+>   step** (§Remaining-to-submit 5). Defer option: `EXPO_PUBLIC_DISABLE_PHONE_AUTH=true` (Google/Apple-only).
+> - **`migrateSensitiveFieldsToPrivate` run-status: NOT yet run** against prod. Backfills/scrubs
+>   email+phone off the public `users/*` docs; active users self-migrate on the 2.0.0 legal re-prompt,
+>   but run it after the functions deploy for full closure (paginate via `nextCursor`).
+> - **Screen-capture protection** (`src/hooks/useScreenProtection.ts:33`) **stays OFF for the submit
+>   build** (demo / investor screen-share workaround) — **tracked post-event flip** to `true` after the
+>   tech-week events; verify screen-share isn't broken before flipping.
+> - **Engagement-gate definition still needs finalizing** (criteria, not mechanism — see Post-submit
+>   dormant flips). Does NOT block submit: only the $5 forgiveness bonus is gated in v1.
+> - **AI work (Phase-0 capture + `ml/`) is PARALLEL — NOT a submit blocker.** Built 2026-06-01: schema +
+>   flag (`AI_DATA_CAPTURE_ENABLED`, default on) + surrender-reason chips + session time-of-day capture;
+>   the `ml/` NumPyro prototype is offline + in `.easignore`. See [submit-and-ai-plan.md](./submit-and-ai-plan.md)
+>   Parts 3–4 and the rules caveat in [session-2026-06-01-heavy-work.md](./session-2026-06-01-heavy-work.md).
 
 ## Right now
 
