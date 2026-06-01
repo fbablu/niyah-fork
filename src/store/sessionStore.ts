@@ -227,8 +227,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // can't derive the user's LOCAL hour. Add the time-of-day capture via a
       // fire-and-forget update (the sessions rule allowlists these benign keys).
       // Analytics only — never touches money/status; failure is non-fatal.
-      updateSession(session.id, { startedAtLocalHour, dayOfWeek }).catch((err) =>
-        logger.warn("Failed to persist session time-of-day:", err),
+      updateSession(session.id, { startedAtLocalHour, dayOfWeek }).catch(
+        (err) => logger.warn("Failed to persist session time-of-day:", err),
       );
     }
 

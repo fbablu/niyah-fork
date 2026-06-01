@@ -204,9 +204,8 @@ function SurrenderScreenInner() {
   const userId = useAuthStore((state) => state.user?.id);
   const [surrendering, setSurrendering] = useState(false);
   const [confirmText, setConfirmText] = useState("");
-  const [surrenderReason, setSurrenderReason] = useState<SurrenderReason | null>(
-    null,
-  );
+  const [surrenderReason, setSurrenderReason] =
+    useState<SurrenderReason | null>(null);
   const [surrenderNote, setSurrenderNote] = useState("");
 
   const canSurrender = confirmText.toLowerCase() === "quit";
@@ -318,7 +317,9 @@ function SurrenderScreenInner() {
         {/* Surrender reason — AI Phase-0 capture (optional, analytics only) */}
         {AI_DATA_CAPTURE_ENABLED && (
           <Card style={styles.reasonCard}>
-            <Text style={styles.reasonTitle}>What made you stop? (optional)</Text>
+            <Text style={styles.reasonTitle}>
+              What made you stop? (optional)
+            </Text>
             <View style={styles.chipRow}>
               {REASON_OPTIONS.map((opt) => {
                 const selected = surrenderReason === opt.value;

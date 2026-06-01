@@ -529,7 +529,7 @@ function CompleteScreenInner() {
             {AI_DATA_CAPTURE_ENABLED && !didComplete && lastSolo.id ? (
               <Card style={styles.reasonCard}>
                 <Text style={styles.reasonTitle}>
-                  {reasonSaved ?? lastSolo.surrenderReason
+                  {(reasonSaved ?? lastSolo.surrenderReason)
                     ? "Thanks — that helps us tune your stake."
                     : "What made you stop? (optional)"}
                 </Text>

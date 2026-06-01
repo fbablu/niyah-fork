@@ -16,6 +16,7 @@ export default tseslint.config(
       "coverage/",
       "plugins/",
       "functions/",
+      "ml/",
       "landing-pg/out/",
       "landing-pg/node_modules/",
       "landing-pg/.next/",
