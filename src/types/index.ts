@@ -109,6 +109,18 @@ export interface Partner {
   tag?: string; // Optional label e.g. "Your Referrer"
 }
 
+/**
+ * Structured reason a user gives when surrendering (AI Phase-0 data capture —
+ * see docs/ai-integration.md). Pure analytics; carries NO money meaning.
+ */
+export type SurrenderReason =
+  | "distracted"
+  | "interrupted"
+  | "too_long"
+  | "lost_motivation"
+  | "emergency"
+  | "other";
+
 // Solo session (Phase 2 — stickK model for now; will use SOLO_COMPLETION_MULTIPLIER later)
 export interface Session {
   id: string;
@@ -120,6 +132,11 @@ export interface Session {
   status: SessionStatus;
   completedAt?: Date;
   actualPayout?: number; // in cents
+  // ── AI Phase-0 capture (analytics only; no money meaning) ──
+  startedAtLocalHour?: number; // 0–23, user-local hour at start
+  dayOfWeek?: number; // 0 (Sun) – 6 (Sat), user-local at start
+  surrenderReason?: SurrenderReason;
+  surrenderNote?: string; // optional free text (capped)
 }
 
 export interface Transaction {

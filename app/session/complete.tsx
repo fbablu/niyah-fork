@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
-import { View, Text, StyleSheet, Animated } from "react-native";
+import { View, Text, StyleSheet, Animated, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   Typography,
@@ -21,7 +21,20 @@ import { useAuthStore } from "../../src/store/authStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
 import { formatMoney } from "../../src/utils/format";
-import type { GroupSessionDoc } from "../../src/types";
+import { logger } from "../../src/utils/logger";
+import { updateSession } from "../../src/config/firebase";
+import { AI_DATA_CAPTURE_ENABLED } from "../../src/constants/config";
+import type { GroupSessionDoc, SurrenderReason } from "../../src/types";
+
+// AI Phase-0 capture (analytics only; no money meaning) — see docs/ai-integration.md.
+const REASON_OPTIONS: { value: SurrenderReason; label: string }[] = [
+  { value: "distracted", label: "Distracted" },
+  { value: "interrupted", label: "Interrupted" },
+  { value: "too_long", label: "Too long" },
+  { value: "lost_motivation", label: "Lost motivation" },
+  { value: "emergency", label: "Emergency" },
+  { value: "other", label: "Other" },
+];
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -217,6 +230,37 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.textSecondary,
       lineHeight: 18,
     },
+    reasonCard: {
+      backgroundColor: Colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      marginBottom: Spacing.sm,
+      paddingVertical: Spacing.sm,
+    },
+    reasonTitle: {
+      fontSize: Typography.bodyMedium,
+      ...Font.semibold,
+      color: Colors.text,
+      marginBottom: Spacing.sm,
+    },
+    reasonChipRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.xs,
+    },
+    reasonChip: {
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      backgroundColor: Colors.backgroundTertiary,
+    },
+    reasonChipText: {
+      fontSize: Typography.bodySmall,
+      color: Colors.textSecondary,
+      ...Font.medium,
+    },
   });
 
 // ─── FirestoreResultsCard ─────────────────────────────────────────────────────
@@ -308,6 +352,7 @@ function CompleteScreenInner() {
   const lastForgivenCents = useSessionStore((s) => s.lastForgivenCents);
   const isSolo = params.type === "solo";
   const lastSolo = soloHistory[0];
+  const [reasonSaved, setReasonSaved] = useState<SurrenderReason | null>(null);
 
   // Legacy local history (demo/legacy sessions)
   const lastSession = groupSessionHistory[0];
@@ -368,6 +413,20 @@ function CompleteScreenInner() {
 
   // Wallet balance now auto-syncs via onSnapshot listener in walletStore.
   // No manual hydrate needed on session completion.
+
+  // AI Phase-0: capture the solo surrender reason post-hoc (analytics only; no
+  // money meaning). All surrender paths funnel to this screen, so it's the
+  // universal, zero-money-path-risk capture point. Fire-and-forget to the
+  // sessions doc (rule-allowlisted keys).
+  const handlePickReason = (reason: SurrenderReason) => {
+    Haptics.selectionAsync();
+    setReasonSaved(reason);
+    if (lastSolo?.id) {
+      updateSession(lastSolo.id, { surrenderReason: reason }).catch((err) =>
+        logger.warn("Failed to persist surrender reason:", err),
+      );
+    }
+  };
 
   const handleDone = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -465,6 +524,28 @@ function CompleteScreenInner() {
                 <Text style={styles.receiptBody}>
                   {`${formatMoney(lastSolo.stakeAmount)} forfeited to Niyah. You staked this money so your future self couldn't weasel out — that's what keeps the commitment real.`}
                 </Text>
+              </Card>
+            ) : null}
+            {AI_DATA_CAPTURE_ENABLED && !didComplete && lastSolo.id ? (
+              <Card style={styles.reasonCard}>
+                <Text style={styles.reasonTitle}>
+                  {reasonSaved ?? lastSolo.surrenderReason
+                    ? "Thanks — that helps us tune your stake."
+                    : "What made you stop? (optional)"}
+                </Text>
+                {!(reasonSaved ?? lastSolo.surrenderReason) && (
+                  <View style={styles.reasonChipRow}>
+                    {REASON_OPTIONS.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        onPress={() => handlePickReason(opt.value)}
+                        style={styles.reasonChip}
+                      >
+                        <Text style={styles.reasonChipText}>{opt.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </Card>
             ) : null}
           </>

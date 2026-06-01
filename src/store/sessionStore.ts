@@ -1,10 +1,11 @@
 import { create } from "zustand";
-import { Session, CadenceType } from "../types";
+import { Session, CadenceType, SurrenderReason } from "../types";
 import {
   CADENCES,
   DEMO_MODE,
   USE_SHORT_TIMERS,
   DAILY_STAKE_CAP_CENTS,
+  AI_DATA_CAPTURE_ENABLED,
 } from "../constants/config";
 import { useAuthStore } from "./authStore";
 import { useWalletStore } from "./walletStore";
@@ -52,7 +53,8 @@ interface SessionState {
   lastForgivenCents: number | null;
 
   startSession: (cadence: CadenceType) => Promise<void>;
-  surrenderSession: () => void;
+  /** `reason`/`note` are AI Phase-0 capture (analytics only; no money effect). */
+  surrenderSession: (reason?: SurrenderReason, note?: string) => void;
   completeSession: () => void;
   getTimeRemaining: () => number;
   /** Recover an active session from Firestore after app restart. */
@@ -123,6 +125,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     }
 
+    // AI Phase-0 capture (analytics only; no money meaning) — derived from the
+    // canonical start time (server-returned in prod). Deterministic.
+    const startDate = new Date(startedAtMs);
+    const startedAtLocalHour = startDate.getHours(); // 0–23 user-local
+    const dayOfWeek = startDate.getDay(); // 0 (Sun) – 6 (Sat)
+
     const session: Session = {
       id: sessionId,
       cadence,
@@ -131,6 +139,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       startedAt: new Date(startedAtMs),
       endsAt: new Date(endsAtMs),
       status: "active",
+      ...(AI_DATA_CAPTURE_ENABLED ? { startedAtLocalHour, dayOfWeek } : {}),
     };
 
     // Local wallet deduct mirrors the server-side debit so the UI updates
@@ -209,8 +218,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         startedAt: session.startedAt,
         endsAt: session.endsAt,
         status: "active",
+        ...(AI_DATA_CAPTURE_ENABLED ? { startedAtLocalHour, dayOfWeek } : {}),
       }).catch((err) =>
         logger.error("Failed to persist session to Firestore:", err),
+      );
+    } else if (AI_DATA_CAPTURE_ENABLED && !DEMO_MODE) {
+      // Prod: the createSoloSession CF already wrote the canonical doc, but it
+      // can't derive the user's LOCAL hour. Add the time-of-day capture via a
+      // fire-and-forget update (the sessions rule allowlists these benign keys).
+      // Analytics only — never touches money/status; failure is non-fatal.
+      updateSession(session.id, { startedAtLocalHour, dayOfWeek }).catch((err) =>
+        logger.warn("Failed to persist session time-of-day:", err),
       );
     }
 
@@ -220,7 +238,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     });
   },
 
-  surrenderSession: () => {
+  surrenderSession: (reason?: SurrenderReason, note?: string) => {
     const { currentSession, sessionHistory } = get();
     if (!currentSession) return;
 
@@ -230,6 +248,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       status: "surrendered",
       completedAt,
       actualPayout: 0,
+      ...(AI_DATA_CAPTURE_ENABLED && reason ? { surrenderReason: reason } : {}),
     };
 
     const authStore = useAuthStore.getState();
@@ -286,9 +305,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         .catch((err) => logger.error("cloudForfeit failed:", err));
     }
 
+    // AI Phase-0: persist the structured surrender reason (analytics only; no
+    // money meaning). Separate fire-and-forget update from the forfeit money
+    // path — the CF owns status; this only writes the allowlisted capture keys.
+    if (AI_DATA_CAPTURE_ENABLED && reason) {
+      const trimmed = note?.trim();
+      updateSession(currentSession.id, {
+        surrenderReason: reason,
+        ...(trimmed ? { surrenderNote: trimmed.slice(0, 500) } : {}),
+      }).catch((err) =>
+        logger.warn("Failed to persist surrender reason:", err),
+      );
+    }
+
     logEvent("solo_session_surrendered", {
       cadence: currentSession.cadence,
       stakeAmount: currentSession.stakeAmount,
+      ...(reason ? { surrenderReason: reason } : {}),
     });
   },
 

@@ -211,7 +211,28 @@ service cloud.firestore {
       allow update: if request.auth != null
         && resource.data.userId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'completedAt', 'updatedAt', 'violationCount']);
+             .hasOnly(['status', 'completedAt', 'updatedAt', 'violationCount',
+                       'surrenderReason', 'surrenderNote',
+                       'startedAtLocalHour', 'dayOfWeek'])
+        // AI Phase-0 capture fields (surrenderReason / surrenderNote /
+        // startedAtLocalHour / dayOfWeek) are benign analytics — NO money
+        // meaning. Bound them so a client can't bloat the doc. Financial fields
+        // (stakeAmount, potentialPayout, endsAt, actualPayout, cadence) remain
+        // immutable — not in the allowlist above.
+        && (!('surrenderReason' in request.resource.data.keys())
+            || (request.resource.data.surrenderReason is string
+                && request.resource.data.surrenderReason.size() <= 20))
+        && (!('surrenderNote' in request.resource.data.keys())
+            || (request.resource.data.surrenderNote is string
+                && request.resource.data.surrenderNote.size() <= 500))
+        && (!('startedAtLocalHour' in request.resource.data.keys())
+            || (request.resource.data.startedAtLocalHour is int
+                && request.resource.data.startedAtLocalHour >= 0
+                && request.resource.data.startedAtLocalHour <= 23))
+        && (!('dayOfWeek' in request.resource.data.keys())
+            || (request.resource.data.dayOfWeek is int
+                && request.resource.data.dayOfWeek >= 0
+                && request.resource.data.dayOfWeek <= 6));
 
       // No client-side deletes
       allow delete: if false;

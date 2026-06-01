@@ -123,6 +123,17 @@ export const PENDING_REFERRAL_KEY = "@niyah/pending_referral"; // AsyncStorage k
 export const PHONE_AUTH_DISABLED =
   process.env.EXPO_PUBLIC_DISABLE_PHONE_AUTH === "true";
 
+// ── AI / data-flywheel flags (see docs/ai-integration.md) ──
+// AI_DATA_CAPTURE_ENABLED gates Phase-0 in-app capture: structured surrender
+// reason + session time-of-day. Analytics only — NO money-path effect, never
+// changes a stake or a payout. Default ON: starts the behavioral dataset the
+// stake-calibration moat needs. AI_STAKE_CALIBRATION_ENABLED is a placeholder
+// for the later money-side phases (variable stake + bandit) — stays OFF until
+// the lever + model + counsel sign-off exist.
+export const AI_DATA_CAPTURE_ENABLED =
+  process.env.EXPO_PUBLIC_AI_DATA_CAPTURE_ENABLED !== "false"; // default true
+export const AI_STAKE_CALIBRATION_ENABLED = false;
+
 // Lane B (DeviceActivityReport + LiveActivity) runtime feature flag.
 //
 // Extensions ALWAYS register at build time now (via @bacons/apple-targets in
