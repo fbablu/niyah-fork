@@ -15,6 +15,79 @@ bet/wager/gamble/win/pool language. Keep `APP_CHECK_ENFORCED=false`. `STRIPE_SEC
 
 ---
 
+## ▶ RESUME HERE — 2026-06-01 PM (git push/merge + repo ownership)
+
+> **Say "continue with this doc" and start in this section.** Branch `wallet-ledger`, HEAD
+> **`1c7b53f`**, working tree clean, **12 commits ahead of `origin`** (`niyah-fork`).
+> **Submission is DEFERRED** — app UX/workflow isn't done. **Do NOT run the Part-1 submit chain
+> below yet.** Current focus = back up code → dev/QA build on phone → sort repo ownership so the
+> GitHub contribution graph counts.
+
+### What this PM session did
+- **Pre-push gate was failing** (`husky` runs `lint && format:check && typecheck && test`). Fixed,
+  committed as **`1c7b53f` `chore: unblock pre-push — ignore ml/ in eslint, prettier-format Phase-0 files`**:
+  - `eslint .` was linting `ml/.venv_smoke/` (matplotlib/pip vendored JS → 67 errors). → added **`ml/`**
+    to `eslint.config.mjs` ignores (next to `functions/`).
+  - `format:check` failed on the 3 Phase-0 files → `prettier --write src/store/sessionStore.ts
+    app/session/complete.tsx app/session/surrender.tsx`.
+  - `typecheck` + `test` already green (**736 passed**, 0 fail; "worker failed to exit" = teardown timer
+    warning, not a failure).
+- **Diagnosed the `origin` divergence.** `origin/wallet-ledger` has commit **`2e14527`** (landing
+  de-pool + `/legal` index + footer legal links) that local lacks; merge-base = `4bb9ae1`. But the 11
+  landing `.tsx` files are **byte-identical** to local (same work done twice in parallel lanes); the
+  **only** real diff is 1 line in `landing-pg/CLAUDE.md`, and **local's version is the better one**
+  (documents the new `/legal` index `2e14527` itself added). → local is a strict superset; **rebase is
+  clean** (git skips already-applied patches).
+- **DISCOVERY — `niyah-fork` is a TRUE GitHub fork** (parent `SySyAli/niyah`; confirmed via
+  `gh repo view … --json isFork,parent`). **GitHub does not count fork commits toward the contribution
+  graph — even on `main`.** So pushing/merging inside `niyah-fork` backs up code but **won't green the
+  squares.** (This corrects the earlier "merge to main → green squares" advice.)
+
+### Repo ownership = the green-square fix (in progress)
+- **Syed (`SySyAli`)** owns parent `SySyAli/niyah` and has agreed (over iMessage) to **transfer it to
+  Fardeen**, but hasn't yet — he's still deciding his own role. Meeting in person in **NYC this week**
+  (Tech Week, through ~6/7).
+- On transfer → repo becomes **`fbablu/niyah` = non-fork Fardeen owns** → commits **count, retroactive
+  by author date, full history kept.** That's the clean fix — **don't** create a throwaway standalone repo.
+- Follow-up message to Syed (ties handoff to the NYC meet, gives him role-decision space):
+  > Hey Syed! I'm in NYC til ~the 7th — want to grab time in person? We can figure out your role and do
+  > the repo handoff together, no rush before then. What days work for you?
+
+### NEXT STEPS — pick up here (Fardeen runs ALL git)
+
+**A — Back up your 12 commits to `niyah-fork` (do first):**
+```bash
+git rebase origin/wallet-ledger      # clean — git skips already-applied .tsx patches
+git push origin wallet-ledger        # clean fast-forward, NO --force; pre-push gate is green now
+```
+
+**B — Build + QA on phone:**
+```bash
+pnpm start            # Metro, separate terminal
+pnpm build:local      # builds to device
+```
+Real (non-demo) flow: deposit → solo session → complete + surrender → confirm surrender chips show, nothing breaks.
+
+**C — (optional) sync `main` inside the fork — housekeeping only, WON'T green the graph:**
+```bash
+git fetch origin
+git log --oneline wallet-ledger..main     # expect EMPTY = clean ff
+git checkout main && git merge --ff-only wallet-ledger
+git push origin main                       # ⚠️ also auto-deploys niyah.live (landing-pg/**)
+git checkout wallet-ledger
+```
+
+**D — Green squares (ONLY after Syed transfers the repo):**
+```bash
+git remote set-url origin https://github.com/fbablu/niyah.git
+git push origin wallet-ledger
+git push origin main          # squares fill in, by author date
+```
+
+**Order:** A now → B verify → C optional → D whenever the transfer lands. Nothing here blocks building.
+
+---
+
 ## What landed this session
 
 ### Part 3 — AI Phase-0 in-app data capture (BUILT, flag-on) — analytics only, NO money-path change
