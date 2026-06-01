@@ -1,0 +1,9 @@
+# Niyah ML research artifact — OFFLINE only. No network, no real data, no live keys.
+# CPU-runnable. Pins are recent-and-reasonable; loosen if your platform needs it.
+
+numpyro>=0.15,<0.22
+jax>=0.4.34,<0.12
+jaxlib>=0.4.34,<0.12
+numpy>=1.26,<3.0
+matplotlib>=3.8,<4.0
+arviz>=0.18,<0.23
