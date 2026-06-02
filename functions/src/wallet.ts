@@ -157,3 +157,54 @@ export function readComposition(
 export function sumComposition(c: StakeComposition): number {
   return c.deposited + c.earned + c.bonus;
 }
+
+// ─── daily withdrawal cap ────────────────────────────────────────────────────
+
+/**
+ * UTC calendar-day key, e.g. "2026-06-02". The daily withdrawal cap resets at
+ * 00:00 UTC — same convention as DAILY_STAKE_CAP. A calendar-day counter (vs a
+ * rolling 24h window) is what lets the cap be enforced atomically with a single
+ * counter field on the wallet doc.
+ */
+export function utcDayKey(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+export interface DailyWithdrawalState {
+  /** Cents already withdrawn today (0 if the stored counter is from a prior day). */
+  priorToday: number;
+  /** Running total once this withdrawal commits (what we write back). */
+  newTotal: number;
+  /** True if priorToday + amount exceeds the cap — caller must refuse. */
+  exceedsCap: boolean;
+  /** UTC day this counter is tagged with. */
+  dayKey: string;
+}
+
+/**
+ * Pure daily-withdrawal-cap accounting. `storedDate`/`storedTotal` are the
+ * `dailyWithdrawalDate`/`dailyWithdrawalTotal` fields on wallets/{uid}.
+ *
+ * A stored counter from a previous UTC day (or missing) is treated as 0 — the
+ * cap resets at UTC midnight. That same reset also harmlessly absorbs a stale or
+ * negative leftover from a rare cross-midnight decrement (see
+ * restoreWithdrawalReservation), so the counter can never wrongly block a new
+ * day's withdrawals. Within a day, the in-transaction increment and the restore
+ * decrement are each paired 1:1 with the wallet's balance mutation, so the
+ * counter can never drift from the actual committed withdrawals.
+ */
+export function computeDailyWithdrawalState(
+  storedDate: unknown,
+  storedTotal: unknown,
+  amount: number,
+  capCents: number,
+  nowMs: number,
+): DailyWithdrawalState {
+  const dayKey = utcDayKey(nowMs);
+  const priorToday =
+    storedDate === dayKey && typeof storedTotal === "number" && storedTotal > 0
+      ? storedTotal
+      : 0;
+  const newTotal = priorToday + amount;
+  return { priorToday, newTotal, exceedsCap: newTotal > capCents, dayKey };
+}

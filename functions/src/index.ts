@@ -22,6 +22,7 @@ import {
   computeWithdrawable,
   withdrawDrawOrder,
   cardRefundableCents,
+  computeDailyWithdrawalState,
   STAKE_DRAW_ORDER,
   type Buckets,
 } from "./wallet";
@@ -409,6 +410,17 @@ const MAX_DEPOSIT_CENTS: number = (() => {
   if (!raw) return 50000;
   const parsed = parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 50000;
+})();
+
+// Per-UTC-day aggregate withdrawal cap ($25,000). Enforced atomically via a
+// counter on the wallet doc (dailyWithdrawalDate/dailyWithdrawalTotal), read +
+// written inside the same transaction as the debit so concurrent requests can't
+// each pass a stale pre-check and collectively exceed it. Override via env.
+const DAILY_WITHDRAWAL_CAP_CENTS: number = (() => {
+  const raw = process.env.DAILY_WITHDRAWAL_CAP_CENTS;
+  if (!raw) return 2_500_000;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2_500_000;
 })();
 
 /**
@@ -3517,6 +3529,14 @@ async function restoreWithdrawalReservation(
     depositedBalance: admin.firestore.FieldValue.increment(reserved.deposited),
     earnedBalance: admin.firestore.FieldValue.increment(reserved.earned),
     bonusBalance: admin.firestore.FieldValue.increment(reserved.bonus),
+    // Undo the daily-cap bump from the aborted debit, atomically with the
+    // balance restore so the counter can never drift from actual withdrawals.
+    // Paired 1:1 with the in-transaction increment; only ever runs after a
+    // committed debit (every caller is post-debit / txnPersisted), so this can
+    // never push the counter below the day's real total. A rare cross-midnight
+    // decrement leaves a stale prior-day value, which computeDailyWithdrawalState
+    // ignores (treated as 0) — so it never wrongly blocks the next day.
+    dailyWithdrawalTotal: admin.firestore.FieldValue.increment(-amount),
   });
 }
 
@@ -3593,35 +3613,11 @@ export const requestWithdrawal = onRequest(
       return;
     }
 
-    // Daily aggregate withdrawal limit: $25,000
-    try {
-      const oneDayAgo = new Date(Date.now() - 86_400_000);
-      const recentWithdrawals = await db
-        .collection("transactions")
-        .where("userId", "==", uid)
-        .where("type", "==", "withdrawal")
-        .where("createdAt", ">=", oneDayAgo)
-        .get();
-      const dailyTotal = recentWithdrawals.docs.reduce(
-        (sum, doc) => sum + Math.abs(doc.data().amount ?? 0),
-        0,
-      );
-      if (dailyTotal + amount > 2_500_000) {
-        sendError(
-          res,
-          400,
-          `Daily withdrawal limit is $25,000. You've withdrawn ${(dailyTotal / 100).toFixed(2)} today.`,
-        );
-        return;
-      }
-    } catch (limitErr) {
-      console.error("Daily limit check failed:", limitErr);
-      // Fail closed: if we can't verify the user is under the $25k/day cap,
-      // refuse the withdrawal. Per-call rate limiting is a separate guardrail
-      // but doesn't bound aggregate damage on a compromised account.
-      sendError(res, 503, "Withdrawal temporarily unavailable — try again shortly");
-      return;
-    }
+    // Daily aggregate withdrawal cap ($25k/UTC-day) is enforced atomically
+    // inside the debit transaction below (via the wallet-doc counter), plus a
+    // friendly pre-check after the wallet read. Doing it pre-transaction as a
+    // read-then-check let concurrent requests each pass a stale total and
+    // collectively exceed the cap — see qa-2026-06-02.md finding #8.
 
     // Hoisted above the try so the catch handler can reference them.
     // txnRef is the withdrawal ledger row; stripeTransferId tracks whether
@@ -3645,6 +3641,28 @@ export const requestWithdrawal = onRequest(
       // pay out until an operator clears the freeze flag.
       if (walletPre.frozen === true) {
         sendError(res, 403, "Wallet frozen for review — contact support");
+        return;
+      }
+
+      // Daily-cap pre-check (friendly early rejection). Authoritative check is
+      // re-run inside the debit transaction below against the fresh snapshot,
+      // so a concurrent request that slips past this advisory check still can't
+      // exceed the cap. `nowMs` is fixed once and reused by both checks (and
+      // across any internal transaction retry) so the UTC day key is stable.
+      const nowMs = Date.now();
+      const dailyPre = computeDailyWithdrawalState(
+        walletPre.dailyWithdrawalDate,
+        walletPre.dailyWithdrawalTotal,
+        amount,
+        DAILY_WITHDRAWAL_CAP_CENTS,
+        nowMs,
+      );
+      if (dailyPre.exceedsCap) {
+        sendError(
+          res,
+          400,
+          `Daily withdrawal limit is $${(DAILY_WITHDRAWAL_CAP_CENTS / 100).toLocaleString("en-US")}. You've withdrawn $${(dailyPre.priorToday / 100).toFixed(2)} today.`,
+        );
         return;
       }
 
@@ -3694,12 +3712,32 @@ export const requestWithdrawal = onRequest(
         // so a shortfall here means a concurrent debit raced us — refuse
         // rather than overdraw a gated bucket.
         if (shortfall > 0) throw new Error("Insufficient withdrawable balance");
+
+        // Authoritative daily-cap check, against the FRESH in-transaction
+        // snapshot. Two concurrent withdrawals contend on this wallet doc, so
+        // the second re-reads the first's committed counter and is forced to
+        // honor the cap — closing the read-then-check race (finding #8). A
+        // throw here aborts cleanly: no debit, no counter bump.
+        const daily = computeDailyWithdrawalState(
+          data.dailyWithdrawalDate,
+          data.dailyWithdrawalTotal,
+          amount,
+          DAILY_WITHDRAWAL_CAP_CENTS,
+          nowMs,
+        );
+        if (daily.exceedsCap) throw new Error("DAILY_LIMIT");
+
         reserved = drawn;
         txn.update(walletRef, {
           balance: current - amount,
           depositedBalance: buckets.deposited - drawn.deposited,
           earnedBalance: buckets.earned - drawn.earned,
           bonusBalance: buckets.bonus - drawn.bonus,
+          // Counter set to an absolute value (resets across UTC days). Restore
+          // paths decrement it 1:1 with the balance restore, so it tracks
+          // committed withdrawals exactly.
+          dailyWithdrawalDate: daily.dayKey,
+          dailyWithdrawalTotal: daily.newTotal,
         });
         txn.set(txnRef, {
           userId: uid,
@@ -3860,6 +3898,19 @@ export const requestWithdrawal = onRequest(
         estimatedArrival,
       });
     } catch (err) {
+      // A request that slipped past the advisory pre-check and hit the
+      // authoritative in-transaction cap. The throw aborted the debit txn, so
+      // nothing committed (no balance change, no counter bump, txnPersisted is
+      // still false) — return a clean 400 with no restoration needed.
+      if (err instanceof Error && err.message === "DAILY_LIMIT") {
+        sendError(
+          res,
+          400,
+          `Daily withdrawal limit is $${(DAILY_WITHDRAWAL_CAP_CENTS / 100).toLocaleString("en-US")}.`,
+        );
+        return;
+      }
+
       console.error("requestWithdrawal error:", err);
       const stripeErr = err as { message?: string; code?: string };
       const detail = stripeErr.message || "Unknown error";

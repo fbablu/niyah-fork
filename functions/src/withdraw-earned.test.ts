@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildStoredPayouts, calculateGroupSessionPayouts } from "./security";
+import { computeDailyWithdrawalState, utcDayKey } from "./wallet";
 
 // Mirror of the CF idempotency-key recipe in `requestWithdrawal`. Kept in
 // sync via this regression test so a copy-paste typo would surface here.
@@ -175,6 +176,92 @@ test("group payout → wallet credit → withdraw preserves invariant", () => {
   wallet.withdraw(2000);
   assert.equal(wallet.balance, 0);
   assert.equal(wallet.summedFromEntries(), wallet.balance);
+});
+
+// ─── daily withdrawal cap (finding #8: atomic counter accounting) ────────────
+
+const CAP = 2_500_000; // $25,000
+const DAY_A = Date.UTC(2026, 5, 2, 14, 0, 0); // 2026-06-02T14:00Z
+const DAY_A_LATE = Date.UTC(2026, 5, 2, 23, 59, 0); // same UTC day
+const DAY_B = Date.UTC(2026, 5, 3, 0, 1, 0); // next UTC day
+
+test("daily cap: missing counter starts the day at zero", () => {
+  const s = computeDailyWithdrawalState(undefined, undefined, 1_000_000, CAP, DAY_A);
+  assert.equal(s.priorToday, 0);
+  assert.equal(s.newTotal, 1_000_000);
+  assert.equal(s.exceedsCap, false);
+  assert.equal(s.dayKey, "2026-06-02");
+});
+
+test("daily cap: same-day counter accumulates", () => {
+  const s = computeDailyWithdrawalState("2026-06-02", 1_000_000, 900_000, CAP, DAY_A_LATE);
+  assert.equal(s.priorToday, 1_000_000);
+  assert.equal(s.newTotal, 1_900_000);
+  assert.equal(s.exceedsCap, false);
+});
+
+test("daily cap: prior-UTC-day counter resets to zero", () => {
+  // $24k withdrawn on day A; first withdrawal on day B sees a clean slate.
+  const s = computeDailyWithdrawalState("2026-06-02", 2_400_000, 1_000_000, CAP, DAY_B);
+  assert.equal(s.priorToday, 0);
+  assert.equal(s.newTotal, 1_000_000);
+  assert.equal(s.exceedsCap, false);
+  assert.equal(s.dayKey, "2026-06-03");
+});
+
+test("daily cap: exactly at the cap is allowed, one cent over is refused", () => {
+  const atCap = computeDailyWithdrawalState("2026-06-02", 2_400_000, 100_000, CAP, DAY_A);
+  assert.equal(atCap.newTotal, CAP);
+  assert.equal(atCap.exceedsCap, false);
+
+  const overCap = computeDailyWithdrawalState("2026-06-02", 2_400_000, 100_001, CAP, DAY_A);
+  assert.equal(overCap.exceedsCap, true);
+});
+
+test("daily cap: stale/negative leftover from a cross-midnight restore is ignored", () => {
+  // A rare cross-midnight decrement can leave a stale prior-day value (even
+  // negative). Treated as 0 on the new day, so it never wrongly blocks.
+  const s = computeDailyWithdrawalState("2026-06-02", -50_000, 1_000_000, CAP, DAY_B);
+  assert.equal(s.priorToday, 0);
+  assert.equal(s.newTotal, 1_000_000);
+  assert.equal(s.exceedsCap, false);
+});
+
+test("daily cap: concurrent requests serialized by the counter can't collectively exceed it (finding #8)", () => {
+  // Models what the in-transaction check does: each committed withdrawal feeds
+  // its newTotal into the next request's prior. Two $10k pass; the third $10k
+  // would hit $30k and is refused — the race the old read-then-check allowed.
+  let date = "2026-06-02";
+  let total = 0;
+  const apply = (amount: number) => {
+    const s = computeDailyWithdrawalState(date, total, amount, CAP, DAY_A);
+    if (s.exceedsCap) return false;
+    date = s.dayKey;
+    total = s.newTotal;
+    return true;
+  };
+  assert.equal(apply(1_000_000), true); // $10k -> $10k
+  assert.equal(apply(1_000_000), true); // $10k -> $20k
+  assert.equal(apply(1_000_000), false); // would be $30k -> refused
+  assert.equal(total, 2_000_000);
+});
+
+test("daily cap: a restored (decremented) withdrawal frees the day's headroom", () => {
+  // Debit commits ($20k), then its restore decrements the counter back to $10k;
+  // a subsequent $14k now fits under the $25k cap.
+  let total = 0;
+  total = computeDailyWithdrawalState("2026-06-02", total, 1_000_000, CAP, DAY_A).newTotal; // $10k
+  total = computeDailyWithdrawalState("2026-06-02", total, 1_000_000, CAP, DAY_A).newTotal; // $20k
+  total -= 1_000_000; // restore path: increment(-amount) -> $10k
+  const after = computeDailyWithdrawalState("2026-06-02", total, 1_400_000, CAP, DAY_A);
+  assert.equal(after.priorToday, 1_000_000);
+  assert.equal(after.exceedsCap, false);
+});
+
+test("utcDayKey is a stable YYYY-MM-DD and rolls at UTC midnight", () => {
+  assert.equal(utcDayKey(DAY_A), "2026-06-02");
+  assert.equal(utcDayKey(DAY_A_LATE), "2026-06-02");
+  assert.equal(utcDayKey(DAY_B), "2026-06-03");
 });
 
 /*
