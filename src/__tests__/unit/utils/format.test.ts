@@ -10,11 +10,41 @@
 
 import {
   formatMoney,
+  formatAmountInput,
   formatTime,
   formatTimeRemaining,
   formatDate,
   formatRelativeTime,
 } from "../../../utils/format";
+
+describe("formatAmountInput", () => {
+  it("returns empty string for empty input so the placeholder shows", () => {
+    expect(formatAmountInput("")).toBe("");
+  });
+
+  it("prefixes a dollar sign", () => {
+    expect(formatAmountInput("5")).toBe("$5");
+  });
+
+  it("groups thousands as the user types", () => {
+    expect(formatAmountInput("1000")).toBe("$1,000");
+    expect(formatAmountInput("100000")).toBe("$100,000");
+    expect(formatAmountInput("1000000")).toBe("$1,000,000");
+  });
+
+  it("preserves an in-progress decimal exactly as typed", () => {
+    expect(formatAmountInput("0.")).toBe("$0.");
+    expect(formatAmountInput("12.5")).toBe("$12.5");
+    expect(formatAmountInput("0.05")).toBe("$0.05");
+    expect(formatAmountInput("1000.99")).toBe("$1,000.99");
+  });
+
+  it("strips leading zeros but keeps a lone zero", () => {
+    expect(formatAmountInput("0")).toBe("$0");
+    expect(formatAmountInput("00")).toBe("$0");
+    expect(formatAmountInput("007")).toBe("$7");
+  });
+});
 
 describe("formatMoney", () => {
   describe("basic formatting (WHITE BOX - tests Intl.NumberFormat logic)", () => {

@@ -11,6 +11,24 @@ export const formatMoney = (
   }).format(dollars);
 };
 
+/**
+ * Formats a raw numeric-entry string (what the NumPad builds up, e.g.
+ * "100000", "0.", "12.5") into a thousands-grouped, "$"-prefixed display
+ * string — preserving an in-progress decimal exactly as typed so the cursor
+ * doesn't jump while the user types. Returns "" for empty input so callers can
+ * fall back to their own placeholder. Display-only: never parse this back, do
+ * money math on the raw value.
+ */
+export const formatAmountInput = (raw: string): string => {
+  if (!raw) return "";
+  const hasDot = raw.includes(".");
+  const [intPart, decPart = ""] = raw.split(".");
+  // Strip leading zeros ("007" → "7") but keep a lone "0".
+  const normInt = intPart.replace(/^0+(?=\d)/, "");
+  const grouped = normInt.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `$${grouped}${hasDot ? `.${decPart}` : ""}`;
+};
+
 export const formatTime = (ms: number): string => {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);

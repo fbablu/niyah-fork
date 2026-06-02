@@ -31,18 +31,19 @@ import {
   Button,
   NumPad,
   AmountDisplay,
+  AnimatedNote,
   MoneySuccessOverlay,
   SessionScreenScaffold,
   withErrorBoundary,
 } from "../../src/components";
 import { useWalletStore } from "../../src/store/walletStore";
 import { useFeatureFlagsStore } from "../../src/store/featureFlagsStore";
-import { formatMoney } from "../../src/utils/format";
+import { formatMoney, formatAmountInput } from "../../src/utils/format";
 import {
   createPaymentIntent,
   verifyAndCreditDeposit,
 } from "../../src/config/functions";
-import { DEMO_MODE } from "../../src/constants/config";
+import { DEMO_MODE, MAX_DEPOSIT_CENTS } from "../../src/constants/config";
 import { logger } from "../../src/utils/logger";
 import { logEvent } from "../../src/utils/analytics";
 import {
@@ -242,8 +243,22 @@ function DepositScreenInner() {
   const amountInCents = inputValue
     ? Math.round(parseFloat(inputValue) * 100)
     : 0;
-  const displayAmount = inputValue ? `$${inputValue}` : "";
-  const isValidAmount = amountInCents >= 100; // Minimum $1
+  const displayAmount = formatAmountInput(inputValue);
+  const isOverMax = amountInCents > MAX_DEPOSIT_CENTS;
+  // Min $1, max $500/transaction — mirrors the server ceiling so an over-limit
+  // amount is blocked here instead of round-tripping to Stripe and erroring.
+  const isValidAmount = amountInCents >= 100 && !isOverMax;
+  const maxDepositLabel = formatMoney(MAX_DEPOSIT_CENTS, false);
+
+  // Fire one warning haptic the moment the entered amount crosses the cap —
+  // Robinhood-style tactile feedback that the limit's been hit.
+  const wasOverMaxRef = useRef(false);
+  useEffect(() => {
+    if (isOverMax && !wasOverMaxRef.current) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    wasOverMaxRef.current = isOverMax;
+  }, [isOverMax]);
 
   const handleKeyPress = useCallback(
     (key: string) => {
@@ -302,7 +317,8 @@ function DepositScreenInner() {
 
   const handleStripeDeposit = async () => {
     const finalAmount = selectedQuickAmount ?? amountInCents;
-    if (finalAmount < 100 || isLoading) return;
+    if (finalAmount < 100 || finalAmount > MAX_DEPOSIT_CENTS || isLoading)
+      return;
 
     if (!isStripePaymentsAvailable) {
       Alert.alert("Payments Unavailable", STRIPE_UNAVAILABLE_MESSAGE);
@@ -479,6 +495,9 @@ function DepositScreenInner() {
         <View style={styles.balanceInfo}>
           <Text style={styles.balanceLabel}>Current Balance</Text>
           <Text style={styles.balanceAmount}>{formatMoney(balance)}</Text>
+          <Text style={styles.balanceCap}>
+            Min $1 · max {maxDepositLabel} per deposit
+          </Text>
         </View>
 
         {/* Amount Display */}
@@ -486,7 +505,13 @@ function DepositScreenInner() {
           amount={displayAmount}
           label="Enter amount"
           placeholder="$0"
+          isError={isOverMax}
         />
+        {isOverMax && (
+          <AnimatedNote style={styles.errorText}>
+            You can deposit up to {maxDepositLabel} at a time.
+          </AnimatedNote>
+        )}
 
         {/* Quick Amounts */}
         <View style={styles.quickAmountsContainer}>
@@ -531,7 +556,9 @@ function DepositScreenInner() {
                     ? "Payments unavailable"
                     : isValidAmount
                       ? `Add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
-                      : "Enter an amount"
+                      : isOverMax
+                        ? `Max ${maxDepositLabel} per deposit`
+                        : "Enter an amount"
               }
               onPress={handleDeposit}
               disabled={
@@ -586,6 +613,18 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.titleMedium,
       ...Font.semibold,
       color: Colors.textSecondary,
+    },
+    balanceCap: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: Spacing.xs,
+    },
+    errorText: {
+      textAlign: "center",
+      color: Colors.danger,
+      fontSize: Typography.bodySmall,
+      marginTop: -Spacing.sm,
+      marginBottom: Spacing.sm,
     },
     quickAmountsContainer: {
       marginBottom: Spacing.lg,

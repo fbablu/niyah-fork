@@ -32,6 +32,7 @@ import {
   Button,
   NumPad,
   AmountDisplay,
+  AnimatedNote,
   MoneySuccessOverlay,
   SessionScreenScaffold,
   withErrorBoundary,
@@ -39,7 +40,7 @@ import {
 import { useWalletStore } from "../../src/store/walletStore";
 import { useAuthStore } from "../../src/store/authStore";
 import { useFeatureFlagsStore } from "../../src/store/featureFlagsStore";
-import { formatMoney } from "../../src/utils/format";
+import { formatMoney, formatAmountInput } from "../../src/utils/format";
 import {
   requestWithdrawal,
   createAccountLink,
@@ -121,7 +122,7 @@ function WithdrawScreenInner() {
   const amountInCents = inputValue
     ? Math.round(parseFloat(inputValue) * 100)
     : 0;
-  const displayAmount = inputValue ? `$${inputValue}` : "";
+  const displayAmount = formatAmountInput(inputValue);
   const isValidAmount =
     amountInCents >= 1000 &&
     amountInCents <= balance &&
@@ -592,8 +593,9 @@ function WithdrawScreenInner() {
         amount={displayAmount}
         label="Enter amount"
         placeholder="$0"
+        isError={!!error}
       />
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {error && <AnimatedNote style={styles.errorText}>{error}</AnimatedNote>}
 
       <View style={styles.numPadContainer}>
         <NumPad

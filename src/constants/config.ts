@@ -80,6 +80,14 @@ export const INITIAL_BALANCE = 5000; // $50.00 in cents
 // $25/day for campus launch. Raise after 3 clean days of real-money operation.
 export const DAILY_STAKE_CAP_CENTS = 2500;
 
+// Per-transaction deposit ceiling (in cents). Mirrors the server's
+// MAX_DEPOSIT_CENTS (functions/src/index.ts, env-overridable, default 50000).
+// Anti-fraud: caps a stolen card to one $500 charge. NOT a balance/earnings
+// cap — users can top up again (rate-limited to 3 deposits / 10 min) and their
+// earned + withdrawable balance is uncapped. Used client-side to block an
+// over-limit deposit before it round-trips to Stripe and fails.
+export const MAX_DEPOSIT_CENTS = 50000;
+
 // Reputation thresholds
 export const REPUTATION_LEVELS = {
   seed: { min: 0, max: 20, label: "Seed", description: "New to Niyah" },

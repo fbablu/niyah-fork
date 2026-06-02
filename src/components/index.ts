@@ -4,6 +4,7 @@ export { Card } from "./Card";
 export { Balance, CompactBalance, AnimatedDigit } from "./Balance";
 export { Timer, InlineTimer } from "./Timer";
 export { NumPad, AmountDisplay } from "./NumPad";
+export { AnimatedNote } from "./AnimatedNote";
 export { Confetti } from "./Confetti";
 export { MoneySuccessOverlay } from "./MoneySuccessOverlay";
 export { MoneyPlant } from "./MoneyPlant";

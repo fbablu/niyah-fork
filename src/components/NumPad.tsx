@@ -170,15 +170,21 @@ interface AmountDisplayProps {
   amount: string;
   label?: string;
   placeholder?: string;
+  /** When true the amount + cursor tint to the danger color (e.g. over a cap). */
+  isError?: boolean;
 }
 
 export const AmountDisplay: React.FC<AmountDisplayProps> = ({
   amount,
   label,
   placeholder = "$0",
+  isError = false,
 }) => {
   const Colors = useColors();
   const cursorOpacity = useRef(new Animated.Value(1)).current;
+  // Drives the amount color text↔danger. JS-driven (color isn't native-able);
+  // kept separate from the native-driven cursor blink so the drivers don't mix.
+  const errorAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const blink = () => {
@@ -198,8 +204,20 @@ export const AmountDisplay: React.FC<AmountDisplayProps> = ({
     blink();
   }, [cursorOpacity]);
 
+  useEffect(() => {
+    Animated.timing(errorAnim, {
+      toValue: isError ? 1 : 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [isError, errorAnim]);
+
   const displayAmount = amount || placeholder;
   const isEmpty = !amount;
+  const animatedColor = errorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [Colors.text, Colors.danger],
+  });
 
   const styles = useMemo(
     () =>
@@ -242,11 +260,23 @@ export const AmountDisplay: React.FC<AmountDisplayProps> = ({
     <View style={styles.amountContainer}>
       {label && <Text style={styles.amountLabel}>{label}</Text>}
       <View style={styles.amountRow}>
-        <Text style={[styles.amountText, isEmpty && styles.placeholderText]}>
-          {displayAmount}
-        </Text>
+        {isEmpty ? (
+          <Text style={[styles.amountText, styles.placeholderText]}>
+            {displayAmount}
+          </Text>
+        ) : (
+          <Animated.Text style={[styles.amountText, { color: animatedColor }]}>
+            {displayAmount}
+          </Animated.Text>
+        )}
         {!isEmpty && (
-          <Animated.View style={[styles.cursor, { opacity: cursorOpacity }]} />
+          <Animated.View
+            style={[
+              styles.cursor,
+              { opacity: cursorOpacity },
+              isError && { backgroundColor: Colors.danger },
+            ]}
+          />
         )}
       </View>
     </View>
