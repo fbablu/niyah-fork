@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   Typography,
@@ -59,6 +60,7 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const handleBack = onBack ?? (() => router.back());
 
@@ -91,16 +93,17 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
       );
     }
 
-    // "back" variant
+    // "back" variant — X icon, always inside the safe top inset
     return (
       <View style={styles.backHeader}>
         <Pressable
           onPress={handleBack}
-          hitSlop={20}
+          hitSlop={8}
+          style={styles.iconButton}
           accessibilityRole="button"
           accessibilityLabel={backLabel ?? "Back"}
         >
-          <Text style={styles.backText}>{backLabel ?? "Back"}</Text>
+          <Ionicons name="close" size={24} color={Colors.textSecondary} />
         </Pressable>
       </View>
     );
@@ -127,7 +130,12 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
 
   if (scrollable) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          { paddingTop: insets.top, paddingBottom: insets.bottom },
+        ]}
+      >
         <KeyboardAwareScrollView
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
@@ -140,19 +148,24 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
           {children}
         </KeyboardAwareScrollView>
         {renderFooter()}
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { paddingTop: insets.top, paddingBottom: insets.bottom },
+      ]}
+    >
       <View style={styles.contentContainer}>
         {renderHeader()}
         {renderTitleSection()}
         {children}
         {renderFooter()}
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -176,6 +189,14 @@ const makeStyles = (Colors: ThemeColors) =>
     // ── Back header ──
     backHeader: {
       marginBottom: Spacing.md,
+      alignItems: "flex-start",
+    },
+    iconButton: {
+      width: 44,
+      height: 44,
+      marginLeft: -Spacing.sm,
+      alignItems: "center",
+      justifyContent: "center",
     },
     backText: {
       color: Colors.textSecondary,

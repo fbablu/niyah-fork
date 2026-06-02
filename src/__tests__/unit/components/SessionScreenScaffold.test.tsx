@@ -20,8 +20,7 @@ describe("SessionScreenScaffold", () => {
         </SessionScreenScaffold>,
       );
 
-      // Default back label is "Back"
-      expect(screen.getByText("Back")).toBeTruthy();
+      // Default back label is "Back" (rendered as an X icon, a11y label kept)
       expect(screen.getByLabelText("Back")).toBeTruthy();
     });
 
@@ -32,7 +31,7 @@ describe("SessionScreenScaffold", () => {
         </SessionScreenScaffold>,
       );
 
-      expect(screen.getByText("Cancel")).toBeTruthy();
+      expect(screen.getByLabelText("Cancel")).toBeTruthy();
     });
 
     it("calls onBack when back is pressed", () => {
