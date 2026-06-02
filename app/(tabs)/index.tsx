@@ -763,12 +763,12 @@ function DashboardScreenInner() {
               </Text>
               <View style={{ gap: Spacing.sm, width: "100%" }}>
                 <Button
-                  title="Block Apps Now"
+                  title="Start a Focus Session (Free)"
                   onPress={() => router.push("/session/quick-block")}
                   size="large"
                 />
                 <Button
-                  title="Solo Focus (Staked)"
+                  title="Stake a Solo Session"
                   onPress={() =>
                     router.push(
                       "/session/select?type=solo" as RelativePathString,
@@ -778,7 +778,7 @@ function DashboardScreenInner() {
                   variant="outline"
                 />
                 <Button
-                  title="Group Challenge"
+                  title="Stake a Group Session"
                   onPress={() => router.push("/session/propose")}
                   size="large"
                   variant="outline"
