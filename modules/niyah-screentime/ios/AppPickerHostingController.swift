@@ -14,8 +14,24 @@ class AppPickerHostingController: UIHostingController<AppPickerView> {
     onSelection: @escaping (FamilyActivitySelection) -> Void,
     onCancel: @escaping () -> Void
   ) {
-    let view = AppPickerView(onSelection: onSelection, onCancel: onCancel)
-    super.init(rootView: view)
+    super.init(
+      rootView: AppPickerView(
+        onSelection: onSelection,
+        onCancel: onCancel,
+        dismiss: {}
+      )
+    )
+    // `self` exists after super.init — wire dismiss to close ONLY this
+    // presented picker. The previous helper called dismiss() on
+    // window.rootViewController, which tears down the ENTIRE forward
+    // presentation chain (the session fullScreenModal too), dumping the user
+    // back on the dashboard. Calling dismiss on this controller dismisses just
+    // this sheet and leaves the session screen intact.
+    rootView = AppPickerView(
+      onSelection: onSelection,
+      onCancel: onCancel,
+      dismiss: { [weak self] in self?.dismiss(animated: true) }
+    )
   }
 
   @MainActor required dynamic init?(coder aDecoder: NSCoder) {
@@ -30,6 +46,8 @@ struct AppPickerView: View {
   @State private var selection = FamilyActivitySelection()
   let onSelection: (FamilyActivitySelection) -> Void
   let onCancel: () -> Void
+  /// Closes only this picker controller (injected by the hosting controller).
+  let dismiss: () -> Void
 
   var body: some View {
     NavigationView {
@@ -39,7 +57,18 @@ struct AppPickerView: View {
         .toolbar {
           ToolbarItem(placement: .confirmationAction) {
             Button("Done") {
-              onSelection(selection)
+              // Done with nothing selected resolves as a cancel so a
+              // previously-saved selection isn't clobbered with an empty one
+              // (which would flip getSavedSelection to "No apps selected").
+              let isEmpty =
+                selection.applicationTokens.isEmpty
+                && selection.categoryTokens.isEmpty
+                && selection.webDomainTokens.isEmpty
+              if isEmpty {
+                onCancel()
+              } else {
+                onSelection(selection)
+              }
               dismiss()
             }
           }
@@ -50,14 +79,6 @@ struct AppPickerView: View {
             }
           }
         }
-    }
-  }
-
-  private func dismiss() {
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let window = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = window.rootViewController {
-      rootVC.dismiss(animated: true)
     }
   }
 }

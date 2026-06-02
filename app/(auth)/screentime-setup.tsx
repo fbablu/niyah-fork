@@ -63,10 +63,11 @@ export default function ScreenTimeSetupScreen() {
     }
     setIsRequesting(true);
     try {
-      await presentAppPicker();
-      // Re-check after picker dismisses (user may have cancelled).
-      const selection = getSavedAppSelection();
-      if (selection) {
+      // Use the picker's RESOLVED selection, not a read-after-write — the
+      // re-read can miss on a fresh native-module instance and falsely report
+      // no apps. An empty Done now throws (treated as cancel) and is caught.
+      const selection = await presentAppPicker();
+      if (selection && selection.appCount + selection.categoryCount > 0) {
         setHasSelection(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setTimeout(() => router.replace("/(tabs)"), 600);

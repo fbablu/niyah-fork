@@ -16,7 +16,6 @@ import {
   isScreenTimeAvailable,
   requestScreenTimeAuth,
   presentAppPicker,
-  getSavedAppSelection,
 } from "../../src/config/screentime";
 
 function ScreentimeBaselineScreenInner() {
@@ -42,8 +41,10 @@ function ScreentimeBaselineScreenInner() {
       await requestScreenTimeAuth();
       // Present picker with no constraint — user picks broadly so the
       // DeviceActivityReport extension has a wide net for baseline data.
-      await presentAppPicker();
-      if (getSavedAppSelection()) {
+      // Use the resolved selection, not a read-after-write (avoids the
+      // fresh-module-instance false "no apps" miss).
+      const selection = await presentAppPicker();
+      if (selection && selection.appCount + selection.categoryCount > 0) {
         router.replace("/(tabs)");
       }
     } catch {
