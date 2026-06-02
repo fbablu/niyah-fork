@@ -524,7 +524,11 @@ const StandingRow: React.FC<{ rank: number; entry: GroupLeaderboardEntry }> = ({
 
 type FollowingItem = { type: "following"; uid: string; profile: PublicProfile };
 type PartnerItem = { type: "partner"; partner: Partner };
-type StandingItem = { type: "standing"; rank: number; entry: GroupLeaderboardEntry };
+type StandingItem = {
+  type: "standing";
+  rank: number;
+  entry: GroupLeaderboardEntry;
+};
 type ListItem = FollowingItem | PartnerItem | StandingItem;
 
 type FriendsTab = "following" | "partners" | "standings";
