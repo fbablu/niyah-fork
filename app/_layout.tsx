@@ -1,5 +1,5 @@
 import { useEffect, type ComponentProps, type ReactElement } from "react";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Text, TextInput, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -14,7 +14,11 @@ import { useFeatureFlagsStore } from "../src/store/featureFlagsStore";
 import { ErrorBoundary, StatusBannerHost } from "../src/components";
 import { isEmailSignInLink } from "../src/config/firebase";
 import { getConnectAccountStatus } from "../src/config/functions";
-import { DEMO_MODE, PENDING_REFERRAL_KEY } from "../src/constants/config";
+import {
+  DEMO_MODE,
+  PENDING_REFERRAL_KEY,
+  PENDING_JOIN_KEY,
+} from "../src/constants/config";
 import { logger } from "../src/utils/logger";
 import { initializeSslPinning } from "../src/config/sslPinning";
 import {
@@ -86,6 +90,25 @@ if (Platform.OS === "ios" && BaseFontFamily) {
   };
 }
 
+/**
+ * Resume a pending group-invite deep link (/join?s=<id>) once the user is
+ * authenticated. Stored by handleUrl when the link arrives; consumed here on
+ * app-active and right after the link, so an already-signed-in friend lands
+ * straight on the accept screen. Clears the key BEFORE routing so it can never
+ * loop. A logged-out recipient keeps the key until a foreground after sign-in.
+ */
+async function consumePendingJoin(): Promise<void> {
+  try {
+    const sessionId = await SecureStore.getItemAsync(PENDING_JOIN_KEY);
+    if (!sessionId) return;
+    if (!useAuthStore.getState().isAuthenticated) return;
+    await SecureStore.deleteItemAsync(PENDING_JOIN_KEY);
+    router.push("/session/invites" as never);
+  } catch (err) {
+    logger.warn("consumePendingJoin failed:", err);
+  }
+}
+
 export default function RootLayout() {
   const Colors = useColors();
   const theme = useThemeStore((s) => s.theme);
@@ -115,6 +138,7 @@ export default function RootLayout() {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         registerFCMToken().catch(() => {});
+        consumePendingJoin();
       }
     });
     return () => sub.remove();
@@ -164,6 +188,27 @@ export default function RootLayout() {
           });
         } catch (err) {
           logger.warn("Stripe return: status refresh failed:", err);
+        }
+        return;
+      }
+
+      // Group focus-session invite. Universal Link
+      // (https://niyah.live/join?s=<id>) or the landing-page custom-scheme
+      // bounce (niyah://join?s=<id>). Stash the session id and resume once
+      // authenticated so an existing friend lands on the accept screen.
+      if (url.includes("/join")) {
+        const joinParsed = Linking.parse(url);
+        let sessionId =
+          typeof joinParsed.queryParams?.s === "string"
+            ? joinParsed.queryParams.s
+            : undefined;
+        if (!sessionId && joinParsed.path) {
+          const m = joinParsed.path.match(/^\/?join\/([A-Za-z0-9_-]+)/);
+          if (m) sessionId = m[1];
+        }
+        if (sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) {
+          await SecureStore.setItemAsync(PENDING_JOIN_KEY, sessionId);
+          await consumePendingJoin();
         }
         return;
       }

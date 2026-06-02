@@ -452,7 +452,10 @@ function WaitingRoomScreenInner() {
     if (!sessionId) return;
     try {
       await Share.share({
-        message: `Join my Niyah focus session! https://niyah.live/join/${sessionId}`,
+        // Query form (?s=) so the static niyah.live/join page can read it
+        // client-side; Universal Link opens the app directly for installed
+        // friends and routes everyone else to install.
+        message: `Join my Niyah focus session! https://niyah.live/join?s=${sessionId}`,
       });
     } catch {
       // User cancelled share sheet

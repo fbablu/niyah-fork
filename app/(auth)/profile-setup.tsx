@@ -14,7 +14,10 @@ import { useColors } from "../../src/hooks/useColors";
 import { Button, AuthScreenScaffold } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
-import { PENDING_REFERRAL_KEY } from "../../src/constants/config";
+import {
+  PENDING_REFERRAL_KEY,
+  PENDING_JOIN_KEY,
+} from "../../src/constants/config";
 import { logger } from "../../src/utils/logger";
 
 export default function ProfileSetupScreen() {
@@ -81,6 +84,11 @@ export default function ProfileSetupScreen() {
         await applyReferralBonus(referrerUid);
         await SecureStore.deleteItemAsync(PENDING_REFERRAL_KEY);
       }
+
+      // A brand-new user has no pending group invite to act on (cold join by
+      // link needs the open-join CF, not built yet) — drop any /join deep link
+      // so they aren't routed to an empty invites screen after onboarding.
+      await SecureStore.deleteItemAsync(PENDING_JOIN_KEY).catch(() => {});
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
