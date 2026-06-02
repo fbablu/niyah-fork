@@ -114,7 +114,9 @@ function InviteScreenInner() {
   // https Universal Link (not a niyah:// custom scheme) so it's openable by a
   // recipient who doesn't have the app yet: niyah.live/i routes installed users
   // straight in and sends everyone else to install, carrying the referral.
-  const inviteLink = uid ? `https://niyah.live/i?ref=${uid}` : "https://niyah.live";
+  const inviteLink = uid
+    ? `https://niyah.live/i?ref=${uid}`
+    : "https://niyah.live";
   const message =
     `I'm using Niyah to stay focused by putting my own money on the line. ` +
     `Join me and we can keep each other accountable!\n\n${inviteLink}`;
