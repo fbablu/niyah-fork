@@ -110,6 +110,9 @@ export const CURRENT_LEGAL_VERSION = "2.0.0";
 // and links out to these for the complete Terms / Privacy Policy.
 export const LEGAL_TERMS_URL = "https://niyah.live/legal/terms";
 export const LEGAL_PRIVACY_URL = "https://niyah.live/legal/privacy";
+// Legal index — links to both the full Terms and Privacy Policy. The in-app
+// acceptance overlay points its single "Learn more" link here.
+export const LEGAL_INDEX_URL = "https://niyah.live/legal";
 
 // Referral system
 // Each accepted referral permanently boosts the new user's social credit score by this amount.

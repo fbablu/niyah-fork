@@ -17,7 +17,7 @@ import {
   type ThemeColors,
 } from "../constants/colors";
 import { useColors } from "../hooks/useColors";
-import { LEGAL_TERMS_URL, LEGAL_PRIVACY_URL } from "../constants/config";
+import { LEGAL_INDEX_URL } from "../constants/config";
 import { logger } from "../utils/logger";
 import { Button } from "./Button";
 
@@ -129,25 +129,16 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
             ))}
           </ScrollView>
 
-          {/* Links out to the full hosted legal text */}
+          {/* Links out to the full hosted legal text (Terms + Privacy index) */}
           <View style={styles.links}>
             <Pressable
               style={styles.linkButton}
-              onPress={() => openLegal(LEGAL_TERMS_URL)}
+              onPress={() => openLegal(LEGAL_INDEX_URL)}
               accessibilityRole="link"
-              accessibilityLabel="Read full Terms of Service"
+              accessibilityLabel="Learn more — read the full Terms of Service and Privacy Policy"
               hitSlop={8}
             >
-              <Text style={styles.link}>Read full Terms ↗</Text>
-            </Pressable>
-            <Pressable
-              style={styles.linkButton}
-              onPress={() => openLegal(LEGAL_PRIVACY_URL)}
-              accessibilityRole="link"
-              accessibilityLabel="Read full Privacy Policy"
-              hitSlop={8}
-            >
-              <Text style={styles.link}>Read full Privacy Policy ↗</Text>
+              <Text style={styles.link}>Learn more ↗</Text>
             </Pressable>
           </View>
 
