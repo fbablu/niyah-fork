@@ -35,8 +35,13 @@ interface ThrottleRecord {
   hardCooldownUntil?: number;
 }
 
+// Strip to digits only. expo-secure-store keys must match /^[A-Za-z0-9._-]+$/,
+// so the leading "+" of an E.164 number (e.g. "+12025551234") is illegal and
+// makes every read/write throw "Invalid key provided to SecureStore". Dropping
+// all non-digits keeps the key valid while still normalising differently
+// formatted spellings of the same number to one record.
 const keyFor = (phone: string): string =>
-  `@niyah/otp_throttle:${phone.replace(/[^+0-9]/g, "")}`;
+  `@niyah/otp_throttle:${phone.replace(/[^0-9]/g, "")}`;
 
 async function read(phone: string): Promise<ThrottleRecord | null> {
   try {
