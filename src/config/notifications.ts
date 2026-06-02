@@ -183,6 +183,7 @@ function handleNotificationNavigation(
     // active screen instead of forcing a navigation. Tapping the banner
     // still routes there in case the app was backgrounded.
     case "member_app_opened":
+    case "session_surrender":
     case "leaderboard_shift":
     case "session_progress_25":
     case "session_progress_50":

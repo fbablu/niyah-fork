@@ -53,6 +53,117 @@ export const clearAppSelection = async (): Promise<void> => {
   return NiyahScreenTime.clearSelection();
 };
 
+/** A selection counts as non-empty if it names apps OR whole categories. */
+const selectionHasApps = (s: AppSelectionToken | null): boolean =>
+  !!s && s.appCount + s.categoryCount > 0;
+
+export interface AppSelectionStatus {
+  /** Screen Time API usable here (iOS 16+ physical device). */
+  available: boolean;
+  /** FamilyControls authorization granted. */
+  authorized: boolean;
+  /** A non-empty app/category selection is saved. */
+  hasApps: boolean;
+  /** The saved selection, if any. */
+  selection: AppSelectionToken | null;
+}
+
+/**
+ * Pure snapshot of whether this device is ready to actually block apps — no
+ * prompts, no side effects, safe to call every render to drive a
+ * "Setup Required" affordance and gate a session-start button.
+ *
+ * When Screen Time isn't available (simulator, iOS <16, Android) reports
+ * `available:false` with `authorized`/`hasApps` true so callers DON'T trap the
+ * user — blocking simply can't apply there (matches startBlocking's no-op).
+ */
+export const getAppSelectionStatus = (): AppSelectionStatus => {
+  if (!isScreenTimeAvailable) {
+    return {
+      available: false,
+      authorized: true,
+      hasApps: true,
+      selection: null,
+    };
+  }
+  const selection = getSavedAppSelection();
+  return {
+    available: true,
+    authorized: getScreenTimeAuthStatus() === "approved",
+    hasApps: selectionHasApps(selection),
+    selection,
+  };
+};
+
+/**
+ * The current saved selection as a shareable, human-readable block summary —
+ * or undefined if nothing (or an empty selection) is saved. NO opaque tokens
+ * (device-local); just counts + the native label, safe to store on a group
+ * session doc so members can see what each other is blocking.
+ */
+export const getSavedAppBlockSummary = ():
+  | { appCount: number; categoryCount: number; label: string }
+  | undefined => {
+  const s = getSavedAppSelection();
+  if (!selectionHasApps(s)) return undefined;
+  return {
+    appCount: s!.appCount,
+    categoryCount: s!.categoryCount,
+    label: s!.label,
+  };
+};
+
+export type AppSelectionGate =
+  | {
+      ok: true;
+      reason: "ready" | "unavailable";
+      selection: AppSelectionToken | null;
+    }
+  | { ok: false; reason: "needs-auth" | "no-selection" };
+
+/**
+ * Imperative gate for a session-start handler: ensure Screen Time is authorized
+ * AND a non-empty selection exists, PROMPTING for each if missing.
+ *  - unavailable device → ok (blocking can't apply; don't trap the user)
+ *  - auth denied/declined → { ok:false, reason:"needs-auth" }
+ *  - picker cancelled / still empty → { ok:false, reason:"no-selection" }
+ *
+ * Gate on `ok` before starting (and charging) a staked session — a staked
+ * session must never run unshielded. The prior bug: callers invoked
+ * startBlocking() with no selection, the native module threw, the error was
+ * swallowed, and the stake was charged for a session that blocked nothing.
+ */
+export const validateAndPromptForAppSelection =
+  async (): Promise<AppSelectionGate> => {
+    if (!isScreenTimeAvailable) {
+      return { ok: true, reason: "unavailable", selection: null };
+    }
+
+    if (getScreenTimeAuthStatus() !== "approved") {
+      try {
+        if ((await requestScreenTimeAuth()) !== "approved") {
+          return { ok: false, reason: "needs-auth" };
+        }
+      } catch {
+        return { ok: false, reason: "needs-auth" };
+      }
+    }
+
+    let selection = getSavedAppSelection();
+    if (!selectionHasApps(selection)) {
+      try {
+        selection = await presentAppPicker();
+      } catch {
+        return { ok: false, reason: "no-selection" };
+      }
+      if (!selectionHasApps(selection)) {
+        return { ok: false, reason: "no-selection" };
+      }
+    }
+
+    return { ok: true, reason: "ready", selection };
+  };
+
 // ---------------------------------------------------------------------------
 // Session blocking
 // ---------------------------------------------------------------------------

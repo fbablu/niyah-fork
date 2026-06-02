@@ -16,6 +16,7 @@ import {
   SessionScreenScaffold,
   withErrorBoundary,
   HoldToConfirmModal,
+  StatusBanner,
 } from "../../src/components";
 import * as Haptics from "expo-haptics";
 import Animated, { LinearTransition } from "react-native-reanimated";
@@ -33,6 +34,7 @@ import {
   onSurrenderRequested,
   checkPendingSurrender,
   isScreenTimeAvailable,
+  getAppSelectionStatus,
 } from "../../src/config/screentime";
 import { reportShieldViolation as reportShieldViolationCF } from "../../src/config/functions";
 import { logger } from "../../src/utils/logger";
@@ -427,6 +429,18 @@ function ActiveSessionScreenInner() {
   useEffect(() => {
     if (isSoloStaked) return;
     if (!isScreenTimeAvailable || !hasActiveSession) return;
+    // Don't silently run an unshielded session: if auth or an app selection is
+    // missing, blocking would no-op (or throw + get swallowed). Warn instead so
+    // the user can fix it rather than discovering nothing was blocked.
+    const { authorized, hasApps } = getAppSelectionStatus();
+    if (!authorized || !hasApps) {
+      StatusBanner.show({
+        severity: "warn",
+        message:
+          "Apps aren't blocked — set up Screen Time and pick apps in Profile.",
+      });
+      return;
+    }
     startBlocking().catch(() => {});
   }, [hasActiveSession, isSoloStaked]);
 
