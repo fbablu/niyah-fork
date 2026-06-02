@@ -1,5 +1,6 @@
 import { getAuth, getIdToken } from "@react-native-firebase/auth";
 import { getAppCheckToken } from "./appCheck";
+import type { AppBlockSummary, GroupLeaderboardEntry } from "../types";
 
 const FUNCTIONS_BASE = (
   process.env.EXPO_PUBLIC_FUNCTIONS_URL ||
@@ -476,6 +477,7 @@ export async function createGroupSession(
   duration: number,
   inviteeIds: string[],
   customStake?: boolean,
+  appBlockSummary?: AppBlockSummary,
 ): Promise<CreateGroupSessionResult> {
   return callFunction<CreateGroupSessionResult>("createGroupSession", {
     cadence,
@@ -483,17 +485,29 @@ export async function createGroupSession(
     duration,
     inviteeIds,
     customStake: customStake ?? false,
+    ...(appBlockSummary ? { appBlockSummary } : {}),
   });
 }
 
 export async function respondToGroupInvite(
   inviteId: string,
   accept: boolean,
+  appBlockSummary?: AppBlockSummary,
 ): Promise<{ success: boolean; sessionStatus: string }> {
   return callFunction<{ success: boolean; sessionStatus: string }>(
     "respondToGroupInvite",
-    { inviteId, accept },
+    { inviteId, accept, ...(appBlockSummary ? { appBlockSummary } : {}) },
   );
+}
+
+export async function getGroupLeaderboard(): Promise<{
+  standings: GroupLeaderboardEntry[];
+  sessionsCounted: number;
+}> {
+  return callFunction<{
+    standings: GroupLeaderboardEntry[];
+    sessionsCounted: number;
+  }>("getGroupLeaderboard", {});
 }
 
 export async function markOnlineForSession(

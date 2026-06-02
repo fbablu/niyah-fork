@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   authUsersShareVerifiedContact,
+  buildGroupLeaderboard,
   buildStoredPayouts,
   calculateGroupSessionPayouts,
   calculateReferralReputation,
@@ -11,6 +12,7 @@ import {
   decideReferralClaim,
   evaluateAppCheckToken,
   isValidFirebaseUid,
+  type LeaderboardSessionInput,
   type MinimalAuthRecord,
 } from "./security";
 
@@ -392,4 +394,82 @@ test("evaluateAppCheckToken → resolves when verifier resolves", async () => {
     seen = t;
   });
   assert.equal(seen, "real-token");
+});
+
+// ─── buildGroupLeaderboard (de-pool: completion-rate ranking) ────────────────
+
+const lbSession = (
+  participants: LeaderboardSessionInput["participants"],
+): LeaderboardSessionInput => ({ participants });
+
+test("leaderboard: empty history yields no standings", () => {
+  assert.deepEqual(buildGroupLeaderboard([], "me"), []);
+});
+
+test("leaderboard: aggregates completions/surrenders/violations across shared sessions", () => {
+  const sessions: LeaderboardSessionInput[] = [
+    lbSession({
+      me: { name: "Me", completed: true },
+      bob: { name: "Bob", completed: true },
+    }),
+    lbSession({
+      me: { name: "Me", surrendered: true, violationCount: 2 },
+      bob: { name: "Bob", completed: true },
+    }),
+  ];
+  const board = buildGroupLeaderboard(sessions, "me");
+  const me = board.find((e) => e.userId === "me")!;
+  const bob = board.find((e) => e.userId === "bob")!;
+  assert.equal(me.sessions, 2);
+  assert.equal(me.completed, 1);
+  assert.equal(me.surrendered, 1);
+  assert.equal(me.violations, 2);
+  assert.equal(me.completionRate, 0.5);
+  assert.equal(me.isMe, true);
+  assert.equal(bob.completed, 2);
+  assert.equal(bob.completionRate, 1);
+  assert.equal(bob.isMe, false);
+});
+
+test("leaderboard: ranks by completion rate, then fewest violations (de-pool — never money)", () => {
+  // Three members, all 1 session. cara + dan both 100% complete; cara has fewer
+  // violations so ranks above dan. ed is 0% complete -> last.
+  const sessions: LeaderboardSessionInput[] = [
+    lbSession({
+      cara: { name: "Cara", completed: true, violationCount: 0 },
+      dan: { name: "Dan", completed: true, violationCount: 3 },
+      ed: { name: "Ed", surrendered: true },
+    }),
+  ];
+  const board = buildGroupLeaderboard(sessions, "cara");
+  assert.deepEqual(
+    board.map((e) => e.userId),
+    ["cara", "dan", "ed"],
+  );
+  assert.equal(board[0].completionRate, 1);
+  assert.equal(board[2].completionRate, 0);
+});
+
+test("leaderboard: tie on rate + violations breaks deterministically by userId", () => {
+  const sessions: LeaderboardSessionInput[] = [
+    lbSession({
+      zed: { name: "Zed", completed: true },
+      amy: { name: "Amy", completed: true },
+    }),
+  ];
+  const board = buildGroupLeaderboard(sessions, "amy");
+  assert.deepEqual(
+    board.map((e) => e.userId),
+    ["amy", "zed"],
+  );
+});
+
+test("leaderboard: a member missing a name still appears (name defaults to empty)", () => {
+  const board = buildGroupLeaderboard(
+    [lbSession({ me: { completed: true }, ghost: { completed: false } })],
+    "me",
+  );
+  const ghost = board.find((e) => e.userId === "ghost")!;
+  assert.equal(ghost.name, "");
+  assert.equal(ghost.completionRate, 0);
 });

@@ -31,6 +31,7 @@ import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useWalletStore } from "../../src/store/walletStore";
 import { formatMoney } from "../../src/utils/format";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
+import { validateAndPromptForAppSelection } from "../../src/config/screentime";
 import {
   getFirestore,
   collection,
@@ -457,6 +458,24 @@ function ProposeSessionScreenInner() {
 
   const handlePropose = async () => {
     if (!canPropose) return;
+
+    // Each member blocks their OWN apps on their OWN device (FamilyControls
+    // tokens can't cross devices). Ensure the proposer has authorized + picked a
+    // selection so their block summary is shared with the group and they're
+    // actually shielded — prompts inline, aborts if declined.
+    const gate = await validateAndPromptForAppSelection();
+    if (!gate.ok) {
+      Alert.alert(
+        gate.reason === "needs-auth"
+          ? "Screen Time Needed"
+          : "Pick Apps to Block",
+        gate.reason === "needs-auth"
+          ? "Niyah needs Screen Time access to block apps during the session."
+          : "Choose at least one app or category to block before proposing.",
+      );
+      return;
+    }
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setLoading(true);
     try {

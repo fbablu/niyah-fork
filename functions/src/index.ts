@@ -37,6 +37,7 @@ import {
 import type { Response } from "express";
 import {
   authUsersShareVerifiedContact,
+  buildGroupLeaderboard,
   buildStoredPayouts,
   calculateGroupSessionPayouts,
   calculateReferralReputation,
@@ -45,6 +46,7 @@ import {
   decideReferralClaim,
   evaluateAppCheckToken,
   isValidFirebaseUid,
+  type LeaderboardSessionInput,
   type MinimalAuthRecord,
 } from "./security";
 
@@ -3502,6 +3504,63 @@ export const getWithdrawalEligibility = onRequest(
   },
 );
 
+// ─── getGroupLeaderboard ────────────────────────────────────────────────────
+/**
+ * Computed (non-real-time) standings across the caller's COMPLETED group
+ * sessions: each co-member (and the caller) ranked by completion rate, tiebreak
+ * fewest blocked-app violations. De-pool: NEVER ranked by money — nobody wins
+ * another member's stake. Read-only; computed on request.
+ *
+ * Returns: { standings: LeaderboardEntry[], sessionsCounted: number }
+ */
+const LEADERBOARD_SESSION_SCAN_CAP = 500;
+export const getGroupLeaderboard = onRequest(
+  PUBLIC_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST" && req.method !== "GET") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req);
+    } catch {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+
+    try {
+      // Reuses the existing participantIds(array-contains)+status index.
+      // Capped scan (no orderBy → no extra index); ample for v1 and logged if
+      // we ever hit it, so a silent truncation can't masquerade as complete.
+      const snap = await db
+        .collection("groupSessions")
+        .where("participantIds", "array-contains", uid)
+        .where("status", "==", "completed")
+        .limit(LEADERBOARD_SESSION_SCAN_CAP)
+        .get();
+
+      if (snap.size === LEADERBOARD_SESSION_SCAN_CAP) {
+        console.warn(
+          `getGroupLeaderboard: hit ${LEADERBOARD_SESSION_SCAN_CAP}-session scan cap for ${uid}`,
+        );
+      }
+
+      const sessions: LeaderboardSessionInput[] = snap.docs.map((doc) => ({
+        participants: (doc.data().participants ??
+          {}) as LeaderboardSessionInput["participants"],
+      }));
+
+      const standings = buildGroupLeaderboard(sessions, uid);
+      res.json({ standings, sessionsCounted: snap.size });
+    } catch (err) {
+      console.error("getGroupLeaderboard error:", err);
+      sendError(res, 500, "Failed to compute leaderboard");
+    }
+  },
+);
+
 // ─── requestWithdrawal ──────────────────────────────────────────────────────
 /**
  * Transfers funds from Niyah's platform account to the user's Stripe Connect
@@ -5043,10 +5102,35 @@ export const findContactsOnNiyah = onRequest(
   },
 );
 
+/**
+ * Sanitize a client-supplied app-block summary (display-only — NO money, NO
+ * opaque tokens). Coerces counts to clamped non-negative integers and trims the
+ * label. Returns undefined for an empty/garbage selection so we never persist a
+ * "0 apps" summary that would imply the member is blocking something.
+ */
+function parseAppBlockSummary(
+  raw: unknown,
+): { appCount: number; categoryCount: number; label: string } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const clampInt = (v: unknown, max: number): number =>
+    typeof v === "number" && Number.isInteger(v) && v >= 0
+      ? Math.min(v, max)
+      : 0;
+  const appCount = clampInt(r.appCount, 1000);
+  const categoryCount = clampInt(r.categoryCount, 100);
+  if (appCount === 0 && categoryCount === 0) return undefined;
+  const label =
+    typeof r.label === "string" && r.label.trim()
+      ? r.label.trim().slice(0, 100)
+      : `${appCount} apps, ${categoryCount} categories`;
+  return { appCount, categoryCount, label };
+}
+
 // ─── createGroupSession ─────────────────────────────────────────────────────
 /**
  * Creates a new group session and sends invites to participants.
- * Body: { cadence: string, stakePerParticipant: number, duration: number, inviteeIds: string[], customStake?: boolean }
+ * Body: { cadence: string, stakePerParticipant: number, duration: number, inviteeIds: string[], customStake?: boolean, appBlockSummary?: {appCount,categoryCount,label} }
  * Returns: { sessionId: string, inviteIds: string[] }
  *
  * SECURITY: Validates proposer balance, deducts stake via Firestore transaction.
@@ -5094,14 +5178,22 @@ export const createGroupSession = onRequest(
       return;
     }
 
-    const { cadence, stakePerParticipant, duration, inviteeIds, customStake } =
-      req.body as {
-        cadence: unknown;
-        stakePerParticipant: unknown;
-        duration: unknown;
-        inviteeIds: unknown;
-        customStake?: boolean;
-      };
+    const {
+      cadence,
+      stakePerParticipant,
+      duration,
+      inviteeIds,
+      customStake,
+      appBlockSummary: rawAppBlockSummary,
+    } = req.body as {
+      cadence: unknown;
+      stakePerParticipant: unknown;
+      duration: unknown;
+      inviteeIds: unknown;
+      customStake?: boolean;
+      appBlockSummary?: unknown;
+    };
+    const proposerAppBlockSummary = parseAppBlockSummary(rawAppBlockSummary);
 
     // Validate input types
     if (typeof cadence !== "string" || !cadence) {
@@ -5193,6 +5285,12 @@ export const createGroupSession = onRequest(
           reputation: Record<string, unknown>;
           accepted: boolean;
           online: boolean;
+          stakeMode?: "solo";
+          appBlockSummary?: {
+            appCount: number;
+            categoryCount: number;
+            label: string;
+          };
         }
       > = {};
 
@@ -5202,6 +5300,13 @@ export const createGroupSession = onRequest(
         reputation: proposerData.reputation ?? {},
         accepted: true,
         online: false,
+        // De-pool: every member stakes their own money — solo is the only mode.
+        stakeMode: "solo",
+        // Proposer's own block selection summary (display + start-gate). Each
+        // member sets their own on accept; this is never enforced cross-device.
+        ...(proposerAppBlockSummary
+          ? { appBlockSummary: proposerAppBlockSummary }
+          : {}),
       };
 
       for (let i = 0; i < inviteeIds.length; i++) {
@@ -5212,6 +5317,9 @@ export const createGroupSession = onRequest(
           reputation: inviteeData.reputation ?? {},
           accepted: false,
           online: false,
+          // De-pool: solo is the only mode. Invitees also set their own
+          // appBlockSummary on accept; the label is consistent from creation.
+          stakeMode: "solo",
         };
       }
 
@@ -5379,15 +5487,21 @@ export const respondToGroupInvite = onRequest(
       return;
     }
 
-    const { inviteId, accept } = req.body as {
+    const {
+      inviteId,
+      accept,
+      appBlockSummary: rawAppBlockSummary,
+    } = req.body as {
       inviteId: string;
       accept: boolean;
+      appBlockSummary?: unknown;
     };
 
     if (!inviteId || typeof accept !== "boolean") {
       sendError(res, 400, "Missing required fields");
       return;
     }
+    const accepterAppBlockSummary = parseAppBlockSummary(rawAppBlockSummary);
 
     try {
       const inviteRef = db.collection("groupInvites").doc(inviteId);
@@ -5487,9 +5601,14 @@ export const respondToGroupInvite = onRequest(
           });
         });
 
-        // Update session participant
+        // Update session participant. Persist this member's own block summary
+        // (display + start-gate) and the solo stake-mode label alongside accept.
         await sessionRef.update({
           [`participants.${uid}.accepted`]: true,
+          [`participants.${uid}.stakeMode`]: "solo",
+          ...(accepterAppBlockSummary
+            ? { [`participants.${uid}.appBlockSummary`]: accepterAppBlockSummary }
+            : {}),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 

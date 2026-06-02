@@ -6,6 +6,7 @@ import {
   GroupSessionStatus,
   GroupInvite,
   GroupInviteStatus,
+  GroupLeaderboardEntry,
   SessionParticipant,
   CadenceType,
   UserReputation,
@@ -27,6 +28,7 @@ import {
   startGroupSessionCF as cloudStartSession,
   reportSessionStatus as cloudReportStatus,
   cancelGroupSession as cloudCancelSession,
+  getGroupLeaderboard as cloudGetGroupLeaderboard,
 } from "../config/functions";
 import {
   subscribeToGroupSession,
@@ -41,6 +43,7 @@ import {
   updateLiveActivity,
   endLiveActivity,
   stopBlocking,
+  getSavedAppBlockSummary,
 } from "../config/screentime";
 import {
   scheduleSessionEndNotification,
@@ -237,6 +240,10 @@ interface GroupSessionState {
   pendingInvites: GroupInvite[];
   activeGroupSessions: GroupSessionDoc[];
 
+  // Computed (non-real-time) group leaderboard — fetched on demand, cached.
+  leaderboard: GroupLeaderboardEntry[] | null;
+  leaderboardLoading: boolean;
+
   // Legacy local-only state (keep for backward compat with existing screens)
   activeGroupSession: GroupSession | null;
   groupSessionHistory: GroupSession[];
@@ -263,6 +270,7 @@ interface GroupSessionState {
   reportCompletion: (sessionId: string) => Promise<void>;
   reportSurrender: (sessionId: string) => Promise<void>;
   cancelSession: (sessionId: string) => Promise<void>;
+  fetchGroupLeaderboard: () => Promise<void>;
 
   // Legacy lifecycle (keep for backward compat, wraps new Cloud Function calls)
   startGroupSession: (
@@ -285,6 +293,8 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
   activeSession: null,
   pendingInvites: [],
   activeGroupSessions: [],
+  leaderboard: null,
+  leaderboardLoading: false,
 
   // Legacy state
   activeGroupSession: null,
@@ -371,18 +381,21 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
   // ─── Cloud Function actions ───────────────────────────────────────────────
 
   proposeSession: async (params) => {
+    // Attach this device's own block summary (display + start-gate). Derived
+    // from the saved selection so it always matches what actually gets blocked.
     const result = await cloudCreateGroupSession(
       params.cadence,
       params.stakePerParticipant,
       params.duration,
       params.inviteeIds,
       params.customStake,
+      getSavedAppBlockSummary(),
     );
     return result.sessionId;
   },
 
   acceptInvite: async (inviteId: string) => {
-    await cloudRespondToGroupInvite(inviteId, true);
+    await cloudRespondToGroupInvite(inviteId, true, getSavedAppBlockSummary());
   },
 
   declineInvite: async (inviteId: string) => {
@@ -408,6 +421,17 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
 
   cancelSession: async (sessionId: string) => {
     await cloudCancelSession(sessionId);
+  },
+
+  fetchGroupLeaderboard: async () => {
+    set({ leaderboardLoading: true });
+    try {
+      const { standings } = await cloudGetGroupLeaderboard();
+      set({ leaderboard: standings, leaderboardLoading: false });
+    } catch (err) {
+      logger.warn("fetchGroupLeaderboard failed:", err);
+      set({ leaderboardLoading: false });
+    }
   },
 
   // ─── Legacy lifecycle (backward compat) ───────────────────────────────────
@@ -631,6 +655,8 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       activeSession: null,
       pendingInvites: [],
       activeGroupSessions: [],
+      leaderboard: null,
+      leaderboardLoading: false,
       // Legacy local state
       activeGroupSession: null,
       groupSessionHistory: [],

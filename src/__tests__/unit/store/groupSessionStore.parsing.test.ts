@@ -955,6 +955,9 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         60000,
         ["user-b", "user-c"],
         false,
+        // appBlockSummary — undefined here since Screen Time is unavailable in
+        // the test env (no saved selection to summarize).
+        undefined,
       );
     });
 
@@ -989,7 +992,13 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
     it("calls cloudRespondToGroupInvite with accept=true", async () => {
       await useGroupSessionStore.getState().acceptInvite("invite-123");
 
-      expect(mockRespondToGroupInvite).toHaveBeenCalledWith("invite-123", true);
+      // 3rd arg is the appBlockSummary — undefined here (Screen Time
+      // unavailable in tests, so no saved selection to summarize).
+      expect(mockRespondToGroupInvite).toHaveBeenCalledWith(
+        "invite-123",
+        true,
+        undefined,
+      );
     });
 
     it("propagates errors from the cloud function", async () => {

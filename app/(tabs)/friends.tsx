@@ -27,8 +27,13 @@ import { withErrorBoundary } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
+import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { findContactsOnNiyah } from "../../src/config/functions";
-import { PublicProfile, Partner } from "../../src/types";
+import {
+  PublicProfile,
+  Partner,
+  type GroupLeaderboardEntry,
+} from "../../src/types";
 import { logger } from "../../src/utils/logger";
 
 // ─── Styles (makeStyles) ──────────────────────────────────────────────────────
@@ -117,6 +122,27 @@ const makeStyles = (Colors: ThemeColors) =>
       borderWidth: 1,
       borderColor: Colors.border,
       gap: Spacing.md,
+    },
+    standingRowMe: {
+      borderColor: Colors.primary,
+      backgroundColor: Colors.primaryMuted,
+    },
+    standingRank: {
+      fontSize: Typography.titleSmall,
+      ...Font.bold,
+      color: Colors.textSecondary,
+      minWidth: 24,
+      textAlign: "center",
+    },
+    standingMeta: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: 2,
+    },
+    standingRate: {
+      fontSize: Typography.titleSmall,
+      ...Font.bold,
+      color: Colors.primaryLight,
     },
     avatar: {
       width: 44,
@@ -302,45 +328,34 @@ const makeStyles = (Colors: ThemeColors) =>
 // ─── Segment control ──────────────────────────────────────────────────────────
 
 const SegmentControl: React.FC<{
-  selected: "following" | "partners";
-  onChange: (tab: "following" | "partners") => void;
+  selected: FriendsTab;
+  onChange: (tab: FriendsTab) => void;
 }> = ({ selected, onChange }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const segments: { key: FriendsTab; label: string }[] = [
+    { key: "following", label: "Following" },
+    { key: "partners", label: "Partners" },
+    { key: "standings", label: "Standings" },
+  ];
   return (
     <View style={styles.segmentRow}>
-      <Pressable
-        style={[
-          styles.segment,
-          selected === "following" && styles.segmentActive,
-        ]}
-        onPress={() => onChange("following")}
-      >
-        <Text
-          style={[
-            styles.segmentLabel,
-            selected === "following" && styles.segmentLabelActive,
-          ]}
+      {segments.map(({ key, label }) => (
+        <Pressable
+          key={key}
+          style={[styles.segment, selected === key && styles.segmentActive]}
+          onPress={() => onChange(key)}
         >
-          Following
-        </Text>
-      </Pressable>
-      <Pressable
-        style={[
-          styles.segment,
-          selected === "partners" && styles.segmentActive,
-        ]}
-        onPress={() => onChange("partners")}
-      >
-        <Text
-          style={[
-            styles.segmentLabel,
-            selected === "partners" && styles.segmentLabelActive,
-          ]}
-        >
-          Partners
-        </Text>
-      </Pressable>
+          <Text
+            style={[
+              styles.segmentLabel,
+              selected === key && styles.segmentLabelActive,
+            ]}
+          >
+            {label}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   );
 };
@@ -472,11 +487,47 @@ const PartnerRow: React.FC<{
   );
 };
 
+// ─── Standings row (computed group leaderboard) ───────────────────────────────
+
+const StandingRow: React.FC<{ rank: number; entry: GroupLeaderboardEntry }> = ({
+  rank,
+  entry,
+}) => {
+  const Colors = useColors();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const ratePct = Math.round(entry.completionRate * 100);
+  const displayName = entry.name || "Member";
+  return (
+    <View style={[styles.row, entry.isMe && styles.standingRowMe]}>
+      <Text style={styles.standingRank}>{rank}</Text>
+      <View style={styles.avatar}>
+        <Text style={styles.avatarInitial}>
+          {displayName.charAt(0).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.rowInfo}>
+        <View style={styles.nameRow}>
+          <Text style={styles.rowName}>{displayName}</Text>
+          {entry.isMe ? <Text style={styles.tagBadge}>You</Text> : null}
+        </View>
+        <Text style={styles.standingMeta}>
+          {entry.completed}/{entry.sessions} completed
+          {entry.violations > 0 ? ` · ${entry.violations} slips` : ""}
+        </Text>
+      </View>
+      <Text style={styles.standingRate}>{ratePct}%</Text>
+    </View>
+  );
+};
+
 // ─── Discriminated union for FlatList items ──────────────────────────────────
 
 type FollowingItem = { type: "following"; uid: string; profile: PublicProfile };
 type PartnerItem = { type: "partner"; partner: Partner };
-type ListItem = FollowingItem | PartnerItem;
+type StandingItem = { type: "standing"; rank: number; entry: GroupLeaderboardEntry };
+type ListItem = FollowingItem | PartnerItem | StandingItem;
+
+type FriendsTab = "following" | "partners" | "standings";
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
@@ -485,7 +536,7 @@ function FriendsScreenInner() {
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const router = useRouter();
   const { tab: requestedTab } = useLocalSearchParams<{
-    tab?: "following" | "partners";
+    tab?: FriendsTab;
   }>();
   const { user } = useAuthStore();
   const { partners } = usePartnerStore();
@@ -505,9 +556,22 @@ function FriendsScreenInner() {
     isContactSyncStale,
   } = useSocialStore();
 
-  const [tab, setTab] = useState<"following" | "partners">(
-    requestedTab === "partners" ? "partners" : "following",
+  const { leaderboard, leaderboardLoading, fetchGroupLeaderboard } =
+    useGroupSessionStore();
+
+  const [tab, setTab] = useState<FriendsTab>(
+    requestedTab === "partners" || requestedTab === "standings"
+      ? requestedTab
+      : "following",
   );
+
+  // Fetch the computed standings the first time the user opens that tab (and
+  // refresh on re-entry — it's a cheap on-request aggregate, not a subscription).
+  useEffect(() => {
+    if (tab === "standings") {
+      fetchGroupLeaderboard();
+    }
+  }, [tab, fetchGroupLeaderboard]);
   const [loadingUids, setLoadingUids] = useState<Record<string, boolean>>({});
   const [isImporting, setIsImporting] = useState(false);
   const hasImported = lastContactSyncAt !== null;
@@ -774,14 +838,21 @@ function FriendsScreenInner() {
         })
         .filter((item): item is FollowingItem => item !== null);
     }
+    if (tab === "standings") {
+      return (leaderboard ?? []).map(
+        (entry, i): StandingItem => ({ type: "standing", rank: i + 1, entry }),
+      );
+    }
     return partners.map(
       (partner): PartnerItem => ({ type: "partner", partner }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, following, profiles, partners]);
+  }, [tab, following, profiles, partners, leaderboard]);
 
   const keyExtractor = useCallback((item: ListItem) => {
-    return item.type === "following" ? item.uid : item.partner.id;
+    if (item.type === "following") return item.uid;
+    if (item.type === "standing") return `standing-${item.entry.userId}`;
+    return item.partner.id;
   }, []);
 
   const renderItem = useCallback(
@@ -797,6 +868,9 @@ function FriendsScreenInner() {
             unfollowLoading={!!loadingUids[item.uid]}
           />
         );
+      }
+      if (item.type === "standing") {
+        return <StandingRow rank={item.rank} entry={item.entry} />;
       }
       const { partner } = item;
       return (
@@ -1007,18 +1081,26 @@ function FriendsScreenInner() {
     ],
   );
 
-  const listEmpty = useMemo(
-    () => (
+  const listEmpty = useMemo(() => {
+    if (tab === "standings" && leaderboardLoading) {
+      return (
+        <View style={styles.emptyState}>
+          <ActivityIndicator color={Colors.primaryLight} />
+        </View>
+      );
+    }
+    return (
       <View style={styles.emptyState}>
         <Text style={styles.emptyText}>
           {tab === "following"
             ? "Follow your partners to stay connected"
-            : "No partners yet. Invite friends to do sessions together."}
+            : tab === "standings"
+              ? "Complete a group session to see standings. Ranked by completion rate — not money."
+              : "No partners yet. Invite friends to do sessions together."}
         </Text>
       </View>
-    ),
-    [styles, tab],
-  );
+    );
+  }, [styles, tab, leaderboardLoading, Colors]);
 
   if (isLoading) {
     return (
