@@ -126,7 +126,9 @@ export const LEGAL_INDEX_URL = "https://niyah.live/legal";
 // Each accepted referral permanently boosts the new user's social credit score by this amount.
 // e.g. a brand-new user (score 50) who joins via referral starts at 60.
 export const REFERRAL_REPUTATION_BOOST = 10; // points added to score per referral (max 100)
-export const PENDING_REFERRAL_KEY = "@niyah/pending_referral"; // AsyncStorage key
+export const PENDING_REFERRAL_KEY = "niyah_pending_referral"; // SecureStore key — alphanumeric/._- only (no @ or /, which throw "Invalid key")
+// Group-invite sessionId stashed from a /join deep link, resumed after auth.
+export const PENDING_JOIN_KEY = "niyah_pending_join"; // SecureStore key — alphanumeric/._- only
 
 // Hide phone auth button. Set EXPO_PUBLIC_DISABLE_PHONE_AUTH=true to disable
 // phone sign-in when APNs Auth Key isn't yet registered in Firebase Console

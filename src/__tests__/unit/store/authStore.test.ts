@@ -519,7 +519,7 @@ describe("authStore", () => {
       });
 
       expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(
-        "@niyah/magic_link_email",
+        "niyah_magic_link_email",
       );
     });
 
@@ -742,7 +742,7 @@ describe("authStore", () => {
 
       expect(sendMagicLink).toHaveBeenCalledWith("user@test.com");
       expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
-        "@niyah/magic_link_email",
+        "niyah_magic_link_email",
         "user@test.com",
       );
       expect(useAuthStore.getState().isLoading).toBe(false);
@@ -775,7 +775,7 @@ describe("authStore", () => {
 
       // Email must NOT be stored if the magic link was never sent
       expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(
-        "@niyah/magic_link_email",
+        "niyah_magic_link_email",
         "fail@test.com",
       );
     });

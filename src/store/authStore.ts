@@ -132,7 +132,7 @@ const recoverGroupSessions = (uid: string) => {
   }
 };
 
-const MAGIC_LINK_EMAIL_KEY = "@niyah/magic_link_email";
+const MAGIC_LINK_EMAIL_KEY = "niyah_magic_link_email"; // SecureStore key — alphanumeric/._- only (no @ or /)
 
 interface AuthState {
   user: User | null;
