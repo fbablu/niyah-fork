@@ -94,6 +94,13 @@ function parseParticipants(
       surrendered: p.surrendered as boolean | undefined,
       surrenderedAt: parseTimestamp(p.surrenderedAt),
       violationCount: (p.violationCount as number) ?? 0,
+      // Server-written (CF-sanitized) block summary + stake-mode. MUST be
+      // carried through here — the waiting-room start-gate reads
+      // participant.appBlockSummary, so dropping it would make
+      // everyoneHasBlockSelection permanently false (proposer can never start).
+      appBlockSummary:
+        p.appBlockSummary as GroupSessionParticipant["appBlockSummary"],
+      stakeMode: p.stakeMode as GroupSessionParticipant["stakeMode"],
     };
   }
   return result;
