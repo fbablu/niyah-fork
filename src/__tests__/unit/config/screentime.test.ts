@@ -452,5 +452,35 @@ describe("screentime", () => {
       const r = await st.validateAndPromptForAppSelection();
       expect(r).toEqual({ ok: false, reason: "no-selection" });
     });
+
+    // getSavedAppBlockSummary — the shareable summary attached to group sessions
+    it("getSavedAppBlockSummary maps a non-empty selection to counts + label", () => {
+      mockNativeModule.getSavedSelection.mockReturnValue(token(4, 1));
+      expect(st.getSavedAppBlockSummary()).toEqual({
+        appCount: 4,
+        categoryCount: 1,
+        label: "4 apps, 1 categories",
+      });
+    });
+
+    it("getSavedAppBlockSummary returns undefined for an empty selection", () => {
+      mockNativeModule.getSavedSelection.mockReturnValue(token(0, 0));
+      expect(st.getSavedAppBlockSummary()).toBeUndefined();
+    });
+
+    it("getSavedAppBlockSummary returns undefined when nothing is saved", () => {
+      mockNativeModule.getSavedSelection.mockReturnValue(null);
+      expect(st.getSavedAppBlockSummary()).toBeUndefined();
+    });
+  });
+
+  describe("getSavedAppBlockSummary — unavailable device", () => {
+    it("returns undefined (no selection possible)", () => {
+      mockPlatformOS = "android";
+      mockPlatformVersion = 33;
+      const st = loadScreenTimeModule();
+      expect(st.getSavedAppBlockSummary()).toBeUndefined();
+      expect(mockNativeModule.getSavedSelection).not.toHaveBeenCalled();
+    });
   });
 });

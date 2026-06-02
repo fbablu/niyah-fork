@@ -46,6 +46,7 @@ import {
   decideReferralClaim,
   evaluateAppCheckToken,
   isValidFirebaseUid,
+  parseAppBlockSummary,
   type LeaderboardSessionInput,
   type MinimalAuthRecord,
 } from "./security";
@@ -5101,31 +5102,6 @@ export const findContactsOnNiyah = onRequest(
     }
   },
 );
-
-/**
- * Sanitize a client-supplied app-block summary (display-only — NO money, NO
- * opaque tokens). Coerces counts to clamped non-negative integers and trims the
- * label. Returns undefined for an empty/garbage selection so we never persist a
- * "0 apps" summary that would imply the member is blocking something.
- */
-function parseAppBlockSummary(
-  raw: unknown,
-): { appCount: number; categoryCount: number; label: string } | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const r = raw as Record<string, unknown>;
-  const clampInt = (v: unknown, max: number): number =>
-    typeof v === "number" && Number.isInteger(v) && v >= 0
-      ? Math.min(v, max)
-      : 0;
-  const appCount = clampInt(r.appCount, 1000);
-  const categoryCount = clampInt(r.categoryCount, 100);
-  if (appCount === 0 && categoryCount === 0) return undefined;
-  const label =
-    typeof r.label === "string" && r.label.trim()
-      ? r.label.trim().slice(0, 100)
-      : `${appCount} apps, ${categoryCount} categories`;
-  return { appCount, categoryCount, label };
-}
 
 // ─── createGroupSession ─────────────────────────────────────────────────────
 /**

@@ -40,6 +40,9 @@ const mockCancelSession: jest.Mock = jest.fn(() =>
 const mockDistributePayouts: jest.Mock = jest.fn(() =>
   Promise.resolve({ success: true }),
 );
+const mockGetGroupLeaderboard: jest.Mock = jest.fn(() =>
+  Promise.resolve({ standings: [], sessionsCounted: 0 }),
+);
 
 jest.mock("../../../config/functions", () => ({
   createGroupSession: (...a: unknown[]) =>
@@ -52,6 +55,8 @@ jest.mock("../../../config/functions", () => ({
   cancelGroupSession: (...a: unknown[]) => mockCancelSession(...(a as [any])),
   distributeGroupPayouts: (...a: unknown[]) =>
     mockDistributePayouts(...(a as [any])),
+  getGroupLeaderboard: (...a: unknown[]) =>
+    mockGetGroupLeaderboard(...(a as [any])),
 }));
 
 // Mock Firebase subscription functions — capture the callback so tests can invoke it
@@ -373,6 +378,58 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
       expect(bob.accepted).toBe(true);
       expect(bob.online).toBe(false);
       expect(bob.completed).toBe(false);
+    });
+
+    it("preserves appBlockSummary + stakeMode from the server doc", () => {
+      // Regression guard: the waiting-room start-gate reads
+      // participant.appBlockSummary; if parseParticipants drops it, every
+      // member reads as "no apps selected" and the proposer can NEVER start.
+      // Member with a summary => present + intact; member without => undefined.
+      useGroupSessionStore.getState().subscribeToSession("sess-blk");
+
+      sessionCallback!({
+        __id: "sess-blk",
+        proposerId: "user-a",
+        status: "ready",
+        cadence: "daily",
+        stakePerParticipant: 500,
+        customStake: false,
+        duration: 60000,
+        participantIds: ["user-a", "user-b"],
+        participants: {
+          "user-a": {
+            name: "Alice",
+            accepted: true,
+            online: true,
+            stakeMode: "solo",
+            appBlockSummary: {
+              appCount: 2,
+              categoryCount: 1,
+              label: "2 apps, 1 category",
+            },
+          },
+          "user-b": {
+            name: "Bob",
+            accepted: true,
+            online: true,
+            stakeMode: "solo",
+            // no appBlockSummary — hasn't picked apps yet
+          },
+        },
+        poolTotal: 1000,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const session = useGroupSessionStore.getState().activeSession!;
+      const alice = session.participants["user-a"];
+      expect(alice.appBlockSummary).toEqual({
+        appCount: 2,
+        categoryCount: 1,
+        label: "2 apps, 1 category",
+      });
+      expect(alice.stakeMode).toBe("solo");
+      expect(session.participants["user-b"].appBlockSummary).toBeUndefined();
     });
 
     it("uses default reputation when not provided", () => {
@@ -1020,6 +1077,40 @@ describe("groupSessionStore — parsing, subscriptions, Cloud Function actions",
         "invite-456",
         false,
       );
+    });
+  });
+
+  describe("fetchGroupLeaderboard", () => {
+    it("stores the standings from the cloud function and clears loading", async () => {
+      const standings = [
+        {
+          userId: "me",
+          name: "Me",
+          completed: 3,
+          surrendered: 0,
+          violations: 0,
+          sessions: 3,
+          completionRate: 1,
+          isMe: true,
+        },
+      ];
+      mockGetGroupLeaderboard.mockResolvedValueOnce({
+        standings,
+        sessionsCounted: 3,
+      });
+
+      await useGroupSessionStore.getState().fetchGroupLeaderboard();
+
+      expect(useGroupSessionStore.getState().leaderboard).toEqual(standings);
+      expect(useGroupSessionStore.getState().leaderboardLoading).toBe(false);
+    });
+
+    it("swallows errors and clears loading (non-blocking)", async () => {
+      mockGetGroupLeaderboard.mockRejectedValueOnce(new Error("boom"));
+
+      await useGroupSessionStore.getState().fetchGroupLeaderboard();
+
+      expect(useGroupSessionStore.getState().leaderboardLoading).toBe(false);
     });
   });
 

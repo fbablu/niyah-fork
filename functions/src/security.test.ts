@@ -12,6 +12,7 @@ import {
   decideReferralClaim,
   evaluateAppCheckToken,
   isValidFirebaseUid,
+  parseAppBlockSummary,
   type LeaderboardSessionInput,
   type MinimalAuthRecord,
 } from "./security";
@@ -472,4 +473,61 @@ test("leaderboard: a member missing a name still appears (name defaults to empty
   const ghost = board.find((e) => e.userId === "ghost")!;
   assert.equal(ghost.name, "");
   assert.equal(ghost.completionRate, 0);
+});
+
+// ─── parseAppBlockSummary (client-input sanitizer; feeds the start-gate) ──────
+
+test("parseAppBlockSummary: null / non-object / empty → undefined", () => {
+  assert.equal(parseAppBlockSummary(null), undefined);
+  assert.equal(parseAppBlockSummary(undefined), undefined);
+  assert.equal(parseAppBlockSummary("nope"), undefined);
+  assert.equal(parseAppBlockSummary({}), undefined);
+});
+
+test("parseAppBlockSummary: both counts zero → undefined (never a misleading '0 apps')", () => {
+  assert.equal(parseAppBlockSummary({ appCount: 0, categoryCount: 0 }), undefined);
+});
+
+test("parseAppBlockSummary: clamps oversized counts and generates a default label", () => {
+  const r = parseAppBlockSummary({ appCount: 999999, categoryCount: 500, label: "" });
+  assert.deepEqual(r, {
+    appCount: 1000,
+    categoryCount: 100,
+    label: "1000 apps, 100 categories",
+  });
+});
+
+test("parseAppBlockSummary: rejects negative / float counts (treated as 0)", () => {
+  // appCount negative → 0; categoryCount float → 0; both 0 → undefined.
+  assert.equal(parseAppBlockSummary({ appCount: -999, categoryCount: 0 }), undefined);
+  assert.equal(parseAppBlockSummary({ appCount: 5.5, categoryCount: 0 }), undefined);
+  // A valid category survives even when appCount is garbage.
+  const r = parseAppBlockSummary({ appCount: -3, categoryCount: 2 });
+  assert.deepEqual(r, { appCount: 0, categoryCount: 2, label: "0 apps, 2 categories" });
+});
+
+test("parseAppBlockSummary: keeps a provided label, trimmed + capped at 100 chars", () => {
+  assert.equal(
+    parseAppBlockSummary({ appCount: 5, categoryCount: 0, label: "  Social media  " })?.label,
+    "Social media",
+  );
+  const long = "x".repeat(250);
+  assert.equal(
+    parseAppBlockSummary({ appCount: 5, categoryCount: 0, label: long })?.label.length,
+    100,
+  );
+});
+
+test("parseAppBlockSummary: whitespace-only label falls back to the count summary", () => {
+  assert.equal(
+    parseAppBlockSummary({ appCount: 3, categoryCount: 1, label: "   " })?.label,
+    "3 apps, 1 categories",
+  );
+});
+
+test("parseAppBlockSummary: valid input passes through intact", () => {
+  assert.deepEqual(
+    parseAppBlockSummary({ appCount: 5, categoryCount: 2, label: "My Apps" }),
+    { appCount: 5, categoryCount: 2, label: "My Apps" },
+  );
 });
