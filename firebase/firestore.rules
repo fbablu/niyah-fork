@@ -334,10 +334,15 @@ service cloud.firestore {
     // Public read-only server-controlled kill switches. Fields:
     //   acceptingDeposits, acceptingWithdrawals, groupSessionsEnabled,
     //   soloSessionsEnabled
-    // Any authenticated user can read so the client can honor a toggle live.
+    // PUBLIC read (no auth gate) on purpose: the client attaches this snapshot
+    // listener at app boot — BEFORE Firebase Auth resolves — and a Firestore
+    // listener that hits permission-denied is torn down for good (the store's
+    // subscribe() never re-runs), so an auth gate left flags stuck on defaults
+    // for the whole session. These are non-sensitive UX kill switches (no PII,
+    // no money, no secrets), so global read is safe. Do NOT re-add an auth gate.
     // Writes are console-only (admin console, or gcloud) — never client.
     match /config/featureFlags {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if false;
     }
 
