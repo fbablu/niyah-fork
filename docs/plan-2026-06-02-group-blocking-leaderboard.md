@@ -108,6 +108,33 @@ and the **session runs unshielded, silently**. Only `quick-block.tsx` validates.
 - [x] **Phase 2 — done** (native, needs `build:local`): `ShieldActionExtension.swift` now `recordViolation()` on BOTH button presses (guarded by `niyah_is_blocking`), mirroring the monitor's `niyah_shield_violations` `[Double]` ms format + `synchronize()`. Live path: shield tap → 2s poll (`NiyahScreenTimeModule`) → existing `reportShieldViolation` CF → existing `member_app_opened` push. (The DeviceActivity event path stays dead — direct ManagedSettings shielding; this is the working signal.) Can't unit-test; verify on device.
 - [x] **Final review — done**: 6-agent adversarial review of the feature diff (de-pool/money, stake-path regression, leaderboard CF security, client gating) → **0 confirmed / 0 likely** (one cosmetic `stakeMode` nit, applied as polish). `/vibe-security`: clean — `groupSessions` is `allow write: if false` (CF-only, sanitized) + participant-scoped reads, so `appBlockSummary` is unforgeable and the leaderboard query can't leak cross-cohort. Full CI green: eslint 0 · tsc 0 · jest 752 pass · functions 65/65.
 
+## Test-quality audit (2026-06-02, post-commit) — found a real bug
+
+A 17-agent audit of the new/changed tests (are they real contract tests or fluff, and what's uncovered)
+returned: the added tests are **solid** (no fluff — they drive the real exported functions and would fail
+on a regression), but surfaced **one live bug + three easy coverage gaps**, all now fixed (uncommitted,
+on top of the 5 commits):
+
+- **🐞 LIVE BUG (fixed):** `src/store/groupSessionStore.ts` `parseParticipants` rebuilt each participant
+  field-by-field and **dropped `appBlockSummary` + `stakeMode`** off the Firestore doc. Since the
+  waiting-room start-gate reads `participant.appBlockSummary`, every member read as "No apps selected
+  yet" and **the proposer could never start a group session**. Fixed by carrying both fields through;
+  added a `parseParticipants` regression test that fails against the old code.
+- **`parseAppBlockSummary`** (client-input sanitizer) was private in `index.ts` → untested. **Moved to
+  `security.ts`** (pure, exported) + 7 tests (clamp negatives/floats/oversized, reject empty→undefined,
+  trim/cap label, passthrough).
+- **`getSavedAppBlockSummary`** (screentime) → 4 tests (maps counts+label, empty→undefined, unavailable).
+- **`fetchGroupLeaderboard`** (store) → 2 tests (stores standings + clears loading; swallows errors).
+
+**Deliberately NOT added (would be over-mock fluff):** `getGroupLeaderboard` / `requestWithdrawal` CF
+**wiring** (query shape, in-txn transaction, Stripe orchestration) is emulator-tier — the functions
+runner has no Firestore/Stripe mock infra, and the team already tracks this as a manual Stripe-test-mode
++ emulator checklist (`withdraw-earned.test.ts` bottom). The **pure logic** under both
+(`computeDailyWithdrawalState`, `buildGroupLeaderboard`, `parseAppBlockSummary`) is fully unit-covered.
+
+Counts after fixes: functions **72/72** · client jest green · tsc 0 · eslint 0. **These are new
+uncommitted changes** — suggested follow-up commits in the handoff below.
+
 ## Deploy / rebuild (Fardeen runs all git/deploy)
 - **Functions**: `firebase deploy --only functions` — new `getGroupLeaderboard` + changed `createGroupSession`/`respondToGroupInvite` (+ the #8 `requestWithdrawal`). No env change, no migration.
 - **Firestore rules/indexes**: none (reused the existing `participantIds`+`status` index; no rule change).
