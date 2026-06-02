@@ -22,6 +22,7 @@ import {
   getScreenTimeAuthStatus,
   presentAppPicker,
   getSavedAppSelection,
+  validateAndPromptForAppSelection,
   startBlocking,
 } from "../../src/config/screentime";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
@@ -184,7 +185,10 @@ function QuickBlockScreenInner() {
 
   const isAuthorized =
     isScreenTimeAvailable && getScreenTimeAuthStatus() === "approved";
-  const hasApps = !!appSelection && appSelection.appCount > 0;
+  // A selection counts as non-empty if it names apps OR whole categories —
+  // "block all of X" is a category-only selection (appCount 0, categoryCount N).
+  const hasApps =
+    !!appSelection && appSelection.appCount + appSelection.categoryCount > 0;
 
   const allDurations: (DurationOption & { key: string })[] = useMemo(() => {
     const tonight = getUntilTonightMs();
@@ -207,6 +211,9 @@ function QuickBlockScreenInner() {
     try {
       const result = await requestScreenTimeAuth();
       if (result === "approved") {
+        // Force a re-render so isAuthorized/hasApps re-evaluate and the
+        // Setup gate clears once Screen Time access is granted.
+        setAppSelection(getSavedAppSelection());
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch {
@@ -228,32 +235,21 @@ function QuickBlockScreenInner() {
   const handleStartBlocking = useCallback(async () => {
     if (!user) return;
 
-    // Step 1: Ensure Screen Time is authorized
-    if (isScreenTimeAvailable && getScreenTimeAuthStatus() !== "approved") {
-      try {
-        const result = await requestScreenTimeAuth();
-        if (result !== "approved") {
-          Alert.alert(
-            "Authorization Required",
-            "Niyah needs Screen Time access to block distracting apps.",
-          );
-          return;
-        }
-      } catch {
-        return;
-      }
+    // Ensure Screen Time is authorized AND a non-empty selection (apps OR whole
+    // categories) exists, prompting for each if missing. Blocks start when the
+    // selection is truly empty — never starts a session that shields nothing.
+    const gate = await validateAndPromptForAppSelection();
+    if (!gate.ok) {
+      setAppSelection(getSavedAppSelection());
+      Alert.alert(
+        gate.reason === "needs-auth" ? "Authorization Required" : "Select Apps",
+        gate.reason === "needs-auth"
+          ? "Niyah needs Screen Time access to block distracting apps."
+          : "Pick at least one app or category to block.",
+      );
+      return;
     }
-
-    // Step 2: Ensure apps are selected
-    if (isScreenTimeAvailable && !getSavedAppSelection()) {
-      try {
-        const selection = await presentAppPicker();
-        setAppSelection(selection);
-      } catch {
-        // User cancelled
-        return;
-      }
-    }
+    if (gate.selection) setAppSelection(gate.selection);
 
     setIsLoading(true);
 
@@ -310,7 +306,10 @@ function QuickBlockScreenInner() {
           <Button
             title={isLoading ? "Starting..." : "Start Blocking"}
             onPress={handleStartBlocking}
-            disabled={isLoading}
+            disabled={
+              isLoading ||
+              (isScreenTimeAvailable && (!isAuthorized || !hasApps))
+            }
             size="large"
           />
           <Text style={styles.disclaimer}>No money involved. Just focus.</Text>
