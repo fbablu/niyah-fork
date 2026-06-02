@@ -16,6 +16,7 @@ class ShieldActionExtension: ShieldActionDelegate {
     private static let surrenderKey          = "niyah_surrender_requested"
     private static let pendingSurrenderKey   = "niyah_surrender_pending"
     private static let blockingKey           = "niyah_is_blocking"
+    private static let violationsKey         = "niyah_shield_violations"
     private static let surrenderPushID       = "niyah-surrender-confirm"
     private static let surrenderCategoryID   = "SURRENDER_CONFIRM"
 
@@ -51,6 +52,14 @@ class ShieldActionExtension: ShieldActionDelegate {
         _ action: ShieldAction,
         completionHandler: @escaping (ShieldActionResponse) -> Void
     ) {
+        // The shield is only shown when the user just tried to open a blocked
+        // app, so EITHER button press is a genuine "hit a blocked app" signal.
+        // This is the live detection path: startBlocking() shields directly via
+        // ManagedSettings (no DeviceActivityCenter event), so the monitor's
+        // eventDidReachThreshold never fires — recording here is what feeds the
+        // main app's 2s poll → reportShieldViolation CF → group push.
+        recordViolation()
+
         switch action {
         case .primaryButtonPressed:
             completionHandler(.close)
@@ -101,6 +110,19 @@ class ShieldActionExtension: ShieldActionDelegate {
                 completion(true)
             }
         }
+    }
+
+    /// Append a violation timestamp (ms since epoch) to the App Group array the
+    /// main app polls — same key/format the DeviceActivityMonitor uses. Guarded
+    /// by the blocking flag so a stray shield tap outside an active session is
+    /// ignored. Best-effort + synchronize() so the value is visible to the main
+    /// app process before its next poll tick.
+    private func recordViolation() {
+        guard sharedDefaults.bool(forKey: Self.blockingKey) else { return }
+        var violations = sharedDefaults.array(forKey: Self.violationsKey) as? [Double] ?? []
+        violations.append(Date().timeIntervalSince1970 * 1000)
+        sharedDefaults.set(violations, forKey: Self.violationsKey)
+        sharedDefaults.synchronize()
     }
 
     private func openMainApp(urlString: String) {
