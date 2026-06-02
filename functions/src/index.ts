@@ -23,6 +23,7 @@ import {
   withdrawDrawOrder,
   cardRefundableCents,
   computeDailyWithdrawalState,
+  shouldUnfreezeWallet,
   STAKE_DRAW_ORDER,
   type Buckets,
 } from "./wallet";
@@ -3579,25 +3580,41 @@ export const getGroupLeaderboard = onRequest(
  * (balance == Σbuckets) is preserved on every abort path. Atomic via
  * FieldValue.increment — no read-modify-write race with concurrent CF writes.
  */
-async function restoreWithdrawalReservation(
+/**
+ * Atomically undo an aborted withdrawal: restore the reserved balance AND
+ * delete the withdrawal transaction doc in a single WriteBatch. Previously
+ * these were two separate awaits — if the balance restore committed but the
+ * txn delete failed (or vice versa), the wallet drifted by ±amount and the
+ * nightly reconcile auto-froze it (the historical source of dev wallet drift,
+ * with no automated recovery). A batch commits all-or-nothing, closing that
+ * window.
+ *
+ * `reserved` is the bucket split drawn by the committed debit. It is non-null
+ * on every post-debit caller; the null branch only covers the impossible
+ * pre-debit path, where there is nothing to restore and we just void the txn.
+ * The dailyWithdrawalTotal decrement is paired 1:1 with the in-transaction
+ * bump; a rare cross-midnight decrement leaves a stale prior-day value, which
+ * computeDailyWithdrawalState ignores (treated as 0), so it never wrongly
+ * blocks the next day.
+ */
+async function restoreAndVoidWithdrawal(
   walletRef: FirebaseFirestore.DocumentReference,
+  txnRef: FirebaseFirestore.DocumentReference,
   amount: number,
-  reserved: Buckets,
+  reserved: Buckets | null,
 ): Promise<void> {
-  await walletRef.update({
-    balance: admin.firestore.FieldValue.increment(amount),
-    depositedBalance: admin.firestore.FieldValue.increment(reserved.deposited),
-    earnedBalance: admin.firestore.FieldValue.increment(reserved.earned),
-    bonusBalance: admin.firestore.FieldValue.increment(reserved.bonus),
-    // Undo the daily-cap bump from the aborted debit, atomically with the
-    // balance restore so the counter can never drift from actual withdrawals.
-    // Paired 1:1 with the in-transaction increment; only ever runs after a
-    // committed debit (every caller is post-debit / txnPersisted), so this can
-    // never push the counter below the day's real total. A rare cross-midnight
-    // decrement leaves a stale prior-day value, which computeDailyWithdrawalState
-    // ignores (treated as 0) — so it never wrongly blocks the next day.
-    dailyWithdrawalTotal: admin.firestore.FieldValue.increment(-amount),
-  });
+  const batch = db.batch();
+  if (reserved) {
+    batch.update(walletRef, {
+      balance: admin.firestore.FieldValue.increment(amount),
+      depositedBalance: admin.firestore.FieldValue.increment(reserved.deposited),
+      earnedBalance: admin.firestore.FieldValue.increment(reserved.earned),
+      bonusBalance: admin.firestore.FieldValue.increment(reserved.bonus),
+      dailyWithdrawalTotal: admin.firestore.FieldValue.increment(-amount),
+    });
+  }
+  batch.delete(txnRef);
+  await batch.commit();
 }
 
 export const requestWithdrawal = onRequest(
@@ -3821,11 +3838,9 @@ export const requestWithdrawal = onRequest(
       const connectedAccountId: string =
         (merged.stripeAccountId as string | undefined) ?? "";
       if (!connectedAccountId) {
-        // Restore the reservation since the Stripe transfer can't proceed
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRef, amount, reserved);
-        }
-        await txnRef.delete();
+        // Atomically restore the reservation + void the txn — the transfer
+        // can't proceed, and a non-atomic restore is what drifts the wallet.
+        await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
         sendError(
           res,
           400,
@@ -3834,11 +3849,9 @@ export const requestWithdrawal = onRequest(
         return;
       }
       if (merged.stripeAccountStatus !== "active") {
-        // Restore the reservation since the Stripe transfer can't proceed
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRef, amount, reserved);
-        }
-        await txnRef.delete();
+        // Atomically restore the reservation + void the txn — the transfer
+        // can't proceed, and a non-atomic restore is what drifts the wallet.
+        await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
         sendError(
           res,
           400,
@@ -3855,10 +3868,7 @@ export const requestWithdrawal = onRequest(
       try {
         const liveAccount = await stripe.accounts.retrieve(connectedAccountId);
         if (!liveAccount.payouts_enabled || !liveAccount.charges_enabled) {
-          if (reserved) {
-            await restoreWithdrawalReservation(walletRef, amount, reserved);
-          }
-          await txnRef.delete();
+          await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
           sendError(
             res,
             400,
@@ -3879,19 +3889,13 @@ export const requestWithdrawal = onRequest(
           .trim()
           .toUpperCase();
         if (payoutState && WITHDRAWAL_EXCLUDED_STATES.has(payoutState)) {
-          if (reserved) {
-            await restoreWithdrawalReservation(walletRef, amount, reserved);
-          }
-          await txnRef.delete();
+          await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
           sendError(res, 403, "Withdrawals aren't available in your state yet.");
           return;
         }
       } catch (err) {
         console.error("Stripe account retrieve failed:", err);
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRef, amount, reserved);
-        }
-        await txnRef.delete();
+        await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
         sendError(res, 502, "Could not verify payout account with Stripe");
         return;
       }
@@ -4021,10 +4025,12 @@ export const requestWithdrawal = onRequest(
       }
       try {
         const walletRestoreRef = db.collection("wallets").doc(uid);
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRestoreRef, amount, reserved);
-        }
-        await txnRef.delete();
+        await restoreAndVoidWithdrawal(
+          walletRestoreRef,
+          txnRef,
+          amount,
+          reserved,
+        );
       } catch (restoreErr) {
         console.error(
           "Failed to restore balance / delete txn after withdrawal error:",
@@ -7492,6 +7498,109 @@ export const reconcileWalletBalances = onSchedule(
     console.info(
       `reconcileWalletBalances run date=${dateId} processed=${processed} mismatches=${mismatchCount}`,
     );
+  },
+);
+
+// ─── unfreezeWallet (admin-only recovery) ───────────────────────────────────
+/**
+ * Clears the `frozen` flag that reconcileWalletBalances sets on balance drift.
+ * Without this there was NO automated recovery — a spurious freeze (e.g. a
+ * transient withdrawal-restore hiccup) locked a real user out of both staking
+ * (`createSoloSession`) and withdrawing (`requestWithdrawal`) until a manual
+ * Firebase Console edit. This re-sums the transaction log and clears the
+ * freeze ONLY if the drift is resolved (delta === 0); `force: true` overrides
+ * after an operator has reviewed the `walletAudits/{uid}_{date}` doc and
+ * credited/refunded by hand.
+ *
+ * Admin-only: header `x-admin-key: <ADMIN_API_KEY>`, constant-time compared
+ * (same gate as mergeDuplicateUsers). Body: `{ uid: string, force?: boolean }`.
+ */
+export const unfreezeWallet = onRequest(
+  PUBLIC_ADMIN_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    const provided = req.headers["x-admin-key"];
+    const expected = ADMIN_API_KEY.value();
+    if (!compareAdminKey(provided, expected)) {
+      sendError(res, 403, "Forbidden");
+      return;
+    }
+
+    const { uid, force } = (req.body ?? {}) as {
+      uid?: string;
+      force?: boolean;
+    };
+    if (!uid || typeof uid !== "string") {
+      sendError(res, 400, "Missing uid");
+      return;
+    }
+
+    try {
+      const walletRef = db.collection("wallets").doc(uid);
+      const walletSnap = await walletRef.get();
+      if (!walletSnap.exists) {
+        sendError(res, 404, "Wallet not found");
+        return;
+      }
+      const wallet = walletSnap.data() ?? {};
+      if (wallet.frozen !== true) {
+        res.json({ status: "not_frozen", uid });
+        return;
+      }
+
+      const storedBalance =
+        typeof wallet.balance === "number" ? wallet.balance : 0;
+      const txnSnap = await db
+        .collection("transactions")
+        .where("userId", "==", uid)
+        .get();
+      let summed = 0;
+      txnSnap.forEach((d) => {
+        const amount = d.data().amount;
+        if (typeof amount === "number") summed += amount;
+      });
+
+      const { unfreeze, delta } = shouldUnfreezeWallet(
+        storedBalance,
+        summed,
+        force === true,
+      );
+      if (!unfreeze) {
+        sendError(
+          res,
+          409,
+          `Drift not resolved (stored=${storedBalance} summed=${summed} delta=${delta}). Review walletAudits and pass force:true to override.`,
+        );
+        return;
+      }
+
+      await walletRef.update({
+        frozen: admin.firestore.FieldValue.delete(),
+        frozenReason: admin.firestore.FieldValue.delete(),
+        frozenAt: admin.firestore.FieldValue.delete(),
+        unfrozenAt: admin.firestore.FieldValue.serverTimestamp(),
+        unfrozenBy: force === true ? "admin_force" : "admin_reconciled",
+        unfrozenDelta: delta,
+      });
+      console.info(
+        `unfreezeWallet uid=${uid} delta=${delta} force=${force === true}`,
+      );
+      res.json({
+        status: "unfrozen",
+        uid,
+        storedBalance,
+        summed,
+        delta,
+        forced: force === true,
+      });
+    } catch (err) {
+      console.error("unfreezeWallet error:", err);
+      sendError(res, 500, "Internal error");
+    }
   },
 );
 

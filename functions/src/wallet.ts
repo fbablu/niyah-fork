@@ -208,3 +208,29 @@ export function computeDailyWithdrawalState(
   const newTotal = priorToday + amount;
   return { priorToday, newTotal, exceedsCap: newTotal > capCents, dayKey };
 }
+
+// ─── Wallet freeze recovery ─────────────────────────────────────────────────
+
+export interface UnfreezeDecision {
+  /** Whether the freeze flag should be cleared. */
+  unfreeze: boolean;
+  /** storedBalance - Σtransactions (0 = drift resolved). */
+  delta: number;
+}
+
+/**
+ * Decide whether an admin unfreeze request should clear a wallet's freeze.
+ * A wallet auto-freezes when stored balance != Σtransactions (any drift).
+ * Default policy: only clear the freeze once the drift is gone (delta === 0).
+ * `force` lets an operator override AFTER reviewing the walletAudits doc and
+ * crediting/refunding by hand. Pure so the policy is unit-pinned and matches
+ * reconcileWalletBalances' drift definition exactly.
+ */
+export function shouldUnfreezeWallet(
+  storedBalance: number,
+  summedFromTransactions: number,
+  force: boolean,
+): UnfreezeDecision {
+  const delta = storedBalance - summedFromTransactions;
+  return { unfreeze: delta === 0 || force, delta };
+}
