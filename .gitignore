@@ -71,3 +71,7 @@ expo-env.d.ts
 functions/.env*
 docs/misc/
 .claude/scheduled_tasks.lock
+
+# Local iOS build/submit logs
+build.log
+submit.log
