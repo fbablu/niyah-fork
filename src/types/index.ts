@@ -307,3 +307,29 @@ export interface GroupInvite {
   createdAt: Date;
   respondedAt?: Date;
 }
+
+/** 0 = Sunday … 6 = Saturday (matches JS Date.getDay()). */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+/**
+ * A recurring, Opal-style scheduled focus block. OS-enforced auto-start via
+ * DeviceActivitySchedule (see scheduleStore).
+ *
+ * Phase-1 caveats (tracked in docs/schedule-templates-plan-2026-06-03.md):
+ * - `days` is stored, but the native wrapper currently applies a DAILY window;
+ *   weekday-specific enforcement needs a native extension (rebuild).
+ * - `stakeCents > 0` (per-template auto-stake) is INERT in Phase 1 — auto-debiting
+ *   money on a schedule needs a server CF + /vibe-security + deploy (Phase 2).
+ */
+export interface ScheduledTemplate {
+  id: string;
+  name: string;
+  days: Weekday[]; // weekdays the block runs
+  startHour: number; // 0–23 (local)
+  startMinute: number; // 0–59
+  endHour: number; // 0–23 (local)
+  endMinute: number; // 0–59
+  stakeCents: number; // 0 = free block. >0 = auto-stake (Phase 2, inert now).
+  enabled: boolean;
+  createdAt: number; // epoch ms (number keeps AsyncStorage persistence simple)
+}

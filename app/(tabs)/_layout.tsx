@@ -41,6 +41,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="schedule"
+        options={{
+          title: "Schedule",
+          tabBarIcon: () => ({ sfSymbol: "calendar" }),
+        }}
+      />
+      <Tabs.Screen
         name="friends"
         options={{
           title: "Friends",
