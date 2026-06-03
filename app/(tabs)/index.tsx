@@ -18,13 +18,11 @@ import {
   Card,
   Balance,
   Button,
-  MoneyPlant,
   BlobAvatar,
   withErrorBoundary,
 } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { useWalletStore } from "../../src/store/walletStore";
-import { usePartnerStore } from "../../src/store/partnerStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
 import { formatMoney, formatRelativeTime } from "../../src/utils/format";
@@ -187,7 +185,6 @@ function DashboardScreenInner() {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const balance = useWalletStore((state) => state.balance);
-  const { partners } = usePartnerStore();
   const { activeGroupSession, groupSessionHistory, pendingInvites } =
     useGroupSessionStore();
   const activeSoloSession = useSessionStore((s) => s.currentSession);
@@ -209,11 +206,6 @@ function DashboardScreenInner() {
     (user?.totalSessions ?? 0) > 0;
   const hasCompletedSession = (user?.completedSessions ?? 0) > 0;
   const showGettingStarted = !hasCompletedSession;
-
-  const totalLeaves = groupSessionHistory.filter(
-    (s) => s.participants.find((p) => p.userId === user?.id)?.completed,
-  ).length;
-  const growthStage = Math.min(5, Math.floor(totalLeaves / 3) + 1);
 
   const styles = useMemo(
     () =>
@@ -890,19 +882,6 @@ function DashboardScreenInner() {
               <StatCard value={`${completionRate}%`} label="Success Rate" />
               <StatCard value={user?.longestStreak || 0} label="Best Streak" />
             </View>
-          </View>
-
-          {/* Money Plant Section */}
-          <View style={styles.plantSection}>
-            <Text style={styles.sectionTitle}>Your Money Plant</Text>
-            <Card style={styles.plantCard}>
-              <MoneyPlant
-                partners={partners}
-                totalLeaves={totalLeaves}
-                growthStage={growthStage}
-                totalEarned={totalEarnings}
-              />
-            </Card>
           </View>
 
           {/* Recent Activity */}

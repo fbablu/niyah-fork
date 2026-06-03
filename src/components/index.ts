@@ -7,7 +7,6 @@ export { NumPad, AmountDisplay } from "./NumPad";
 export { AnimatedNote } from "./AnimatedNote";
 export { Confetti } from "./Confetti";
 export { MoneySuccessOverlay } from "./MoneySuccessOverlay";
-export { MoneyPlant } from "./MoneyPlant";
 export { PeachAvatar } from "./PeachAvatar";
 export { BlobAvatar } from "./BlobAvatar";
 export { AuthScreenScaffold } from "./AuthScreenScaffold";
