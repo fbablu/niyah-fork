@@ -7,6 +7,16 @@
  * - State consistency validation across stores after multi-step operations
  */
 
+// startGroupSession is the legacy DEMO-only local path (throws in live mode),
+// so force DEMO to exercise the full local group flow. Cloud group flow is
+// covered by groupSessionStore.parsing.test.ts.
+// MUST precede imports — babel-jest hoists jest.mock().
+jest.mock("../../constants/config", () => ({
+  ...jest.requireActual("../../constants/config"),
+  DEMO_MODE: true,
+  USE_SHORT_TIMERS: true,
+}));
+
 import { useGroupSessionStore } from "../../store/groupSessionStore";
 import { useWalletStore } from "../../store/walletStore";
 import { useAuthStore } from "../../store/authStore";

@@ -29,6 +29,10 @@ jest.mock("../../../config/firebase", () => ({
   signOut: jest.fn(() => Promise.resolve()),
   subscribeToGroupInvites: jest.fn(() => jest.fn()),
   subscribeToActiveGroupSessions: jest.fn(() => jest.fn()),
+  // hydrateWallet (fired on login) opens the realtime wallet subscription —
+  // without this mock the suite crashes with "subscribeToWallet is not a function".
+  getWalletDoc: jest.fn(() => Promise.resolve(null)),
+  subscribeToWallet: jest.fn(() => jest.fn()),
 }));
 
 jest.mock("../../../config/notifications", () => ({
