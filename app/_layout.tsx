@@ -156,11 +156,24 @@ export default function RootLayout() {
         return;
       }
 
-      // Shield surrender deep link — the ShieldActionExtension opens
-      // niyah://surrender when the user taps "Surrender Session". The
-      // native module's foreground hook will detect the flag and emit
-      // onSurrenderRequested, but we need to ensure the active session
-      // screen is visible so the listener is mounted.
+      // Shield "Open Niyah" deep link. The ShieldActionExtension opens
+      // niyah://blocked when the user taps the secondary shield button while a
+      // blocked app is open. The scheme host is "blocked" (empty path), so
+      // expo-router resolves it to "/" (home) UNLESS we route it explicitly —
+      // that mis-route is exactly the qa-2026-06-02 #10 bug ("lands on the home
+      // screen"). Push the branded surrender-confirm screen (app/blocked.tsx),
+      // which offers Back-to-focus or Forfeit → /session/surrender. Cold start
+      // is covered too (getInitialURL feeds the same handler).
+      if (url.includes("blocked")) {
+        logger.info("Shield blocked deep link received → /blocked");
+        router.push("/blocked" as never);
+        return;
+      }
+
+      // Legacy niyah://surrender deep link (pre-blocked-screen flow). The native
+      // foreground hook also emits onSurrenderRequested off the shared-defaults
+      // flag; the active-session screen mounts that listener. Kept as a no-op
+      // guard so the link doesn't fall through to referrer parsing.
       if (url.includes("surrender")) {
         logger.info("Surrender deep link received");
         return;
@@ -267,6 +280,13 @@ export default function RootLayout() {
             >
               <Stack.Screen name="index" />
               <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="blocked"
+                options={{
+                  headerShown: false,
+                  animation: "slide_from_bottom",
+                }}
+              />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
                 name="session"
