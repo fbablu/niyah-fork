@@ -143,9 +143,15 @@ export default function ScheduleScreen() {
                       value={t.stakeCents > 0}
                       onValueChange={(v) => {
                         Haptics.selectionAsync();
-                        updateStake(t.id, v ? SCHEDULED_STAKE_DEFAULT_CENTS : 0);
+                        updateStake(
+                          t.id,
+                          v ? SCHEDULED_STAKE_DEFAULT_CENTS : 0,
+                        );
                       }}
-                      trackColor={{ true: Colors.primary, false: Colors.border }}
+                      trackColor={{
+                        true: Colors.primary,
+                        false: Colors.border,
+                      }}
                     />
                   </View>
                 )}

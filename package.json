@@ -80,8 +80,8 @@
     "react-native": "0.81.5",
     "react-native-bottom-tabs": "^1.2.0",
     "react-native-gesture-handler": "~2.28.0",
-    "react-native-keyboard-controller": "^1.21.8",
-    "react-native-plaid-link-sdk": "^12.8.1",
+    "react-native-keyboard-controller": "^1.21.9",
+    "react-native-plaid-link-sdk": "^12.8.2",
     "react-native-reanimated": "~4.1.7",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
@@ -116,7 +116,7 @@
     "react-test-renderer": "19.1.0",
     "tsx": "^4.22.4",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.60.0"
+    "typescript-eslint": "^8.60.1"
   },
   "private": true
 }

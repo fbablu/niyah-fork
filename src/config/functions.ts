@@ -155,10 +155,11 @@ export async function createScheduledStakedSession(
   stakeCents: number,
   durationMinutes?: number,
 ): Promise<CreateSoloSessionResult> {
-  return callFunction<CreateSoloSessionResult>(
-    "createScheduledStakedSession",
-    { templateId, stakeCents, durationMinutes },
-  );
+  return callFunction<CreateSoloSessionResult>("createScheduledStakedSession", {
+    templateId,
+    stakeCents,
+    durationMinutes,
+  });
 }
 
 /**
