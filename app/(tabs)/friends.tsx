@@ -36,6 +36,11 @@ import {
 } from "../../src/types";
 import { logger } from "../../src/utils/logger";
 
+// Cap how many invite rows we mount at once. The list sits in a non-virtualized
+// ScrollView (nested in the FlatList header), so rendering every device contact
+// stutters on open. Show the first N alphabetically; search narrows the rest.
+const INVITE_VISIBLE_LIMIT = 30;
+
 // ─── Styles (makeStyles) ──────────────────────────────────────────────────────
 
 const makeStyles = (Colors: ThemeColors) =>
@@ -281,6 +286,12 @@ const makeStyles = (Colors: ThemeColors) =>
     inviteScrollBox: {
       maxHeight: 240,
       borderRadius: Radius.lg,
+    },
+    inviteTruncatedHint: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: Spacing.xs,
+      paddingHorizontal: Spacing.md,
     },
     inviteRow: {
       flexDirection: "row",
@@ -900,14 +911,33 @@ function FriendsScreenInner() {
   const handleInviteContact = useCallback(
     (contact: { name: string; phone?: string }) => {
       if (!contact.phone) return;
+      // niyah.live/i is the invite landing: opens the app via deep link if
+      // installed, else shows the install CTA. ?ref=<uid> credits the inviter
+      // (consumed in app/_layout.tsx). Falls back to /i with no ref if somehow
+      // unauthenticated, which still lands on the install page.
+      const inviteUrl = `https://niyah.live/i${myUid ? `?ref=${myUid}` : ""}`;
       const body = encodeURIComponent(
-        `Hey ${contact.name.split(" ")[0]}! Join me on Niyah — we stake real money on focus sessions and earn it back by staying focused.\n\nhttps://niyah.live`,
+        `Hey ${contact.name.split(" ")[0]}! Join me on Niyah — we stake real money on focus sessions and earn it back by staying focused.\n\n${inviteUrl}`,
       );
       // iOS sms: URL scheme opens iMessage with pre-filled body
       Linking.openURL(`sms:${contact.phone}&body=${body}`);
     },
-    [],
+    [myUid],
   );
+
+  // Filter + cap the invite list once per (contacts, query) change instead of
+  // re-running the filter inside JSX on every render. Only the capped slice is
+  // mounted; `total` drives the "search to find more" hint when truncated.
+  const inviteList = useMemo(() => {
+    const q = inviteSearch.trim().toLowerCase();
+    const matched = q
+      ? nonMatchedContacts.filter((c) => c.name.toLowerCase().includes(q))
+      : nonMatchedContacts;
+    return {
+      visible: matched.slice(0, INVITE_VISIBLE_LIMIT),
+      total: matched.length,
+    };
+  }, [nonMatchedContacts, inviteSearch]);
 
   const handleFollowMatch = useCallback(
     async (targetUid: string) => {
@@ -1032,34 +1062,34 @@ function FriendsScreenInner() {
               nestedScrollEnabled
               showsVerticalScrollIndicator
             >
-              {nonMatchedContacts
-                .filter((c) =>
-                  inviteSearch
-                    ? c.name.toLowerCase().includes(inviteSearch.toLowerCase())
-                    : true,
-                )
-                .map((contact, index) => (
-                  <View
-                    key={`invite-${contact.phone || contact.email || index}`}
-                    style={[styles.inviteRow, { marginBottom: Spacing.xs }]}
-                  >
-                    <View style={styles.inviteAvatar}>
-                      <Text style={styles.inviteAvatarText}>
-                        {contact.name.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text style={styles.inviteContactName} numberOfLines={1}>
-                      {contact.name}
+              {inviteList.visible.map((contact, index) => (
+                <View
+                  key={`invite-${contact.phone || contact.email || index}`}
+                  style={[styles.inviteRow, { marginBottom: Spacing.xs }]}
+                >
+                  <View style={styles.inviteAvatar}>
+                    <Text style={styles.inviteAvatarText}>
+                      {contact.name.charAt(0).toUpperCase()}
                     </Text>
-                    <Pressable
-                      style={styles.inviteBtn}
-                      onPress={() => handleInviteContact(contact)}
-                    >
-                      <Text style={styles.inviteBtnText}>Invite</Text>
-                    </Pressable>
                   </View>
-                ))}
+                  <Text style={styles.inviteContactName} numberOfLines={1}>
+                    {contact.name}
+                  </Text>
+                  <Pressable
+                    style={styles.inviteBtn}
+                    onPress={() => handleInviteContact(contact)}
+                  >
+                    <Text style={styles.inviteBtnText}>Invite</Text>
+                  </Pressable>
+                </View>
+              ))}
             </ScrollView>
+            {inviteList.total > inviteList.visible.length && (
+              <Text style={styles.inviteTruncatedHint}>
+                Showing {inviteList.visible.length} of {inviteList.total} —
+                search to find anyone.
+              </Text>
+            )}
           </View>
         )}
 
@@ -1074,6 +1104,7 @@ function FriendsScreenInner() {
       Colors,
       contactMatches,
       nonMatchedContacts,
+      inviteList,
       isImporting,
       hasImported,
       loadingUids,
