@@ -27,6 +27,11 @@ import {
   formatDays,
 } from "../../src/constants/scheduleTemplates";
 import type { ScheduledTemplate, Weekday } from "../../src/types";
+import {
+  SCHEDULED_STAKE_ENABLED,
+  SCHEDULED_STAKE_DEFAULT_CENTS,
+} from "../../src/constants/config";
+import { formatMoney } from "../../src/utils/format";
 
 // Phase 1: recurring FREE blocks that auto-start (OS-enforced) at the set time.
 // Per-template staking (Phase 2) + weekday-specific native enforcement are
@@ -42,6 +47,7 @@ export default function ScheduleScreen() {
   const updateTemplate = useScheduleStore((s) => s.updateTemplate);
   const removeTemplate = useScheduleStore((s) => s.removeTemplate);
   const setEnabled = useScheduleStore((s) => s.setEnabled);
+  const updateStake = useScheduleStore((s) => s.updateStake);
   const syncNative = useScheduleStore((s) => s.syncNative);
 
   // Re-arm OS schedules whenever the tab mounts (covers cold start).
@@ -114,6 +120,35 @@ export default function ScheduleScreen() {
                     );
                   })}
                 </View>
+
+                {/* Per-template stake toggle (Schedule Phase 2). Display-only:
+                    flips the stored stakeCents so the server can auto-stake at
+                    the block start once the CF + native trigger ship. No yield
+                    framing — you stake, finish, and get it back. */}
+                {SCHEDULED_STAKE_ENABLED && (
+                  <View style={styles.stakeRow}>
+                    <View style={styles.stakeText}>
+                      <Text style={styles.stakeTitle}>
+                        {t.stakeCents > 0
+                          ? `Stake ${formatMoney(t.stakeCents)} on this block`
+                          : "Stake on this block"}
+                      </Text>
+                      <Text style={styles.stakeHint}>
+                        {t.stakeCents > 0
+                          ? "Finish the block → get it back · daily cap applies"
+                          : "Put money on it — finish → get it back"}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={t.stakeCents > 0}
+                      onValueChange={(v) => {
+                        Haptics.selectionAsync();
+                        updateStake(t.id, v ? SCHEDULED_STAKE_DEFAULT_CENTS : 0);
+                      }}
+                      trackColor={{ true: Colors.primary, false: Colors.border }}
+                    />
+                  </View>
+                )}
 
                 <Pressable
                   onPress={() => {
@@ -272,6 +307,28 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     dayChipTextOn: {
       color: Colors.background,
+    },
+    stakeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: Spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: Colors.border,
+      paddingTop: Spacing.md,
+    },
+    stakeText: {
+      flex: 1,
+      gap: 2,
+    },
+    stakeTitle: {
+      fontSize: Typography.bodyMedium,
+      ...Font.semibold,
+      color: Colors.text,
+    },
+    stakeHint: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textSecondary,
     },
     deleteBtn: {
       alignSelf: "flex-start",

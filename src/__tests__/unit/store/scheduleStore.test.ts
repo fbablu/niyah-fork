@@ -184,6 +184,35 @@ describe("scheduleStore", () => {
     expect(stopScheduledBlocking).toHaveBeenCalledWith(`niyah_sched_${t.id}`);
   });
 
+  it("updateStake sets the stake without re-arming the OS schedule", () => {
+    // Phase 2 stake is display-only: the server auto-stakes at the block start,
+    // so toggling a stake never moves money or re-arms a native schedule here.
+    const t = useScheduleStore.getState().addPreset(WORKDAY)!;
+    expect(t.stakeCents).toBe(0);
+    jest.clearAllMocks();
+
+    useScheduleStore.getState().updateStake(t.id, 500);
+    expect(
+      useScheduleStore.getState().templates.find((x) => x.id === t.id)
+        ?.stakeCents,
+    ).toBe(500);
+    // No re-arm / disarm — the OS block is identical whether or not it's staked.
+    expect(startScheduledBlocking).not.toHaveBeenCalled();
+    expect(stopScheduledBlocking).not.toHaveBeenCalled();
+
+    // Toggling back to free clears the stake; negatives are floored to 0.
+    useScheduleStore.getState().updateStake(t.id, 0);
+    expect(
+      useScheduleStore.getState().templates.find((x) => x.id === t.id)
+        ?.stakeCents,
+    ).toBe(0);
+    useScheduleStore.getState().updateStake(t.id, -100);
+    expect(
+      useScheduleStore.getState().templates.find((x) => x.id === t.id)
+        ?.stakeCents,
+    ).toBe(0);
+  });
+
   it("syncNative arms enabled templates and clears disabled ones", () => {
     const a = useScheduleStore.getState().addPreset(WORKDAY)!;
     const b = useScheduleStore.getState().addPreset(STUDY)!; // evening — no overlap

@@ -144,6 +144,24 @@ export async function createSoloSession(
 }
 
 /**
+ * Auto-stakes a recurring scheduled focus block (Schedule Phase 2). Triggered
+ * at the block's start by the on-device DeviceActivityMonitor → app → this CF.
+ * The server clamps the stake to [$2, $25] and is idempotent per
+ * (uid, templateId, UTC-day), so a re-fire never double-debits. Returns 501
+ * (rejected) while the feature flag is off. The client never touches the wallet.
+ */
+export async function createScheduledStakedSession(
+  templateId: string,
+  stakeCents: number,
+  durationMinutes?: number,
+): Promise<CreateSoloSessionResult> {
+  return callFunction<CreateSoloSessionResult>(
+    "createScheduledStakedSession",
+    { templateId, stakeCents, durationMinutes },
+  );
+}
+
+/**
  * Completes a session server-side. The Cloud Function reads the stakeAmount
  * from the session doc, validates ownership, timer, and status.
  * stakeAmount param is accepted for backwards compatibility but ignored by server.

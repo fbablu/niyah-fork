@@ -11,6 +11,7 @@ import {
   startScheduledBlocking,
   stopScheduledBlocking,
 } from "../config/screentime";
+import { SCHEDULED_STAKE_ENABLED } from "../constants/config";
 import { generateId } from "../utils/id";
 import { logger } from "../utils/logger";
 
@@ -31,7 +32,11 @@ const activityNameFor = (id: string) => `niyah_sched_${id}`;
 
 /** Fire-and-forget: arm the OS schedule for a template (no-op off-device). */
 const armNative = (t: ScheduledTemplate): void => {
-  if (t.stakeCents > 0) {
+  // Only warn when a stake is set BUT the feature is still dormant — i.e. the
+  // stake really is inert. With the flag on, the server auto-stakes at block
+  // start (the client still arms the free block here either way), so the
+  // "not active yet" warning would be misleading.
+  if (t.stakeCents > 0 && !SCHEDULED_STAKE_ENABLED) {
     logger.warn(
       `scheduleStore: template ${t.id} has a stake but auto-stake is not active yet (Phase 2) — arming a free block.`,
     );
@@ -67,6 +72,10 @@ interface ScheduleStore {
   removeTemplate: (id: string) => void;
   /** Enable/disable a template — arms or clears its OS schedule. */
   setEnabled: (id: string, enabled: boolean) => void;
+  /** Set a template's stake (cents); 0 = free block. Display-only in Phase 2
+   * (gated by SCHEDULED_STAKE_ENABLED) — the server, not the client, debits at
+   * the block start, so this does NOT touch the wallet or re-arm the OS block. */
+  updateStake: (id: string, stakeCents: number) => void;
   /** Re-arm every enabled template's OS schedule (call on app launch). */
   syncNative: () => void;
 }
@@ -121,6 +130,18 @@ export const useScheduleStore = create<ScheduleStore>()(
         if (!target) return;
         if (enabled) armNative(target);
         else disarmNative(id);
+      },
+
+      updateStake: (id, stakeCents) => {
+        const cents = Math.max(0, Math.round(stakeCents));
+        set((s) => ({
+          templates: s.templates.map((t) =>
+            t.id === id ? { ...t, stakeCents: cents } : t,
+          ),
+        }));
+        // Intentionally does NOT re-arm: the OS block is the same free window
+        // either way; auto-staking happens server-side (Phase 2 CF), so a stake
+        // change never moves money or re-arms a native schedule here.
       },
 
       syncNative: () => {
