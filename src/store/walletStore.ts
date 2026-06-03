@@ -9,6 +9,28 @@ import { logger } from "../utils/logger";
 let _unsubWallet: (() => void) | null = null;
 let _subscribedWalletUid: string | null = null;
 
+// Optimistic-deposit guard. After a deposit() credits the balance locally, the
+// realtime subscribeToWallet snapshot can briefly arrive with the OLD,
+// not-yet-credited server balance (webhook / write lag) and stomp the balance
+// back down — the "vanishing $1" symptom. While a floor is armed, a snapshot
+// that is LOWER than the floor is ignored (kept optimistic); the first snapshot
+// at/above the floor means the server caught up, so we drop the guard and
+// resume trusting snapshots. The floor also auto-expires after the window and
+// is cleared on any intentional local debit (withdraw/deductStake).
+const OPTIMISTIC_DEPOSIT_GUARD_MS = 30_000;
+let _optimisticFloor: number | null = null;
+let _optimisticUntil = 0;
+
+const armOptimisticFloor = (balance: number): void => {
+  _optimisticFloor = balance;
+  _optimisticUntil = Date.now() + OPTIMISTIC_DEPOSIT_GUARD_MS;
+};
+
+const clearOptimisticFloor = (): void => {
+  _optimisticFloor = null;
+  _optimisticUntil = 0;
+};
+
 interface WalletState {
   balance: number;
   transactions: Transaction[];
@@ -79,13 +101,26 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     }
     _subscribedWalletUid = uid;
     _unsubWallet = subscribeToWallet(uid, (data) => {
-      if (data) {
-        set({
-          balance: data.balance,
+      if (!data) return;
+      set((state) => {
+        // Drop an expired guard so it can never wrongly pin the balance.
+        if (_optimisticFloor !== null && Date.now() >= _optimisticUntil) {
+          clearOptimisticFloor();
+        }
+        let balance = data.balance;
+        if (_optimisticFloor !== null && data.balance < _optimisticFloor) {
+          // Lagging snapshot — keep the optimistic balance, don't stomp it down.
+          balance = state.balance;
+        } else if (_optimisticFloor !== null) {
+          // Snapshot reached the floor → server caught up; stop guarding.
+          clearOptimisticFloor();
+        }
+        return {
+          balance,
           pendingWithdrawal: data.pendingBalance,
           isHydrated: true,
-        });
-      }
+        };
+      });
     });
   },
 
@@ -95,6 +130,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       _unsubWallet = null;
     }
     _subscribedWalletUid = null;
+    clearOptimisticFloor();
   },
 
   deposit: (amount: number, syncedBalance?: number) => {
@@ -112,6 +148,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       transactions: [transaction, ...state.transactions],
     }));
 
+    // Guard the just-credited balance against a lagging realtime snapshot that
+    // still carries the pre-credit (lower) server balance.
+    armOptimisticFloor(get().balance);
+
     useAuthStore.getState().updateUser({
       balance: get().balance,
     });
@@ -120,6 +160,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   withdraw: (amount: number) => {
     const { balance } = get();
     if (amount > balance) return;
+    // Intentional local debit — a snapshot reflecting the lower balance is real,
+    // so stop guarding against lower snapshots.
+    clearOptimisticFloor();
 
     const transaction: Transaction = {
       id: generateId(),
@@ -147,6 +190,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         `Insufficient balance: need ${amount} cents but have ${balance}`,
       );
     }
+    // Intentional local debit — let snapshots reflecting the lower balance land.
+    clearOptimisticFloor();
 
     const transaction: Transaction = {
       id: generateId(),

@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useEffect } from "react";
+import React, { useRef, useMemo, useEffect, useState } from "react";
 import BlobsBackground from "../../src/components/BlobsBackground";
 import {
   View,
@@ -25,7 +25,11 @@ import { useAuthStore } from "../../src/store/authStore";
 import { useWalletStore } from "../../src/store/walletStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
+import { useScheduleStore } from "../../src/store/scheduleStore";
 import { formatMoney, formatRelativeTime } from "../../src/utils/format";
+import { getActiveScheduledBlock } from "../../src/utils/scheduledBlock";
+import { formatWindow } from "../../src/constants/scheduleTemplates";
+import { MIN_STAKE_CENTS } from "../../src/constants/config";
 import { generateBlobAvatarPreset } from "../../src/constants/blobAvatar";
 
 interface ActionButtonProps {
@@ -188,6 +192,24 @@ function DashboardScreenInner() {
   const { activeGroupSession, groupSessionHistory, pendingInvites } =
     useGroupSessionStore();
   const activeSoloSession = useSessionStore((s) => s.currentSession);
+  const scheduledTemplates = useScheduleStore((s) => s.templates);
+
+  // Tick a clock so the "scheduled block running" indicator turns on/off as the
+  // window opens/closes without the user reopening the app. 30s is snappy enough
+  // for a block boundary and cheap.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const activeScheduledBlock = useMemo(
+    () => getActiveScheduledBlock(scheduledTemplates, now),
+    [scheduledTemplates, now],
+  );
+  // A real (running) session always takes visual precedence over a scheduled
+  // block; the block indicator + CTA-gating only apply when neither is running.
+  const hasRunningSession = !!activeGroupSession || !!activeSoloSession;
+  const showScheduledBlock = !hasRunningSession && !!activeScheduledBlock;
 
   const completionRate =
     user && user.totalSessions > 0
@@ -199,13 +221,18 @@ function DashboardScreenInner() {
   // First-run onboarding callout: visible until the user has completed at
   // least one session. Steps tick as the user progresses through deposit →
   // session → completion, so cold installs have a clear path from zero.
-  const hasDeposited = balance > 0;
+  // "Deposited" for onboarding means "has enough to actually stake" — a $1
+  // deposit can't fund the $2 minimum stake, so don't tick the step on balance
+  // alone. Keeps the checklist honest with the min-stake floor.
+  const hasDeposited = balance >= MIN_STAKE_CENTS;
   const hasStartedSession =
     !!activeSoloSession ||
     !!activeGroupSession ||
     (user?.totalSessions ?? 0) > 0;
   const hasCompletedSession = (user?.completedSessions ?? 0) > 0;
-  const showGettingStarted = !hasCompletedSession;
+  // Hide the getting-started checklist while a scheduled block is enforcing —
+  // the user is mid-focus; the Start CTAs are gated below for the same reason.
+  const showGettingStarted = !hasCompletedSession && !showScheduledBlock;
 
   const styles = useMemo(
     () =>
@@ -611,10 +638,11 @@ function DashboardScreenInner() {
                       hasDeposited && styles.onboardingStepLabelDone,
                     ]}
                   >
-                    Add $5 to your wallet
+                    Add at least {formatMoney(MIN_STAKE_CENTS, false)} to your
+                    wallet
                   </Text>
                   <Text style={styles.onboardingStepHint}>
-                    Staked money you earn back when you complete.
+                    Staked money you get back when you complete.
                   </Text>
                 </View>
                 {!hasDeposited && (
@@ -746,8 +774,38 @@ function DashboardScreenInner() {
             </Pressable>
           )}
 
-          {/* Quick Start CTA */}
-          {!activeGroupSession && !activeSoloSession && (
+          {/* Scheduled focus block running — Opal-style indicator. A
+              DeviceActivitySchedule isn't a currentSession, so without this the
+              dashboard would still show Start CTAs during an enforced block.
+              Tapping opens the Schedule tab to manage it. */}
+          {showScheduledBlock && activeScheduledBlock && (
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/(tabs)/schedule");
+              }}
+            >
+              <Card style={styles.activeSessionCard}>
+                <View style={styles.activeSessionIndicator} />
+                <View style={styles.activeSessionContent}>
+                  <Text style={styles.activeSessionLabel}>
+                    FOCUS BLOCK RUNNING
+                  </Text>
+                  <Text style={styles.activeSessionText}>
+                    {activeScheduledBlock.name}
+                  </Text>
+                  <Text style={styles.activeSessionPayout}>
+                    {formatWindow(activeScheduledBlock)}
+                  </Text>
+                </View>
+                <Text style={styles.activeSessionArrow}>Manage</Text>
+              </Card>
+            </Pressable>
+          )}
+
+          {/* Quick Start CTA — hidden while a session OR a scheduled block is
+              running (you're already focusing; don't offer to start another). */}
+          {!activeGroupSession && !activeSoloSession && !showScheduledBlock && (
             <Card style={styles.ctaCard}>
               <Text style={styles.ctaTitle}>Ready to focus?</Text>
               <Text style={styles.ctaSubtitle}>

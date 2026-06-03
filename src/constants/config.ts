@@ -65,6 +65,11 @@ export const CADENCES = {
 export const SHORT_CADENCES: readonly string[] = ["test", "focus", "hour"];
 export const LONG_CADENCES: readonly string[] = ["daily", "weekly", "monthly"];
 
+// Minimum stake a user can put on a session (cents). The Focus cadence is the
+// cheapest stakeable session, so its stake is the floor. Onboarding nudges a
+// deposit of at least this much (a $1 deposit can't fund a stake).
+export const MIN_STAKE_CENTS = CADENCES.focus.stake; // $2.00
+
 // Demo mode: driven by env var so production builds can't accidentally ship demo.
 // Set EXPO_PUBLIC_DEMO_MODE=true in .env for development; omit or set false for production.
 export const DEMO_MODE = process.env.EXPO_PUBLIC_DEMO_MODE === "true";
@@ -155,3 +160,19 @@ export const AI_STAKE_CALIBRATION_ENABLED = false;
 // the session stores. Lets us soft-roll the feature even when the binary
 // already ships with the targets compiled.
 export const LANE_B_ENABLED = process.env.EXPO_PUBLIC_LANE_B_ENABLED === "true";
+
+// Scheduled-template auto-stake (Schedule Phase 2). This CLIENT flag gates the
+// per-template stake toggle in the Schedule tab. There is a SEPARATE server
+// flag (functions/ SCHEDULED_STAKE_ENABLED) that gates the createScheduledStakedSession
+// CF — they are INDEPENDENT (a client EXPO_PUBLIC_ var is baked into the bundle;
+// the server reads its own env) and BOTH must be set to go live. Setting only
+// this one just shows the toggle; the CF still returns 501, so no money moves.
+// Ships DORMANT (default OFF): Phase 1 is free blocks only. When on, a template
+// can carry a stake the server debits at the block's start (never the client),
+// returned on completion (+ a gated, capped house-funded reward). NO yield /
+// interest framing — money is staked and returned/forfeited, never "grown".
+export const SCHEDULED_STAKE_ENABLED =
+  process.env.EXPO_PUBLIC_SCHEDULED_STAKE_ENABLED === "true";
+// Default stake when a user toggles a scheduled block to "staked" (cents). The
+// server clamps to [$2, $25] regardless; this is just the starting amount.
+export const SCHEDULED_STAKE_DEFAULT_CENTS = 500; // $5.00
