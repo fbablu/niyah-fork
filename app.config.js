@@ -51,7 +51,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.niyah.app",
-      buildNumber: "19",
+      buildNumber: "20",
       appleTeamId: "4R55F73KCP",
       googleServicesFile:
         process.env.GOOGLE_SERVICE_INFO_PLIST ||
@@ -109,7 +109,8 @@ module.exports = {
             NSPrivacyAccessedAPITypeReasons: ["C617.1", "0A2A.1", "3B52.1"],
           },
           {
-            NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryUserDefaults",
+            NSPrivacyAccessedAPIType:
+              "NSPrivacyAccessedAPICategoryUserDefaults",
             NSPrivacyAccessedAPITypeReasons: ["CA92.1", "1C8F.1", "C56D.1"],
           },
           {
