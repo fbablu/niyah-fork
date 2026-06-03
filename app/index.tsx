@@ -5,6 +5,11 @@ import { useAuthStore } from "../src/store/authStore";
 import { useColors } from "../src/hooks/useColors";
 import { LegalAcceptanceOverlay } from "../src/components";
 import { logger } from "../src/utils/logger";
+import { DEMO_MODE } from "../src/constants/config";
+import {
+  isScreenTimeAvailable,
+  getScreenTimeAuthStatus,
+} from "../src/config/screentime";
 
 export default function Index() {
   const Colors = useColors();
@@ -81,6 +86,18 @@ export default function Index() {
 
   if (!profileComplete) {
     return <Redirect href="/(auth)/profile-setup" />;
+  }
+
+  // Hard gate (Opal-style): Screen Time is core to Niyah, so a profiled user
+  // who hasn't granted it is sent back to setup on every launch until they do.
+  // Bypassed on devices without Screen Time and in DEMO builds so the booth
+  // demo / simulator aren't trapped (drop the DEMO_MODE check to gate demos too).
+  if (
+    isScreenTimeAvailable &&
+    !DEMO_MODE &&
+    getScreenTimeAuthStatus() !== "approved"
+  ) {
+    return <Redirect href="/(auth)/screentime-setup" />;
   }
 
   return <Redirect href="/(tabs)" />;
