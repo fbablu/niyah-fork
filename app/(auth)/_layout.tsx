@@ -24,6 +24,7 @@ export default function AuthLayout() {
       <Stack.Screen name="screen-time-math" />
       <Stack.Screen name="screentime-setup" />
       <Stack.Screen name="screentime-baseline" />
+      <Stack.Screen name="notifications-setup" />
     </Stack>
   );
 }

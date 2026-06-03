@@ -12,6 +12,7 @@
 import {
   getMessaging,
   requestPermission,
+  hasPermission,
   AuthorizationStatus,
   getToken,
   getAPNSToken,
@@ -86,6 +87,20 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 
   return enabled;
+}
+
+/**
+ * Current notification permission status WITHOUT prompting — never shows the
+ * OS dialog. Used by initializeNotifications() on sign-in so we only wire up
+ * push for users who have *already* granted it; the first-time OS prompt is
+ * triggered explicitly from the onboarding priming screen (enableNotifications).
+ */
+export async function hasNotificationPermission(): Promise<boolean> {
+  const authStatus = await hasPermission(getMessagingInstance());
+  return (
+    authStatus === AuthorizationStatus.AUTHORIZED ||
+    authStatus === AuthorizationStatus.PROVISIONAL
+  );
 }
 
 // ─── Token Management ───────────────────────────────────────────────────────
@@ -293,34 +308,60 @@ export function setupNotificationOpenHandler(): () => void {
 let initPromise: Promise<() => void> | null = null;
 let activeCleanup: (() => void) | null = null;
 
+/** Wire up token refresh + token registration + foreground/open/initial
+ * handlers. Caller guarantees permission is already granted. */
+async function setupListenersAndToken(): Promise<() => void> {
+  const unsubTokenRefresh = onTokenRefresh();
+  await registerFCMToken();
+  const unsubForeground = setupForegroundHandler();
+  const unsubOpen = setupNotificationOpenHandler();
+
+  await checkInitialNotification();
+
+  activeCleanup = () => {
+    unsubTokenRefresh();
+    unsubForeground();
+    unsubOpen();
+  };
+  return activeCleanup;
+}
+
 /**
- * Initialize all notification handling. Safe to call repeatedly — subsequent
- * calls return the in-flight or already-resolved init. Prevents listener
- * stacking when multiple auth paths race to initialize.
+ * Initialize notification handling WITHOUT ever showing the OS permission
+ * dialog. Called on sign-in: if permission is already granted it wires up the
+ * listeners + token; otherwise it no-ops and clears the cache so a later
+ * enableNotifications() (fired from the onboarding priming screen) can prompt
+ * and init. The old contextless sign-in prompt was killing opt-in — an iOS
+ * dismissal is permanent. Safe to call repeatedly (returns the in-flight or
+ * resolved init; prevents listener stacking across racing auth paths).
  */
 export async function initializeNotifications(): Promise<() => void> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    const hasPermission = await requestNotificationPermission();
-    if (!hasPermission) return () => {};
-
-    const unsubTokenRefresh = onTokenRefresh();
-    await registerFCMToken();
-    const unsubForeground = setupForegroundHandler();
-    const unsubOpen = setupNotificationOpenHandler();
-
-    await checkInitialNotification();
-
-    activeCleanup = () => {
-      unsubTokenRefresh();
-      unsubForeground();
-      unsubOpen();
-    };
-    return activeCleanup;
+    const granted = await hasNotificationPermission();
+    if (!granted) {
+      initPromise = null; // let a later enableNotifications() retry
+      return () => {};
+    }
+    return setupListenersAndToken();
   })();
 
   return initPromise;
+}
+
+/**
+ * Explicitly request notification permission (shows the OS dialog when the
+ * status is not-yet-determined) and, if granted, wire up listeners + token.
+ * Triggered from the onboarding priming screen so the prompt appears in
+ * context. Returns whether notifications are now enabled.
+ */
+export async function enableNotifications(): Promise<boolean> {
+  const granted = await requestNotificationPermission();
+  if (!granted) return false;
+  resetNotifications(); // clear any cached no-op init from sign-in
+  await initializeNotifications();
+  return true;
 }
 
 /** Tear down active listeners and clear the init guard so re-login re-inits. */

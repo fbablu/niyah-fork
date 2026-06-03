@@ -24,6 +24,8 @@ import { router } from "expo-router";
 
 import {
   requestNotificationPermission,
+  hasNotificationPermission,
+  enableNotifications,
   registerFCMToken,
   removeFCMToken,
   onTokenRefresh,
@@ -32,6 +34,7 @@ import {
   checkInitialNotification,
   setupNotificationOpenHandler,
   initializeNotifications,
+  resetNotifications,
 } from "../../../config/notifications";
 import {
   registerPushToken as cloudRegisterPushToken,
@@ -41,6 +44,7 @@ import {
 // Shared mock instance — getMessaging() always returns this same object.
 const sharedInstance: Record<string, jest.Mock> = {
   requestPermission: jest.fn(() => Promise.resolve(1)),
+  hasPermission: jest.fn(() => Promise.resolve(1)),
   getToken: jest.fn(() => Promise.resolve("mock-fcm-token")),
   getAPNSToken: jest.fn(() => Promise.resolve("mock-apns-token")),
   registerDeviceForRemoteMessages: jest.fn(() => Promise.resolve()),
@@ -55,8 +59,11 @@ describe("notifications", () => {
   const originalOS = Platform.OS;
 
   beforeEach(() => {
+    // Clear module-level init cache so each test exercises a fresh init.
+    resetNotifications();
     // Re-wire getMessaging() to return the shared instance with fresh mocks
     sharedInstance.requestPermission = jest.fn(() => Promise.resolve(1));
+    sharedInstance.hasPermission = jest.fn(() => Promise.resolve(1));
     sharedInstance.getToken = jest.fn(() => Promise.resolve("mock-fcm-token"));
     sharedInstance.getAPNSToken = jest.fn(() =>
       Promise.resolve("mock-apns-token"),
@@ -509,9 +516,44 @@ describe("notifications", () => {
 
   // ─── initializeNotifications ────────────────────────────────────────────────
 
+  describe("hasNotificationPermission", () => {
+    it("returns true when AUTHORIZED (no OS prompt)", async () => {
+      sharedInstance.hasPermission.mockResolvedValue(
+        AuthorizationStatus.AUTHORIZED,
+      );
+      const result = await hasNotificationPermission();
+      expect(result).toBe(true);
+      expect(sharedInstance.hasPermission).toHaveBeenCalled();
+      expect(sharedInstance.requestPermission).not.toHaveBeenCalled();
+    });
+
+    it("returns true when PROVISIONAL", async () => {
+      sharedInstance.hasPermission.mockResolvedValue(
+        AuthorizationStatus.PROVISIONAL,
+      );
+      expect(await hasNotificationPermission()).toBe(true);
+    });
+
+    it("returns false when NOT_DETERMINED (never prompts)", async () => {
+      sharedInstance.hasPermission.mockResolvedValue(
+        AuthorizationStatus.NOT_DETERMINED,
+      );
+      expect(await hasNotificationPermission()).toBe(false);
+      expect(sharedInstance.requestPermission).not.toHaveBeenCalled();
+    });
+
+    it("returns false when DENIED", async () => {
+      sharedInstance.hasPermission.mockResolvedValue(
+        AuthorizationStatus.DENIED,
+      );
+      expect(await hasNotificationPermission()).toBe(false);
+    });
+  });
+
   describe("initializeNotifications", () => {
-    it("returns cleanup function that calls all unsubs", async () => {
-      sharedInstance.requestPermission.mockResolvedValue(
+    it("wires up listeners WITHOUT prompting when permission already granted", async () => {
+      // Sign-in path: must check status, never show the OS dialog.
+      sharedInstance.hasPermission.mockResolvedValue(
         AuthorizationStatus.AUTHORIZED,
       );
       (getAuth as jest.Mock).mockReturnValue({
@@ -529,7 +571,9 @@ describe("notifications", () => {
 
       const cleanup = await initializeNotifications();
 
-      expect(sharedInstance.requestPermission).toHaveBeenCalled();
+      // Critical contract: the sign-in path NEVER calls requestPermission.
+      expect(sharedInstance.requestPermission).not.toHaveBeenCalled();
+      expect(sharedInstance.hasPermission).toHaveBeenCalled();
       expect(sharedInstance.onTokenRefresh).toHaveBeenCalled();
       expect(sharedInstance.onMessage).toHaveBeenCalled();
       expect(sharedInstance.onNotificationOpenedApp).toHaveBeenCalled();
@@ -542,19 +586,54 @@ describe("notifications", () => {
       expect(mockUnsubOpen).toHaveBeenCalled();
     });
 
-    it("returns noop when permission is denied", async () => {
-      const spy = jest.spyOn(console, "warn").mockImplementation(() => {});
-      sharedInstance.requestPermission.mockResolvedValue(
-        AuthorizationStatus.DENIED,
+    it("no-ops (no prompt, no listeners) when permission not yet granted", async () => {
+      sharedInstance.hasPermission.mockResolvedValue(
+        AuthorizationStatus.NOT_DETERMINED,
       );
 
       const cleanup = await initializeNotifications();
 
+      expect(sharedInstance.requestPermission).not.toHaveBeenCalled();
       expect(sharedInstance.onTokenRefresh).not.toHaveBeenCalled();
       expect(sharedInstance.onMessage).not.toHaveBeenCalled();
       expect(sharedInstance.onNotificationOpenedApp).not.toHaveBeenCalled();
 
       expect(() => cleanup()).not.toThrow();
+    });
+  });
+
+  describe("enableNotifications", () => {
+    it("prompts, and on grant wires up listeners + returns true", async () => {
+      // Priming-screen path: this is the ONLY place the OS dialog fires.
+      sharedInstance.requestPermission.mockResolvedValue(
+        AuthorizationStatus.AUTHORIZED,
+      );
+      sharedInstance.hasPermission.mockResolvedValue(
+        AuthorizationStatus.AUTHORIZED,
+      );
+      (getAuth as jest.Mock).mockReturnValue({
+        currentUser: { uid: "user-enable" },
+      });
+
+      const result = await enableNotifications();
+
+      expect(result).toBe(true);
+      expect(sharedInstance.requestPermission).toHaveBeenCalled();
+      expect(sharedInstance.onTokenRefresh).toHaveBeenCalled();
+      expect(sharedInstance.onMessage).toHaveBeenCalled();
+    });
+
+    it("returns false and skips setup when the user denies", async () => {
+      const spy = jest.spyOn(console, "warn").mockImplementation(() => {});
+      sharedInstance.requestPermission.mockResolvedValue(
+        AuthorizationStatus.DENIED,
+      );
+
+      const result = await enableNotifications();
+
+      expect(result).toBe(false);
+      expect(sharedInstance.onTokenRefresh).not.toHaveBeenCalled();
+      expect(sharedInstance.onMessage).not.toHaveBeenCalled();
       spy.mockRestore();
     });
   });

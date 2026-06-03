@@ -357,6 +357,7 @@ jest.mock("@react-native-firebase/messaging", () => {
   };
   const mockMessaging: any = jest.fn(() => ({
     requestPermission: jest.fn(() => Promise.resolve(1)),
+    hasPermission: jest.fn(() => Promise.resolve(1)),
     getToken: jest.fn(() => Promise.resolve("mock-fcm-token")),
     getAPNSToken: jest.fn(() => Promise.resolve("mock-apns-token")),
     registerDeviceForRemoteMessages: jest.fn(() => Promise.resolve()),
@@ -378,6 +379,7 @@ jest.mock("@react-native-firebase/messaging", () => {
     requestPermission: jest.fn((instance: any, permissions?: unknown) =>
       instance.requestPermission(permissions),
     ),
+    hasPermission: jest.fn((instance: any) => instance.hasPermission()),
     getToken: jest.fn((instance: any, options?: unknown) =>
       instance.getToken(options),
     ),
