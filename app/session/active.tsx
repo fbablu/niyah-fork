@@ -606,7 +606,11 @@ function ActiveSessionScreenInner() {
       footer={
         <>
           <Button
-            title={mode === "solo_quick" ? "End Session" : "Surrender"}
+            title={
+              mode === "solo_quick"
+                ? "End Session"
+                : `💸 End early — forfeit ${formatMoney(stakeAmount)}`
+            }
             onPress={() => {
               if (mode === "solo_quick") {
                 Alert.alert(
@@ -660,15 +664,15 @@ function ActiveSessionScreenInner() {
 
       {/* Timer */}
       <View style={styles.timerSection}>
+        {/* No pause: a staked session is end-only (pausing would free the
+            phone mid-commitment). The countdown just runs; the only exit is
+            finishing or the money-stamped "end early" control below. */}
         <Timer
           timeRemaining={timeRemaining}
           totalTime={totalDuration}
           size="medium"
           showProgress={true}
-          mode={isSoloStaked ? "scrubber" : "ring"}
-          onPauseRequested={
-            isSoloStaked ? () => setSurrenderModalVisible(true) : undefined
-          }
+          mode="ring"
         />
       </View>
 
