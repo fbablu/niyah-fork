@@ -14,12 +14,13 @@ diff --git a/build/target.js b/build/target.js
 index bc7f3f5551674af5ffbd9363e8c449b530bb5263..89bd28321459efca034f34e21d21f33a0b8cfbb2 100644
 --- a/build/target.js
 +++ b/build/target.js
-@@ -116,6 +116,11 @@ exports.TARGET_REGISTRY = {
+@@ -116,6 +116,12 @@ exports.TARGET_REGISTRY = {
          frameworks: ["DeviceActivity"],
          displayName: "Device Activity Monitor",
      },
 +    "device-activity-report": {
-+        extensionPointIdentifier: "com.apple.deviceactivity.report-extension",
++        extensionPointIdentifier: "com.apple.deviceactivityui.report-extension",
++        productType: "com.apple.product-type.extensionkit-extension",
 +        frameworks: ["DeviceActivity", "SwiftUI", "FamilyControls"],
 +        displayName: "Device Activity Report",
 +    },

@@ -14,7 +14,7 @@ overrides:
   uuid: ^11.1.1
 
 patchedDependencies:
-  '@bacons/apple-targets@4.0.7': cfd10bf226b70cfd9be434275b2282c445647666d78a63fdf0a3e1d575786761
+  '@bacons/apple-targets@4.0.7': e6fb6b94bcda0abf77420ac9b957ddc0dd4e2258a353b35178f34b3f7ea128e3
 
 importers:
 
@@ -173,7 +173,7 @@ importers:
         version: 7.29.7
       '@bacons/apple-targets':
         specifier: ^4.0.7
-        version: 4.0.7(patch_hash=cfd10bf226b70cfd9be434275b2282c445647666d78a63fdf0a3e1d575786761)(expo@54.0.35)
+        version: 4.0.7(patch_hash=e6fb6b94bcda0abf77420ac9b957ddc0dd4e2258a353b35178f34b3f7ea128e3)(expo@54.0.35)
       '@eslint/js':
         specifier: ^9.39.4
         version: 9.39.4
@@ -7656,7 +7656,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@bacons/apple-targets@4.0.7(patch_hash=cfd10bf226b70cfd9be434275b2282c445647666d78a63fdf0a3e1d575786761)(expo@54.0.35)':
+  '@bacons/apple-targets@4.0.7(patch_hash=e6fb6b94bcda0abf77420ac9b957ddc0dd4e2258a353b35178f34b3f7ea128e3)(expo@54.0.35)':
     dependencies:
       '@bacons/xcode': 1.0.0-alpha.32
       '@react-native/normalize-colors': 0.79.7
