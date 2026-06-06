@@ -19,6 +19,7 @@ export default function AuthLayout() {
       <Stack.Screen name="verify-phone" />
       <Stack.Screen name="check-email" />
       <Stack.Screen name="profile-setup" />
+      <Stack.Screen name="blob-maker" />
       <Stack.Screen name="intake" />
       <Stack.Screen name="how-it-works" />
       <Stack.Screen name="screen-time-math" />

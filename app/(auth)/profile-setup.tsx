@@ -92,8 +92,8 @@ export default function ProfileSetupScreen() {
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Route to intake (goal questions) before Screen Time setup
-      router.replace("/(auth)/intake" as never);
+      // Route to the Blob Maker (dice-roll avatar), then intake (goal questions)
+      router.replace("/(auth)/blob-maker" as never);
     } catch (e: unknown) {
       const err = e as { message?: string };
       logger.error("Profile setup error:", e);
