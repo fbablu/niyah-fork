@@ -19,6 +19,7 @@ import {
   getSavedAppSelection,
   onAuthorizationChange,
 } from "../../src/config/screentime";
+import { logEvent } from "../../src/utils/analytics";
 
 // HARD GATE (Opal-style): Screen Time is core to Niyah, so onboarding requires
 // it before reaching the app — there is no "Skip" here, and app/index.tsx
@@ -84,12 +85,15 @@ export default function ScreenTimeSetupScreen() {
         setIsAuthorized(true);
         setAuthDenied(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        logEvent("screentime_granted");
       } else {
         // Denied — iOS won't re-prompt, so route the user to Settings.
         setAuthDenied(true);
+        logEvent("screentime_denied", { reason: "denied" });
       }
     } catch {
       setAuthDenied(true);
+      logEvent("screentime_denied", { reason: "error" });
     } finally {
       setIsRequesting(false);
     }

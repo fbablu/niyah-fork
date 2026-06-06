@@ -237,6 +237,9 @@ export default function RootLayout() {
         /^[a-zA-Z0-9]{1,128}$/.test(referrerUid)
       ) {
         await SecureStore.setItemAsync(PENDING_REFERRAL_KEY, referrerUid);
+        // Pre-auth opens are silently dropped by rules (create requires
+        // auth) — invite_redeemed at profile-setup covers the new-user leg.
+        logEvent("invite_opened", { referrerUid });
       }
     };
 

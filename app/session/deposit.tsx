@@ -378,6 +378,10 @@ function DepositScreenInner() {
       });
 
       if (initError) {
+        logEvent("deposit_failed", {
+          reason: "init_failed",
+          amountCents: finalAmount,
+        });
         Alert.alert(
           "Payment Error",
           getErrorMessage(initError, "We couldn't open payments right now."),
@@ -389,6 +393,10 @@ function DepositScreenInner() {
 
       if (presentError) {
         if (!isUserCancellationError(presentError)) {
+          logEvent("deposit_failed", {
+            reason: "payment_failed",
+            amountCents: finalAmount,
+          });
           Alert.alert(
             "Payment Failed",
             getErrorMessage(
@@ -396,6 +404,11 @@ function DepositScreenInner() {
               "We couldn't complete your payment. Please try again.",
             ),
           );
+        } else {
+          logEvent("deposit_failed", {
+            reason: "cancelled",
+            amountCents: finalAmount,
+          });
         }
         return;
       }
@@ -421,6 +434,10 @@ function DepositScreenInner() {
       logger.error("Deposit error:", err);
       // If payment sheet succeeded but verify failed, save for retry
       if (pendingVerifyId) {
+        logEvent("deposit_failed", {
+          reason: "verify_failed",
+          amountCents: finalAmount,
+        });
         Alert.alert(
           "Verification Failed",
           "Your payment went through but we couldn't verify it. Tap Retry to try again — you won't be charged twice.",
@@ -430,6 +447,10 @@ function DepositScreenInner() {
           ],
         );
       } else {
+        logEvent("deposit_failed", {
+          reason: "error",
+          amountCents: finalAmount,
+        });
         Alert.alert("Deposit Failed", getDepositErrorMessage(err));
       }
       // Resync wallet from Firestore in case server credited but client missed it

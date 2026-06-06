@@ -19,6 +19,7 @@ import {
   PENDING_JOIN_KEY,
 } from "../../src/constants/config";
 import { logger } from "../../src/utils/logger";
+import { logEvent } from "../../src/utils/analytics";
 
 export default function ProfileSetupScreen() {
   const Colors = useColors();
@@ -83,6 +84,9 @@ export default function ProfileSetupScreen() {
       if (referrerUid) {
         await applyReferralBonus(referrerUid);
         await SecureStore.deleteItemAsync(PENDING_REFERRAL_KEY);
+        // Post-auth pairing for invite_opened: the new-user leg of the
+        // invite funnel (their pre-auth open was rules-denied).
+        logEvent("invite_redeemed", { referrerUid });
       }
 
       // A brand-new user has no pending group invite to act on (cold join by

@@ -1,8 +1,20 @@
-import { Stack } from "expo-router";
+import { useEffect } from "react";
+import { Stack, usePathname } from "expo-router";
 import { useColors } from "../../src/hooks/useColors";
+import { logEvent } from "../../src/utils/analytics";
 
 export default function AuthLayout() {
   const colors = useColors();
+  const pathname = usePathname();
+
+  // Onboarding funnel: one event per step reached. Pre-auth steps (welcome →
+  // verify) are silently dropped by rules (analytics_events create requires
+  // auth) — accepted; the post-auth run (profile-setup → … →
+  // notifications-setup) is the drop-off signal the beta needs.
+  useEffect(() => {
+    const step = pathname.replace(/^\//, "");
+    if (step) logEvent("onboarding_step_reached", { step });
+  }, [pathname]);
 
   return (
     <Stack
