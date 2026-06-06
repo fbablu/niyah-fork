@@ -1,3 +1,5 @@
+import type { BlobAvatarConfig } from "../constants/blobAvatar";
+
 export type CadenceType =
   | "test"
   | "focus"
@@ -36,11 +38,7 @@ export interface User {
   // Reputation/Social Credit
   reputation: UserReputation;
   profileImage?: string;
-  blobAvatar?: {
-    colorPreset: "sunset" | "ocean" | "forest" | "berry" | "lemon" | "coral";
-    shapePreset: "peach" | "wave" | "petal";
-    eyesPreset: "classic" | "happy" | "wink" | "sleepy" | "surprised";
-  };
+  blobAvatar?: BlobAvatarConfig;
   phoneNumber?: string;
   authProvider?: "email" | "google" | "apple" | "phone";
   // Firebase-backed profile

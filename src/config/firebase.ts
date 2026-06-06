@@ -19,6 +19,7 @@ import {
   signInWithPhoneNumber as rnfbSignInWithPhoneNumber,
 } from "@react-native-firebase/auth";
 import type { FirebaseAuthTypes } from "@react-native-firebase/auth";
+import type { BlobAvatarConfig } from "../constants/blobAvatar";
 import {
   getFirestore,
   collection,
@@ -269,11 +270,7 @@ export const saveUserProfile = async (
     email?: string;
     phone?: string;
     profileImage?: string;
-    blobAvatar?: {
-      colorPreset: "sunset" | "ocean" | "forest" | "berry" | "lemon" | "coral";
-      shapePreset: "peach" | "wave" | "petal";
-      eyesPreset: "classic" | "happy" | "wink" | "sleepy" | "surprised";
-    };
+    blobAvatar?: BlobAvatarConfig;
     authProvider: "google" | "apple" | "email" | "phone";
   },
 ): Promise<void> => {

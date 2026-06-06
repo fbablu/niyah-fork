@@ -151,7 +151,7 @@ function BlockedScreenInner() {
           <View style={styles.avatarGlow} />
           <Animated.View style={{ transform: [{ scale: pulse }] }}>
             {blob ? (
-              <BlobAvatar size={140} config={blob} />
+              <BlobAvatar size={140} config={blob} seed={user?.id} />
             ) : (
               <View style={styles.avatarFallback} />
             )}

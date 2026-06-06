@@ -19,23 +19,10 @@ import {
   BLOB_AVATAR_EYES,
   BLOB_AVATAR_SHAPES,
   BLOB_DISPLAY_LABELS,
+  BLOB_PALETTES,
   generateBlobAvatarPreset,
-  type BlobAvatarColorPreset,
   type BlobAvatarConfig,
 } from "../../constants/blobAvatar";
-
-/** Gradient circle swatch used for color selection */
-const COLOR_SWATCH_DATA: Record<
-  BlobAvatarColorPreset,
-  { start: string; end: string }
-> = {
-  sunset: { start: "#F0A090", end: "#E07A5F" },
-  ocean: { start: "#64BFEE", end: "#329DD8" },
-  forest: { start: "#5CB88A", end: "#40916C" },
-  berry: { start: "#D38ECF", end: "#A65EA1" },
-  lemon: { start: "#F5D76E", end: "#E8B830" },
-  coral: { start: "#FF8A80", end: "#E05555" },
-};
 
 interface ProfileHeaderProps {
   user: User | null;
@@ -84,7 +71,7 @@ export function ProfileHeader({
 
   return (
     <View style={styles.header}>
-      <BlobAvatar size={92} config={avatarConfig} />
+      <BlobAvatar size={92} config={avatarConfig} seed={user?.id} animated />
       <Text style={styles.name}>{user?.name || "?"}</Text>
       <Text style={styles.email}>{user?.email || ""}</Text>
 
@@ -142,11 +129,14 @@ export function ProfileHeader({
           <View style={styles.optionsRow}>
             {BLOB_AVATAR_COLORS.map((option) => {
               const selected = avatarConfig.colorPreset === option;
-              const swatch = COLOR_SWATCH_DATA[option];
+              const swatch = BLOB_PALETTES[option];
               return (
                 <Pressable
                   key={option}
-                  style={styles.swatchWrapper}
+                  style={({ pressed }) => [
+                    styles.swatchWrapper,
+                    pressed && styles.optionPressed,
+                  ]}
                   onPress={() => updateBlobAvatar("colorPreset", option)}
                 >
                   <View
@@ -200,7 +190,10 @@ export function ProfileHeader({
               return (
                 <Pressable
                   key={option}
-                  style={styles.previewWrapper}
+                  style={({ pressed }) => [
+                    styles.previewWrapper,
+                    pressed && styles.optionPressed,
+                  ]}
                   onPress={() => updateBlobAvatar("shapePreset", option)}
                 >
                   <View
@@ -218,6 +211,7 @@ export function ProfileHeader({
                         ...avatarConfig,
                         shapePreset: option,
                       }}
+                      seed={user?.id}
                     />
                   </View>
                   <Text
@@ -241,7 +235,10 @@ export function ProfileHeader({
               return (
                 <Pressable
                   key={option}
-                  style={styles.previewWrapper}
+                  style={({ pressed }) => [
+                    styles.previewWrapper,
+                    pressed && styles.optionPressed,
+                  ]}
                   onPress={() => updateBlobAvatar("eyesPreset", option)}
                 >
                   <View
@@ -259,6 +256,7 @@ export function ProfileHeader({
                         ...avatarConfig,
                         eyesPreset: option,
                       }}
+                      seed={user?.id}
                     />
                   </View>
                   <Text
@@ -424,5 +422,8 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "center",
       borderWidth: 2,
       borderColor: "transparent",
+    },
+    optionPressed: {
+      transform: [{ scale: 0.92 }],
     },
   });

@@ -629,7 +629,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         email: firebaseUser.email || "",
         phone: data.phone,
         profileImage: undefined,
-        blobAvatar: generateBlobAvatarPreset(firebaseUser.uid),
+        // "unique" = the uid-seeded procedural blob — the exact blob the
+        // Blob Maker screen (next step) presents, so if onboarding is
+        // interrupted there the user keeps the blob they actually saw.
+        blobAvatar: {
+          ...generateBlobAvatarPreset(firebaseUser.uid),
+          shapePreset: "unique" as const,
+        },
         authProvider,
       });
 
