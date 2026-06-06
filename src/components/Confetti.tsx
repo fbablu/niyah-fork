@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { View, StyleSheet, Animated, Dimensions } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { useColors } from "../hooks/useColors";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -99,24 +100,35 @@ interface ConfettiProps {
   colors?: string[];
 }
 
-export const Confetti: React.FC<ConfettiProps> = ({ count = 50, colors }) => {
+const ConfettiBase: React.FC<ConfettiProps> = ({ count = 50, colors }) => {
   const Colors = useColors();
-  const resolvedColors = colors ?? [
-    Colors.primary,
-    Colors.primaryLight,
-    Colors.accentGold, // Dark goldenrod
-    Colors.accentClay, // Deep clay red
-    "#2A6F97", // Deep teal-blue
-    Colors.accent, // Deep plum
-    "#8B6914", // Dark amber
-  ];
+  const reducedMotion = useReducedMotion();
 
-  const pieces = Array.from({ length: count }, (_, i) => ({
-    id: i,
-    delay: Math.random() * 500,
-    startX: Math.random() * SCREEN_WIDTH,
-    color: resolvedColors[Math.floor(Math.random() * resolvedColors.length)],
-  }));
+  // Compute pieces ONCE per (count/colors/theme), not on every parent re-render.
+  // Otherwise a parent re-render (e.g. a money-overlay count-up tick) reshuffles
+  // every piece's random delay/startX and restarts all the fall animations
+  // mid-celebration — a visible jump, not just wasted work.
+  const pieces = React.useMemo(() => {
+    const resolvedColors = colors ?? [
+      Colors.primary,
+      Colors.primaryLight,
+      Colors.accentGold, // Dark goldenrod
+      Colors.accentClay, // Deep clay red
+      "#2A6F97", // Deep teal-blue
+      Colors.accent, // Deep plum
+      "#8B6914", // Dark amber
+    ];
+
+    return Array.from({ length: count }, (_, i) => ({
+      id: i,
+      delay: Math.random() * 500,
+      startX: Math.random() * SCREEN_WIDTH,
+      color: resolvedColors[Math.floor(Math.random() * resolvedColors.length)],
+    }));
+  }, [count, colors, Colors]);
+
+  // Respect the OS reduce-motion setting — suppress the falling confetti.
+  if (reducedMotion) return null;
 
   return (
     <View style={styles.container} pointerEvents="none">
@@ -131,6 +143,9 @@ export const Confetti: React.FC<ConfettiProps> = ({ count = 50, colors }) => {
     </View>
   );
 };
+
+export const Confetti = React.memo(ConfettiBase);
+Confetti.displayName = "Confetti";
 
 const styles = StyleSheet.create({
   container: {

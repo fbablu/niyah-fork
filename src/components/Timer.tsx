@@ -1,6 +1,12 @@
-import React, { useRef, useEffect, useMemo } from "react";
-import { View, Text, StyleSheet, Animated, Pressable } from "react-native";
+import React, { useEffect, useMemo } from "react";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedProps,
+  withTiming,
+} from "react-native-reanimated";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 import { Typography, Spacing, Radius, Font } from "../constants/colors";
@@ -31,17 +37,14 @@ export const Timer: React.FC<TimerProps> = ({
   onPauseRequested,
 }) => {
   const Colors = useColors();
-  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const opacity = useSharedValue(0);
+  const containerStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
   const isLow = timeRemaining < 60000; // Less than 1 minute
   const isCritical = timeRemaining < 10000; // Less than 10 seconds
 
   useEffect(() => {
-    Animated.timing(opacityAnim, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
-  }, [opacityAnim]);
+    opacity.value = withTiming(1, { duration: 400 });
+  }, [opacity]);
 
   const getTimerSize = () => {
     switch (size) {
@@ -60,15 +63,17 @@ export const Timer: React.FC<TimerProps> = ({
   const radius = (timerSize.ring - timerSize.stroke) / 2;
   const circumference = 2 * Math.PI * radius;
 
-  // useNativeDriver must be false for SVG props (JS thread only).
-  const offsetAnim = useRef(new Animated.Value(0)).current;
+  // Drive the SVG ring offset on the UI thread via Reanimated (was JS-thread
+  // Animated with useNativeDriver:false, the only option for SVG props before).
+  const offset = useSharedValue(0);
   useEffect(() => {
-    Animated.timing(offsetAnim, {
-      toValue: circumference * (1 - progress),
-      duration: 950, // slightly under 1 second so it completes before the next tick
-      useNativeDriver: false,
-    }).start();
-  }, [circumference, offsetAnim, progress]);
+    offset.value = withTiming(circumference * (1 - progress), {
+      duration: 950, // slightly under 1s so it lands before the next tick
+    });
+  }, [circumference, offset, progress]);
+  const ringAnimatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: offset.value,
+  }));
 
   const getColor = () => {
     if (isCritical) return Colors.danger;
@@ -203,11 +208,7 @@ export const Timer: React.FC<TimerProps> = ({
     )}%` as `${number}%`;
     return (
       <Animated.View
-        style={[
-          styles.container,
-          styles.scrubberContainer,
-          { opacity: opacityAnim },
-        ]}
+        style={[styles.container, styles.scrubberContainer, containerStyle]}
       >
         {showLabel && <Text style={styles.label}>Focus session</Text>}
         <Text style={[styles.scrubberCenterTime, { color: getColor() }]}>
@@ -250,7 +251,7 @@ export const Timer: React.FC<TimerProps> = ({
   }
 
   return (
-    <Animated.View style={[styles.container, { opacity: opacityAnim }]}>
+    <Animated.View style={[styles.container, containerStyle]}>
       {showProgress && (
         <View
           style={[
@@ -282,7 +283,7 @@ export const Timer: React.FC<TimerProps> = ({
               strokeWidth={timerSize.stroke}
               fill="transparent"
               strokeDasharray={circumference}
-              strokeDashoffset={offsetAnim}
+              animatedProps={ringAnimatedProps}
               strokeLinecap="round"
               rotation="-90"
               origin={`${timerSize.ring / 2}, ${timerSize.ring / 2}`}

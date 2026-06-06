@@ -23,7 +23,7 @@ import {
   type ThemeColors,
 } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
-import { withErrorBoundary } from "../../src/components";
+import { Skeleton, withErrorBoundary } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
@@ -500,10 +500,10 @@ const PartnerRow: React.FC<{
 
 // ─── Standings row (computed group leaderboard) ───────────────────────────────
 
-const StandingRow: React.FC<{ rank: number; entry: GroupLeaderboardEntry }> = ({
-  rank,
-  entry,
-}) => {
+const StandingRowBase: React.FC<{
+  rank: number;
+  entry: GroupLeaderboardEntry;
+}> = ({ rank, entry }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const ratePct = Math.round(entry.completionRate * 100);
@@ -531,6 +531,13 @@ const StandingRow: React.FC<{ rank: number; entry: GroupLeaderboardEntry }> = ({
   );
 };
 
+// Memoized: StandingRow takes only primitive/stable props (rank + entry), so a
+// re-render that doesn't change a row's data skips it. (FollowingRow/PartnerRow
+// also want memo, but need their inline-arrow handlers stabilized first — see
+// docs/overnight-2026-06-05/plan.md "deferred: friends row memoization".)
+const StandingRow = React.memo(StandingRowBase);
+StandingRow.displayName = "StandingRow";
+
 // ─── Discriminated union for FlatList items ──────────────────────────────────
 
 type FollowingItem = { type: "following"; uid: string; profile: PublicProfile };
@@ -554,7 +561,7 @@ function FriendsScreenInner() {
     tab?: FriendsTab;
   }>();
   const { user } = useAuthStore();
-  const { partners } = usePartnerStore();
+  const partners = usePartnerStore((s) => s.partners);
   const {
     following,
     profiles,
@@ -1119,8 +1126,23 @@ function FriendsScreenInner() {
   const listEmpty = useMemo(() => {
     if (tab === "standings" && leaderboardLoading) {
       return (
-        <View style={styles.emptyState}>
-          <ActivityIndicator color={Colors.primaryLight} />
+        <View style={{ gap: Spacing.sm }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <View key={`standing-skeleton-${i}`} style={styles.row}>
+              <Skeleton width={24} height={18} radius={5} />
+              <Skeleton width={44} height={44} radius={22} />
+              <View style={styles.rowInfo}>
+                <Skeleton width="55%" height={15} radius={6} />
+                <Skeleton
+                  width="40%"
+                  height={11}
+                  radius={5}
+                  style={{ marginTop: 6 }}
+                />
+              </View>
+              <Skeleton width={36} height={16} radius={6} />
+            </View>
+          ))}
         </View>
       );
     }
@@ -1135,7 +1157,7 @@ function FriendsScreenInner() {
         </Text>
       </View>
     );
-  }, [styles, tab, leaderboardLoading, Colors]);
+  }, [styles, tab, leaderboardLoading]);
 
   if (isLoading) {
     return (

@@ -9,6 +9,8 @@ export { Confetti } from "./Confetti";
 export { MoneySuccessOverlay } from "./MoneySuccessOverlay";
 export { PeachAvatar } from "./PeachAvatar";
 export { BlobAvatar } from "./BlobAvatar";
+export { MorphingBlob } from "./MorphingBlob";
+export { Skeleton } from "./Skeleton";
 export { AuthScreenScaffold } from "./AuthScreenScaffold";
 export { SessionScreenScaffold } from "./SessionScreenScaffold";
 export { LegalContentView } from "./LegalContentView";

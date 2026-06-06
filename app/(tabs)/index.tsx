@@ -1,13 +1,12 @@
-import React, { useRef, useMemo, useEffect, useState } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import BlobsBackground from "../../src/components/BlobsBackground";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Animated,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useRouter, type RelativePathString } from "expo-router";
@@ -19,6 +18,7 @@ import {
   Balance,
   Button,
   BlobAvatar,
+  Skeleton,
   withErrorBoundary,
 } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
@@ -44,18 +44,19 @@ const ActionButton: React.FC<ActionButtonProps> = ({
   variant = "primary",
 }) => {
   const Colors = useColors();
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const scale = useSharedValue(1);
 
   const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.95,
-      useNativeDriver: true,
-    }).start();
+    scale.value = withSpring(0.95, { damping: 15, stiffness: 220 });
   };
 
   const handlePressOut = () => {
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
+    scale.value = withSpring(1, { damping: 15, stiffness: 220 });
   };
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
 
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -98,7 +99,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({
         style={[
           styles.actionButton,
           variant === "secondary" && styles.actionButtonSecondary,
-          { transform: [{ scale: scaleAnim }] },
+          animatedStyle,
         ]}
       >
         <Text
@@ -118,9 +119,15 @@ interface StatCardProps {
   value: string | number;
   label: string;
   color?: string;
+  loading?: boolean;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ value, label, color }) => {
+const StatCardBase: React.FC<StatCardProps> = ({
+  value,
+  label,
+  color,
+  loading = false,
+}) => {
   const Colors = useColors();
   const styles = useMemo(
     () =>
@@ -149,48 +156,61 @@ const StatCard: React.FC<StatCardProps> = ({ value, label, color }) => {
 
   // Pop the value in on mount and re-pop whenever it changes (e.g. the streak
   // ticks up after a completed session) so the stat feels alive, not static.
-  const scale = useRef(new Animated.Value(0.8)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
+  const scale = useSharedValue(0.8);
+  const opacity = useSharedValue(0);
   useEffect(() => {
-    scale.setValue(0.8);
-    Animated.parallel([
-      Animated.spring(scale, {
-        toValue: 1,
-        tension: 120,
-        friction: 6,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    scale.value = 0.8;
+    scale.value = withSpring(1, { damping: 9, stiffness: 140 });
+    opacity.value = withTiming(1, { duration: 300 });
   }, [value, scale, opacity]);
+  const valueAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
 
   return (
     <View style={styles.statCard}>
-      <Animated.Text
-        style={[
-          styles.statValue,
-          color ? { color } : null,
-          { opacity, transform: [{ scale }] },
-        ]}
-      >
-        {value}
-      </Animated.Text>
+      {loading ? (
+        <Skeleton
+          width={44}
+          height={24}
+          radius={6}
+          style={{ marginVertical: 2 }}
+        />
+      ) : (
+        <Animated.Text
+          style={[
+            styles.statValue,
+            color ? { color } : null,
+            valueAnimatedStyle,
+          ]}
+        >
+          {value}
+        </Animated.Text>
+      )}
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 };
+
+// Memoized: stat cards take only primitive props, so a dashboard re-render that
+// doesn't change a card's value/label/color/loading skips re-rendering it.
+const StatCard = React.memo(StatCardBase);
+StatCard.displayName = "StatCard";
 
 function DashboardScreenInner() {
   const Colors = useColors();
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const balance = useWalletStore((state) => state.balance);
-  const { activeGroupSession, groupSessionHistory, pendingInvites } =
-    useGroupSessionStore();
+  const isWalletHydrated = useWalletStore((state) => state.isHydrated);
+  // Granular selectors: the dashboard no longer re-renders on every unrelated
+  // group-store mutation, only when one of these three fields changes.
+  const activeGroupSession = useGroupSessionStore((s) => s.activeGroupSession);
+  const groupSessionHistory = useGroupSessionStore(
+    (s) => s.groupSessionHistory,
+  );
+  const pendingInvites = useGroupSessionStore((s) => s.pendingInvites);
   const activeSoloSession = useSessionStore((s) => s.currentSession);
   const scheduledTemplates = useScheduleStore((s) => s.templates);
 
@@ -565,6 +585,7 @@ function DashboardScreenInner() {
                 user?.blobAvatar ??
                 generateBlobAvatarPreset(user?.id || "guest")
               }
+              seed={user?.id || "guest"}
               onPress={() => router.push("/(tabs)/profile")}
             />
           </View>
@@ -572,7 +593,11 @@ function DashboardScreenInner() {
           {/* Balance Card */}
           <Card style={styles.balanceCard} variant="elevated">
             <Text style={styles.balanceLabel}>Total Balance</Text>
-            <Balance amount={balance} size="display" />
+            {isWalletHydrated ? (
+              <Balance amount={balance} size="display" />
+            ) : (
+              <Skeleton width={170} height={56} radius={12} />
+            )}
             <View style={styles.balanceChange}>
               <Text
                 style={[
@@ -931,14 +956,24 @@ function DashboardScreenInner() {
                 value={user?.currentStreak || 0}
                 label="Current Streak"
                 color={user?.currentStreak ? Colors.primary : undefined}
+                loading={!user}
               />
               <StatCard
                 value={formatMoney(totalEarnings, false)}
                 label="Total Earned"
                 color={totalEarnings > 0 ? Colors.gain : undefined}
+                loading={!user}
               />
-              <StatCard value={`${completionRate}%`} label="Success Rate" />
-              <StatCard value={user?.longestStreak || 0} label="Best Streak" />
+              <StatCard
+                value={`${completionRate}%`}
+                label="Success Rate"
+                loading={!user}
+              />
+              <StatCard
+                value={user?.longestStreak || 0}
+                label="Best Streak"
+                loading={!user}
+              />
             </View>
           </View>
 

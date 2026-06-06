@@ -59,9 +59,15 @@ function ProfileScreenInner() {
   const { theme, toggleTheme } = useThemeStore();
   const router = useRouter();
   const { user, logout, setBlobAvatar, updateUser } = useAuthStore();
-  const { balance, transactions, pendingWithdrawal } = useWalletStore();
-  const { partners } = usePartnerStore();
-  const { following, loadMyFollows } = useSocialStore();
+  // Granular field selectors so an unrelated store mutation doesn't re-render
+  // the whole profile tab (each selector returns a stable single field).
+  const balance = useWalletStore((s) => s.balance);
+  const transactions = useWalletStore((s) => s.transactions);
+  const pendingWithdrawal = useWalletStore((s) => s.pendingWithdrawal);
+  const isWalletHydrated = useWalletStore((s) => s.isHydrated);
+  const partners = usePartnerStore((s) => s.partners);
+  const following = useSocialStore((s) => s.following);
+  const loadMyFollows = useSocialStore((s) => s.loadMyFollows);
 
   useEffect(() => {
     if (user?.id) {
@@ -325,7 +331,10 @@ function ProfileScreenInner() {
           </View>
         </View>
 
-        <TransactionHistory transactions={transactions} />
+        <TransactionHistory
+          transactions={transactions}
+          loading={!isWalletHydrated}
+        />
 
         {/* Settings */}
         <View style={styles.section}>

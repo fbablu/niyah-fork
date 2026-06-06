@@ -13,12 +13,14 @@ import { formatMoney } from "../../src/utils/format";
 function SessionTabScreenInner() {
   const Colors = useColors();
   const router = useRouter();
-  const {
-    activeGroupSession,
-    pendingInvites,
-    activeGroupSessions,
-    subscribeToSession,
-  } = useGroupSessionStore();
+  // Granular selectors so the session tab only re-renders when one of these
+  // fields changes, not on every unrelated group-store mutation.
+  const activeGroupSession = useGroupSessionStore((s) => s.activeGroupSession);
+  const pendingInvites = useGroupSessionStore((s) => s.pendingInvites);
+  const activeGroupSessions = useGroupSessionStore(
+    (s) => s.activeGroupSessions,
+  );
+  const subscribeToSession = useGroupSessionStore((s) => s.subscribeToSession);
   const userId = useAuthStore((state) => state.user?.id);
   const activePartner = activeGroupSession?.participants.find(
     (p) => p.userId !== userId,

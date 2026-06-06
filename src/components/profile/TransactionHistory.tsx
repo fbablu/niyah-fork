@@ -8,6 +8,7 @@ import {
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
 import { Card } from "../Card";
+import { Skeleton } from "../Skeleton";
 import { formatMoney, formatRelativeTime } from "../../utils/format";
 import type { Transaction } from "../../types";
 
@@ -15,24 +16,46 @@ interface TransactionHistoryProps {
   transactions: Transaction[];
   /** Max number of transactions to show (default: 5) */
   limit?: number;
+  /** Show placeholder skeleton rows while the wallet hydrates. */
+  loading?: boolean;
 }
 
 export function TransactionHistory({
   transactions,
   limit = 5,
+  loading = false,
 }: TransactionHistoryProps) {
   const Colors = useColors();
   const styles = React.useMemo(() => makeStyles(Colors), [Colors]);
+  const visible = React.useMemo(
+    () => transactions.slice(0, limit),
+    [transactions, limit],
+  );
 
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Transaction History</Text>
-      {transactions.length === 0 ? (
+      {loading && transactions.length === 0 ? (
+        Array.from({ length: 4 }).map((_, i) => (
+          <View key={`tx-skeleton-${i}`} style={styles.transactionRow}>
+            <View style={styles.transactionInfo}>
+              <Skeleton width="55%" height={15} radius={6} />
+              <Skeleton
+                width="32%"
+                height={11}
+                radius={5}
+                style={{ marginTop: 6 }}
+              />
+            </View>
+            <Skeleton width={64} height={16} radius={6} />
+          </View>
+        ))
+      ) : transactions.length === 0 ? (
         <Card style={styles.emptyCard}>
           <Text style={styles.emptyText}>No transactions yet</Text>
         </Card>
       ) : (
-        transactions.slice(0, limit).map((tx) => (
+        visible.map((tx) => (
           <View key={tx.id} style={styles.transactionRow}>
             <View style={styles.transactionInfo}>
               <Text style={styles.transactionDesc}>{tx.description}</Text>
