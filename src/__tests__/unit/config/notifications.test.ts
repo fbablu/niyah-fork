@@ -35,7 +35,10 @@ import {
   setupNotificationOpenHandler,
   initializeNotifications,
   resetNotifications,
+  scheduleRetentionReminder,
+  cancelRetentionReminder,
 } from "../../../config/notifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   registerPushToken as cloudRegisterPushToken,
   removePushToken as cloudRemovePushToken,
@@ -635,6 +638,79 @@ describe("notifications", () => {
       expect(sharedInstance.onTokenRefresh).not.toHaveBeenCalled();
       expect(sharedInstance.onMessage).not.toHaveBeenCalled();
       spy.mockRestore();
+    });
+  });
+
+  // ─── Retention reminders ────────────────────────────────────────────────────
+
+  describe("scheduleRetentionReminder", () => {
+    const getNotifee = () =>
+      jest.requireMock("@notifee/react-native").default as {
+        createTriggerNotification: jest.Mock;
+        cancelTriggerNotification: jest.Mock;
+      };
+
+    beforeEach(() => {
+      const n = getNotifee();
+      n.createTriggerNotification.mockClear();
+      n.cancelTriggerNotification.mockClear();
+      (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+      (AsyncStorage.setItem as jest.Mock).mockResolvedValue(undefined);
+    });
+
+    it("schedules a timestamp trigger with a stable per-reason id", async () => {
+      const fireAt = new Date(Date.now() + 22 * 60 * 60 * 1000);
+      const ok = await scheduleRetentionReminder({
+        reason: "streak_at_risk",
+        fireAt,
+        title: "Keep your streak alive",
+        body: "Do a session today.",
+      });
+
+      expect(ok).toBe(true);
+      const n = getNotifee();
+      expect(n.createTriggerNotification).toHaveBeenCalledTimes(1);
+      const [notif, trigger] = n.createTriggerNotification.mock.calls[0];
+      expect(notif.id).toBe("niyah-retention-streak_at_risk");
+      expect(notif.data.type).toBe("streak_at_risk");
+      expect(trigger.timestamp).toBe(fireAt.getTime());
+    });
+
+    it("no-ops for a fire time in the past", async () => {
+      const ok = await scheduleRetentionReminder({
+        reason: "low_balance",
+        fireAt: new Date(Date.now() - 1000),
+        title: "x",
+        body: "y",
+      });
+
+      expect(ok).toBe(false);
+      expect(getNotifee().createTriggerNotification).not.toHaveBeenCalled();
+    });
+
+    it("dedups a second reminder of the same reason on the same UTC day", async () => {
+      const fireAt = new Date(Date.now() + 22 * 60 * 60 * 1000);
+      const day = fireAt.toISOString().slice(0, 10);
+      (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
+        JSON.stringify({ streak_at_risk: day }),
+      );
+
+      const ok = await scheduleRetentionReminder({
+        reason: "streak_at_risk",
+        fireAt,
+        title: "x",
+        body: "y",
+      });
+
+      expect(ok).toBe(false);
+      expect(getNotifee().createTriggerNotification).not.toHaveBeenCalled();
+    });
+
+    it("cancelRetentionReminder cancels by the reason's stable id", async () => {
+      await cancelRetentionReminder("reengagement");
+      expect(getNotifee().cancelTriggerNotification).toHaveBeenCalledWith(
+        "niyah-retention-reengagement",
+      );
     });
   });
 });

@@ -14,6 +14,10 @@ import {
 import { SCHEDULED_STAKE_ENABLED } from "../constants/config";
 import { generateId } from "../utils/id";
 import { logger } from "../utils/logger";
+import {
+  scheduleRetentionReminder,
+  cancelRetentionReminder,
+} from "../config/notifications";
 
 /**
  * Recurring "Opal-style" scheduled focus blocks.
@@ -29,6 +33,29 @@ import { logger } from "../utils/logger";
  */
 
 const activityNameFor = (id: string) => `niyah_sched_${id}`;
+
+const SCHEDULE_REMINDER_LEAD_MIN = 5;
+
+/** Fire-and-forget: schedule a "starts soon" local reminder for the next
+ *  occurrence of a template's (daily, Phase 1) start window. notifee replaces by
+ *  id; the per-day dedup caps it to one per template per day. Notification-only —
+ *  reads no wallet/session state and moves no money. */
+const scheduleBlockReminder = (t: ScheduledTemplate): void => {
+  const fire = new Date();
+  fire.setHours(t.startHour, t.startMinute, 0, 0);
+  fire.setMinutes(fire.getMinutes() - SCHEDULE_REMINDER_LEAD_MIN);
+  // If today's lead time already passed, remind before tomorrow's occurrence.
+  if (fire.getTime() <= Date.now() + 60_000) {
+    fire.setDate(fire.getDate() + 1);
+  }
+  scheduleRetentionReminder({
+    reason: "scheduled_block_reminder",
+    key: t.id,
+    fireAt: fire,
+    title: t.name ? `${t.name} starts soon` : "Focus block starts soon",
+    body: `Your scheduled focus block begins in ${SCHEDULE_REMINDER_LEAD_MIN} minutes.`,
+  }).catch(() => {});
+};
 
 /** Fire-and-forget: arm the OS schedule for a template (no-op off-device). */
 const armNative = (t: ScheduledTemplate): void => {
@@ -50,6 +77,7 @@ const armNative = (t: ScheduledTemplate): void => {
   ).catch((err) =>
     logger.warn("scheduleStore: startScheduledBlocking failed:", err),
   );
+  scheduleBlockReminder(t);
 };
 
 /** Fire-and-forget: clear the OS schedule for a template id. */
@@ -57,6 +85,7 @@ const disarmNative = (id: string): void => {
   stopScheduledBlocking(activityNameFor(id)).catch((err) =>
     logger.warn("scheduleStore: stopScheduledBlocking failed:", err),
   );
+  cancelRetentionReminder("scheduled_block_reminder", id).catch(() => {});
 };
 
 interface ScheduleStore {

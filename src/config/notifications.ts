@@ -36,6 +36,7 @@ import notifee, {
   type TimestampTrigger,
 } from "@notifee/react-native";
 import { logger } from "../utils/logger";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const NOTIFEE_CHANNEL_ID = "niyah-default";
 let notifeeChannelCreated = false;
@@ -212,6 +213,17 @@ function handleNotificationNavigation(
       router.push(
         "/session/active?confirmSurrender=true" as RelativePathString,
       );
+      break;
+    // Local retention reminders (scheduled client-side via scheduleRetentionReminder).
+    case "streak_at_risk":
+    case "reengagement":
+      router.push("/session/select?type=solo" as RelativePathString);
+      break;
+    case "scheduled_block_reminder":
+      router.push("/(tabs)/schedule" as RelativePathString);
+      break;
+    case "low_balance":
+      router.push("/session/deposit" as RelativePathString);
       break;
     default:
       break;
@@ -418,5 +430,123 @@ export async function cancelSessionEndNotification(): Promise<void> {
     await notifee.cancelTriggerNotification(SESSION_END_NOTIFICATION_ID);
   } catch (err) {
     logger.warn("cancelSessionEndNotification failed:", err);
+  }
+}
+
+// ─── Retention reminders (local, client-only) ───────────────────────────────
+// Local nudges scheduled with notifee's timestamp trigger (no server, no push
+// token). A per-day dedup guard caps these to one per reason per UTC day so they
+// can never pile up into notification fatigue. Functional notifications (e.g.
+// session-end above) are exempt — only the reasons below route through the guard.
+// All inputs are READ-ONLY over wallet/session/auth state; this schedules nothing
+// on the server and moves no money.
+
+export type RetentionReason =
+  | "streak_at_risk"
+  | "reengagement"
+  | "scheduled_block_reminder"
+  | "low_balance";
+
+const RETENTION_REMINDER_PREFIX = "niyah-retention-";
+const RETENTION_DEDUP_KEY = "@niyah/retention_reminder_log";
+
+const utcDayKey = (ms: number): string =>
+  new Date(ms).toISOString().slice(0, 10);
+
+// A `key` (e.g. a template id) lets one reason carry MANY independent reminders
+// (separate notifee ids + separate per-day dedup slots) — needed for per-template
+// scheduled-block reminders. Omit it for singleton reasons (streak/re-engagement).
+const retentionNotifeeId = (reason: RetentionReason, key?: string): string =>
+  `${RETENTION_REMINDER_PREFIX}${reason}${key ? `-${key}` : ""}`;
+const retentionDedupKey = (reason: RetentionReason, key?: string): string =>
+  key ? `${reason}:${key}` : reason;
+
+async function retentionScheduledToday(
+  dedup: string,
+  fireAtMs: number,
+): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(RETENTION_DEDUP_KEY);
+    const log = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    return log[dedup] === utcDayKey(fireAtMs);
+  } catch {
+    return false; // fail open — one possible duplicate beats never firing
+  }
+}
+
+async function recordRetentionScheduled(
+  dedup: string,
+  fireAtMs: number,
+): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(RETENTION_DEDUP_KEY);
+    const log = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    log[dedup] = utcDayKey(fireAtMs);
+    await AsyncStorage.setItem(RETENTION_DEDUP_KEY, JSON.stringify(log));
+  } catch (err) {
+    logger.warn("recordRetentionScheduled failed:", err);
+  }
+}
+
+/**
+ * Schedule a local retention reminder. The notifee id is stable per reason, so
+ * re-scheduling REPLACES (never stacks). Subject to the per-day dedup guard: at
+ * most one reminder per reason per UTC day. `data.type` deep-links on tap (see
+ * handleNotificationNavigation). No-ops (returns false) when the fire time is in
+ * the past or a reminder for this reason was already scheduled today.
+ */
+export async function scheduleRetentionReminder(opts: {
+  reason: RetentionReason;
+  fireAt: Date;
+  title: string;
+  body: string;
+  /** Distinguishes multiple reminders of the same reason (e.g. a template id). */
+  key?: string;
+  data?: Record<string, string>;
+}): Promise<boolean> {
+  const fireAtMs = opts.fireAt.getTime();
+  if (!Number.isFinite(fireAtMs) || fireAtMs <= Date.now() + 1000) return false;
+  const dedup = retentionDedupKey(opts.reason, opts.key);
+  if (await retentionScheduledToday(dedup, fireAtMs)) return false;
+
+  await ensureNotifeeChannel();
+  const trigger: TimestampTrigger = {
+    type: TriggerType.TIMESTAMP,
+    timestamp: fireAtMs,
+  };
+  try {
+    await notifee.createTriggerNotification(
+      {
+        id: retentionNotifeeId(opts.reason, opts.key),
+        title: opts.title,
+        body: opts.body,
+        data: { type: opts.reason, ...(opts.data ?? {}) },
+        android: {
+          channelId: NOTIFEE_CHANNEL_ID,
+          pressAction: { id: "default" },
+          smallIcon: "ic_notification",
+        },
+        ios: { sound: "default" },
+      },
+      trigger,
+    );
+    await recordRetentionScheduled(dedup, fireAtMs);
+    return true;
+  } catch (err) {
+    logger.warn(`scheduleRetentionReminder(${opts.reason}) failed:`, err);
+    return false;
+  }
+}
+
+/** Cancel a scheduled retention reminder by reason (+ optional key) when it no
+ *  longer applies (e.g. a scheduled block was disabled/deleted). */
+export async function cancelRetentionReminder(
+  reason: RetentionReason,
+  key?: string,
+): Promise<void> {
+  try {
+    await notifee.cancelTriggerNotification(retentionNotifeeId(reason, key));
+  } catch (err) {
+    logger.warn(`cancelRetentionReminder(${reason}) failed:`, err);
   }
 }
