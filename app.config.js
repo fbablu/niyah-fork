@@ -51,7 +51,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.niyah.app",
-      buildNumber: "20",
+      buildNumber: "21",
       appleTeamId: "4R55F73KCP",
       googleServicesFile:
         process.env.GOOGLE_SERVICE_INFO_PLIST ||
