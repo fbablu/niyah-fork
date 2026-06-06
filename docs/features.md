@@ -12,7 +12,11 @@ Four sign-in methods, all backed by Firebase Auth:
 3. **Email Magic Link** -- passwordless email link via Firebase
 4. **Phone SMS OTP** -- Firebase phone auth with SMS verification code
 
-**Flow**: `auth-entry.tsx` -> (phone: `phone-entry.tsx` -> `verify-phone.tsx`) -> (if new user) `profile-setup.tsx` -> `screentime-setup.tsx` -> tabs
+**Flow**: `auth-entry.tsx` -> (phone: `phone-entry.tsx` -> `verify-phone.tsx`) -> (if new user) `profile-setup.tsx` -> `blob-maker.tsx` (shuffle-to-morph avatar) -> `intake.tsx` -> `how-it-works.tsx` -> `screen-time-math.tsx` -> `screentime-setup.tsx` -> `notifications-setup.tsx` -> tabs
+
+> Note: only `profileComplete` is persisted — a kill/relaunch after profile-setup resumes at the
+> Screen Time gate, skipping blob-maker/intake/how-it-works (pre-existing behavior; blob-maker
+> degrades gracefully since `completeProfile` pre-seeds the same uid-derived "unique" blob).
 
 Auth state managed by `authStore.ts`, which listens to Firebase `onAuthStateChanged` and hydrates user data from Firestore.
 

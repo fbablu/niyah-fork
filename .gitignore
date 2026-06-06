@@ -75,3 +75,10 @@ docs/misc/
 # Local iOS build/submit logs
 build.log
 submit.log
+
+# Large local Expo docs snapshot (reconstructable from docs.expo.dev/llms/)
+expo-docs/*.rtf
+
+# Local tool/session artifacts
+.playwright-mcp/
+firestore-debug.log

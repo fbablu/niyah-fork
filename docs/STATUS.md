@@ -4,9 +4,35 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-06-01** — submit-readiness audited 2026-05-31 (see
-> [submit-and-ai-plan.md](./submit-and-ai-plan.md)). Prior: 2026-05-30 PM — PR #7 merged to `main`,
+> Last updated: **2026-06-06** — overnight polish loop + Blob Maker onboarding landed (uncommitted).
+> Prior: 2026-06-01 — submit-readiness audited 2026-05-31 (see
+> [submit-and-ai-plan.md](./submit-and-ai-plan.md)); 2026-05-30 PM — PR #7 merged to `main`,
 > pre-deploy pre-flight green, smoke pending.
+>
+> **2026-06-06 deltas (supersede the "Right now" branch bullet below):**
+> - **Branch reality check:** `wallet-ledger` is now **64 commits ahead of `main`** (TestFlight
+>   build-19/20 line, schedule templates, etc.) **plus ~39 uncommitted paths** in the working tree.
+>   The "0 divergence" statement below is stale (was true 2026-06-01). Merge to `main` deliberately
+>   — `main` is the live-payments branch.
+> - **Overnight polish loop (2026-06-05, UNCOMMITTED):** skeletons everywhere, UI-thread Reanimated
+>   migrations (Timer ring, dashboard), local retention reminders (streak-at-risk + scheduled-block,
+>   notifee + per-day dedup), granular Zustand selectors on all 4 tabs, procedural "unique" blobs.
+>   Final 3-agent review: 0 blockers. Commit slices 1–7 in
+>   [overnight-2026-06-05/progress.md](./overnight-2026-06-05/progress.md).
+> - **Blob Maker onboarding (2026-06-05 PM → 06-06, UNCOMMITTED):** new `(auth)/blob-maker` screen
+>   (shuffle-to-morph blob on a podium, between profile-setup → intake), `MorphingBlob` (UI-thread
+>   path morphing), `shapeSeed` account-bound blob identity (`uid:nonce` — visual fingerprint, NOT
+>   a credential), `completeProfile` now seeds `shapePreset:"unique"`. Commit slices 8–10 in the
+>   same progress log.
+> - **`firestore.rules` grew a `users.blobAvatar` validation clause** (known keys / string types /
+>   size caps, diff-gated for legacy docs) — **rides the already-pending rules deploy**; backward
+>   compatible with the shipping client. `/vibe-security` on the diff: no Critical/High. NEW
+>   `pnpm test:rules` (13/13, emulator; needs Java 21+ → `JAVA_HOME=$(brew --prefix openjdk)`).
+>   New dev-only deps: `firebase`, `@firebase/rules-unit-testing` (not bundled).
+> - **Test counts:** client Jest **812 pass / 0 fail** · functions 91/91 (node:test) · rules 13/13.
+> - **Known follow-up (pre-existing, Medium):** users update rule has no doc-wide `hasOnly()` key
+>   whitelist — owner can write arbitrary non-denylisted fields. Do as a separate reviewed rules
+>   pass before public launch.
 >
 > **2026-06-01 deltas (audit close-out):**
 > - **APNs `.p8`** (Apple Team `4R55F73KCP`) → Firebase Console → Cloud Messaging is an **explicit submit
