@@ -4,7 +4,11 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-06-06** — overnight polish loop + Blob Maker onboarding landed (uncommitted).
+> Last updated: **2026-06-06 PM** — slices committed (head `edc4139`+), account cleanup DONE,
+> **functions+rules deployed to prod**, PII migration run, APNs keys uploaded, funnel events
+> added (uncommitted), buildNumber → 21. See §Remaining-to-submit for the revised launch line
+> (TestFlight internal build 21 → smoke+UX on-device → final submit).
+> Prior: 2026-06-06 AM — overnight polish loop + Blob Maker onboarding landed (uncommitted).
 > Prior: 2026-06-01 — submit-readiness audited 2026-05-31 (see
 > [submit-and-ai-plan.md](./submit-and-ai-plan.md)); 2026-05-30 PM — PR #7 merged to `main`,
 > pre-deploy pre-flight green, smoke pending.
@@ -154,27 +158,45 @@ These are the steps between here and an App Store build. **Fardeen runs all git/
 actions** — Claude supplies messages only.
 
 1. ~~**Merge** `wallet-ledger` → `main`~~ — **DONE.** Fully merged at `41dfb43` (PR #7; 0 divergence).
+   _(Stale: `wallet-ledger` is now 70+ commits ahead again — re-merge deliberately at the end.)_
 2. ~~**Verify hosted legal live**~~ — **DONE.** `niyah.live/legal/{privacy,terms}` live (Pages).
-3. **App Store Connect:** click **Publish** on App Privacy (10 data types, all Linked=true /
-   Tracking=false); confirm account-deletion + support URLs; support email `support@niyah.live`
-   (display name "Niyah Support", fix reply-from).
-4. **Deploy** (merging code ≠ deploying — do before real users transact). Pre-flight **DONE + green**
-   (see "Pre-flight" above): `cd functions && npm install`, then
-   `firebase deploy --only functions,firestore:rules,firestore:indexes`. **Live + irreversible.**
-5. **Live infra:** Stripe live key (`sk_live_`) + webhook + the 5 Secret-Manager secrets — **verified
-   present** at pre-flight. Plaid **prod** webhook is wired **per-Item** via `/link/token/create`
-   (not the dashboard); see [security-deploy-checklist.md](./security-deploy-checklist.md) Phase 4.
-   Still to confirm: Apple **APNs Auth Key** (.p8) → Firebase Cloud Messaging.
-6. **Build + smoke:** `pnpm build:production`; then the controlled real-money smoke on a **fresh
-   clean account** (not the drifted test acct — see below) + Delete on a throwaway — full tickable
-   script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**.
-7. **Submit** — be ready to explain in App Review notes: Stripe (not IAP) because deposits/stakes/
-   withdrawals are the user's own funds; commitment-contract (not gambling), Productivity category.
-8. **External TestFlight public QR (tech-week track):** after `eas submit`, ASC → TestFlight →
-   create an **external group** → enable the **public link** → triggers **Beta App Review**
-   (~24–48h, lighter than App Store). The join URL → the sticker QR. The App Store submit (step 7)
-   is a separate, slower track on the same binary. APNs `.p8` (step 5) is required for the live
-   non-demo build, or ship Google/Apple-only via `EXPO_PUBLIC_DISABLE_PHONE_AUTH=true`.
+3. ~~**Account cleanup**~~ — **DONE 2026-06-06.** Real phone number freed (`cMtHvQ` auth record
+   deleted, Firestore drift fixture kept frozen); `apY32` gmail test acct fully purged
+   (`functions/scripts/cleanup-test-accounts.js`).
+4. ~~**Deploy**~~ — **DONE 2026-06-06.** 43 functions updated + 2 created
+   (`createScheduledStakedSession`, `unfreezeWallet` — **45 total**), rules (incl. new
+   `users.blobAvatar` clause) + indexes released. Post-deploy `verify-lane-a.js`: deposits ✅
+   (zero double-credits); PII migration run (11 docs moved). Residual: 9 docs carry **empty**
+   email/phone fields (migration only moves non-empty strings; verifier flags presence) — scrub
+   with `functions/scripts/scrub-empty-contact-fields.js` (dry-run → `--apply`) then re-verify ✅.
+5. ~~**APNs Auth Key**~~ — **DONE 2026-06-06.** Dev `M2F5339KYF` + Prod `BM42K87CP9` (.p8) uploaded
+   to FCM (Team `4R55F73KCP`). Phone auth fully usable in live builds — the
+   `EXPO_PUBLIC_DISABLE_PHONE_AUTH` fallback is moot.
+6. **Funnel events (pre-QR analytics gate)** — ~~code~~ **DONE 2026-06-06** (uncommitted):
+   `screentime_granted/denied`, `deposit_failed` (reason-tagged incl. `cancelled`),
+   `invite_opened` + `invite_redeemed`, `onboarding_step_reached` (route-level in
+   `(auth)/_layout`). Pre-auth events are rules-denied by design (ASC installs =
+   top-of-funnel). One shot at clean first-touch data — these MUST be in the QR build.
+7. **TestFlight internal build 21** (upload ≠ review — `eas submit` only uploads to ASC;
+   internal TestFlight needs **no** review, same as builds 3–19):
+   `eas build --platform ios --profile production --local` (writes a NEW `build-<ts>.ipa` —
+   submit THAT file, not a stale one), then
+   `eas submit --platform ios --profile production --path ./build-<ts>.ipa`.
+   `app.config.js` already bumped to `buildNumber: "21"`; extensions inherit at prebuild.
+   Build 20 (`build-1780523620368.ipa`) is superseded — never uploaded, predates the polish.
+8. **Smoke + UX pass ON the TestFlight build:** the controlled real-money smoke on a **fresh
+   clean account** (the freed real number works now) + Delete on a throwaway — full tickable
+   script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**. Then the
+   animations/UX/polish acceptance pass on the same build; iterate (build 22, 23…) until happy.
+   Each new internal build is just rebuild → re-upload, still no review.
+9. **Final submit (only after 8 passes)** — App Review notes ready on request: Stripe (not IAP)
+   because deposits/stakes/withdrawals are the user's own funds; commitment-contract (not
+   gambling), Productivity category. Also: ASC App Privacy **Publish** (10 data types,
+   Linked=true / Tracking=false), account-deletion + support URLs, `support@niyah.live`.
+10. **External TestFlight public QR (tech-week track):** ASC → TestFlight → **external group** →
+    **public link** → **Beta App Review** (~24–48h, lighter than App Store) on the passing build.
+    The join URL → the sticker QR. The App Store submit (step 9) is a separate, slower track on
+    the same binary.
 
 > **Tech-week track (NYC 6/1–6/7):** the dual goal (external TestFlight public QR **and** App Store
 > submit), the critical path, the five lanes, and the **live-money-with-strangers** risk +
