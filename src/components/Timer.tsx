@@ -116,11 +116,6 @@ export const Timer: React.FC<TimerProps> = ({
           fontVariant: ["tabular-nums"],
           letterSpacing: -1,
         },
-        progressText: {
-          fontSize: Typography.labelSmall,
-          color: Colors.textMuted,
-          marginTop: Spacing.xs,
-        },
         inlineTime: {
           fontSize: Typography.bodyLarge,
           ...Font.semibold,
@@ -290,7 +285,9 @@ export const Timer: React.FC<TimerProps> = ({
             />
           </Svg>
 
-          {/* Center content */}
+          {/* Center content — the depleting ring + MM:SS are the single
+              source of truth; no % label (a remaining-% next to an elapsed-%
+              bar read as two contradictory numbers in the build-21 test). */}
           <View style={styles.timeContainer}>
             {showLabel && <Text style={styles.label}>Remaining</Text>}
             <Text
@@ -300,9 +297,6 @@ export const Timer: React.FC<TimerProps> = ({
               ]}
             >
               {formatTime(timeRemaining)}
-            </Text>
-            <Text style={styles.progressText}>
-              {Math.round(progress * 100)}%
             </Text>
           </View>
         </View>

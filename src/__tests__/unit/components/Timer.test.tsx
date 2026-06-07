@@ -23,10 +23,12 @@ describe("Timer Component", () => {
       expect(screen.getByText("01:30")).toBeTruthy();
     });
 
-    it("displays progress percentage", () => {
+    it("does NOT render a percentage label inside the ring", () => {
+      // The ring + MM:SS are the single progress readout. A remaining-% label
+      // contradicted the (since removed) elapsed-% bar on the active screen —
+      // this pins that no % text ever comes back inside the ring.
       render(<Timer timeRemaining={50000} totalTime={100000} />);
-      // 50% is split across elements ("100" + "%") -- use regex
-      expect(screen.getByText("50%")).toBeTruthy();
+      expect(screen.queryByText(/%/)).toBeNull();
     });
 
     it("displays 'Remaining' label by default", () => {

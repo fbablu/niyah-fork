@@ -13,6 +13,7 @@ import { useRouter, type RelativePathString } from "expo-router";
 import { Typography, Spacing, Radius, Font } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Card,
   Balance,
@@ -27,7 +28,11 @@ import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
 import { useScheduleStore } from "../../src/store/scheduleStore";
 import { formatMoney, formatRelativeTime } from "../../src/utils/format";
-import { getActiveScheduledBlock } from "../../src/utils/scheduledBlock";
+import {
+  getActiveScheduledBlock,
+  getBlockProgress,
+  formatBlockTimeLeft,
+} from "../../src/utils/scheduledBlock";
 import { formatWindow } from "../../src/constants/scheduleTemplates";
 import { MIN_STAKE_CENTS } from "../../src/constants/config";
 import { generateBlobAvatarPreset } from "../../src/constants/blobAvatar";
@@ -207,6 +212,10 @@ function DashboardScreenInner() {
   // Granular selectors: the dashboard no longer re-renders on every unrelated
   // group-store mutation, only when one of these three fields changes.
   const activeGroupSession = useGroupSessionStore((s) => s.activeGroupSession);
+  const activeGroupSessions = useGroupSessionStore(
+    (s) => s.activeGroupSessions,
+  );
+  const subscribeToSession = useGroupSessionStore((s) => s.subscribeToSession);
   const groupSessionHistory = useGroupSessionStore(
     (s) => s.groupSessionHistory,
   );
@@ -328,6 +337,33 @@ function DashboardScreenInner() {
           marginBottom: Spacing.md,
           overflow: "hidden",
         },
+        groupRecoveryRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+        },
+        groupRecoveryTitle: {
+          fontSize: Typography.bodyMedium,
+          ...Font.semibold,
+          color: Colors.text,
+        },
+        blockProgressTrack: {
+          height: 3,
+          backgroundColor: Colors.backgroundTertiary,
+          borderRadius: Radius.full,
+          overflow: "hidden",
+          marginTop: Spacing.sm,
+        },
+        blockProgressFill: {
+          height: "100%",
+          backgroundColor: Colors.primary,
+          borderRadius: Radius.full,
+        },
+        blockProgressLabel: {
+          fontSize: Typography.labelSmall,
+          color: Colors.textSecondary,
+          marginTop: Spacing.xs,
+        },
         activeSessionIndicator: {
           width: 4,
           height: "100%",
@@ -448,40 +484,12 @@ function DashboardScreenInner() {
         plantCard: {
           padding: Spacing.md,
         },
-        inviteCard: {
-          backgroundColor: Colors.primaryMuted,
-          borderRadius: Radius.lg,
-          borderWidth: 1,
-          borderColor: Colors.primaryLight,
-          paddingVertical: Spacing.md,
-          paddingHorizontal: Spacing.lg,
-          marginBottom: Spacing.lg,
-        },
-        inviteCardContent: {
-          flexDirection: "row",
-          justifyContent: "space-between",
+        headerInviteBtn: {
+          width: 44,
+          height: 44,
           alignItems: "center",
-        },
-        inviteCardTitle: {
-          fontSize: Typography.titleSmall,
-          ...Font.semibold,
-          color: Colors.text,
-        },
-        inviteCardSubtitle: {
-          fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
-          marginTop: 2,
-        },
-        inviteBadge: {
-          backgroundColor: Colors.primary,
-          borderRadius: Radius.full,
-          paddingVertical: 4,
-          paddingHorizontal: Spacing.md,
-        },
-        inviteBadgeText: {
-          fontSize: Typography.labelLarge,
-          ...Font.bold,
-          color: Colors.white,
+          justifyContent: "center",
+          marginRight: Spacing.sm,
         },
         statsSection: {
           marginBottom: Spacing.lg,
@@ -579,6 +587,25 @@ function DashboardScreenInner() {
               <Text style={styles.greeting}>Welcome back</Text>
               <Text style={styles.name}>{user?.name || "there"}</Text>
             </View>
+            {/* Invite lives here as a quiet header action (the old "+10"
+                dashboard card read as noise); the +10 explainer stays on the
+                invite screen itself. */}
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/invite" as never);
+              }}
+              hitSlop={10}
+              accessibilityLabel="Invite friends"
+              accessibilityRole="button"
+              style={styles.headerInviteBtn}
+            >
+              <Ionicons
+                name="person-add"
+                size={22}
+                color={Colors.textSecondary}
+              />
+            </Pressable>
             <BlobAvatar
               size={56}
               config={
@@ -803,30 +830,52 @@ function DashboardScreenInner() {
               DeviceActivitySchedule isn't a currentSession, so without this the
               dashboard would still show Start CTAs during an enforced block.
               Tapping opens the Schedule tab to manage it. */}
-          {showScheduledBlock && activeScheduledBlock && (
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push("/(tabs)/schedule");
-              }}
-            >
-              <Card style={styles.activeSessionCard}>
-                <View style={styles.activeSessionIndicator} />
-                <View style={styles.activeSessionContent}>
-                  <Text style={styles.activeSessionLabel}>
-                    FOCUS BLOCK RUNNING
-                  </Text>
-                  <Text style={styles.activeSessionText}>
-                    {activeScheduledBlock.name}
-                  </Text>
-                  <Text style={styles.activeSessionPayout}>
-                    {formatWindow(activeScheduledBlock)}
-                  </Text>
-                </View>
-                <Text style={styles.activeSessionArrow}>Manage</Text>
-              </Card>
-            </Pressable>
-          )}
+          {showScheduledBlock &&
+            activeScheduledBlock &&
+            (() => {
+              // Live remaining-time line (build-21 ask: "there's no timer, no
+              // tracker"). The 30s `now` tick above keeps it fresh; no pause —
+              // blocks are end-only by design.
+              const { fraction, minutesLeft } = getBlockProgress(
+                activeScheduledBlock,
+                now,
+              );
+              return (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/(tabs)/schedule");
+                  }}
+                >
+                  <Card style={styles.activeSessionCard}>
+                    <View style={styles.activeSessionIndicator} />
+                    <View style={styles.activeSessionContent}>
+                      <Text style={styles.activeSessionLabel}>
+                        FOCUS BLOCK RUNNING
+                      </Text>
+                      <Text style={styles.activeSessionText}>
+                        {activeScheduledBlock.name}
+                      </Text>
+                      <Text style={styles.activeSessionPayout}>
+                        {formatWindow(activeScheduledBlock)}
+                      </Text>
+                      <View style={styles.blockProgressTrack}>
+                        <View
+                          style={[
+                            styles.blockProgressFill,
+                            { width: `${Math.round(fraction * 100)}%` },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.blockProgressLabel}>
+                        {formatBlockTimeLeft(minutesLeft)}
+                      </Text>
+                    </View>
+                    <Text style={styles.activeSessionArrow}>Manage</Text>
+                  </Card>
+                </Pressable>
+              );
+            })()}
 
           {/* Quick Start CTA — hidden while a session OR a scheduled block is
               running (you're already focusing; don't offer to start another). */}
@@ -861,6 +910,41 @@ function DashboardScreenInner() {
               </View>
             </Card>
           )}
+
+          {/* Group sessions waiting / recovering — the only surface that can
+              re-enter a waiting room (or a live session this client lost
+              track of) after a force-quit. Ported from the removed Focus tab. */}
+          {activeGroupSessions &&
+            activeGroupSessions.length > 0 &&
+            activeGroupSessions.map((session) => (
+              <Pressable
+                key={session.id}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (session.status === "active") {
+                    // Subscribe so active.tsx can render on recovery
+                    subscribeToSession(session.id);
+                    router.push("/session/active");
+                  } else {
+                    router.push(
+                      `/session/waiting-room?sessionId=${session.id}` as RelativePathString,
+                    );
+                  }
+                }}
+                style={{ marginBottom: Spacing.sm }}
+              >
+                <Card variant="interactive">
+                  <View style={styles.groupRecoveryRow}>
+                    <Text style={styles.groupRecoveryTitle}>
+                      {session.status === "active"
+                        ? "Session Active"
+                        : `Group Session ${session.status === "ready" ? "Ready" : "Pending"}`}
+                    </Text>
+                    <Text style={{ color: Colors.primary }}>View →</Text>
+                  </View>
+                </Card>
+              </Pressable>
+            ))}
 
           {/* Pending Group Invites Banner */}
           {pendingInvites && pendingInvites.length > 0 && (
@@ -926,27 +1010,6 @@ function DashboardScreenInner() {
               </Card>
             </Pressable>
           )}
-
-          {/* Invite Friends Card */}
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/invite" as never);
-            }}
-            style={styles.inviteCard}
-          >
-            <View style={styles.inviteCardContent}>
-              <View>
-                <Text style={styles.inviteCardTitle}>Invite Friends</Text>
-                <Text style={styles.inviteCardSubtitle}>
-                  Earn +10 social credit per referral
-                </Text>
-              </View>
-              <View style={styles.inviteBadge}>
-                <Text style={styles.inviteBadgeText}>+10</Text>
-              </View>
-            </View>
-          </Pressable>
 
           {/* Stats Grid */}
           <View style={styles.statsSection}>

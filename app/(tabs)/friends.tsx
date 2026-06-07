@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  ScrollView,
   TextInput,
   Pressable,
   ActivityIndicator,
@@ -13,6 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import * as Contacts from "expo-contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -36,10 +37,12 @@ import {
 } from "../../src/types";
 import { logger } from "../../src/utils/logger";
 
-// Cap how many invite rows we mount at once. The list sits in a non-virtualized
-// ScrollView (nested in the FlatList header), so rendering every device contact
-// stutters on open. Show the first N alphabetically; search narrows the rest.
+// Cap how many invite rows we mount at once. The rows live inside the
+// FlatList header (non-virtualized), so rendering every device contact
+// stutters on open. Collapsed shows the first few alphabetically; "Show more"
+// expands to the cap; search narrows the full list.
 const INVITE_VISIBLE_LIMIT = 30;
+const INVITE_COLLAPSED_COUNT = 5;
 
 // ─── Styles (makeStyles) ──────────────────────────────────────────────────────
 
@@ -283,9 +286,12 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.text,
       marginBottom: Spacing.sm,
     },
-    inviteScrollBox: {
-      maxHeight: 240,
-      borderRadius: Radius.lg,
+    inviteShowMore: {
+      fontSize: Typography.bodySmall,
+      ...Font.semibold,
+      color: Colors.primaryLight,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
     },
     inviteTruncatedHint: {
       fontSize: Typography.labelSmall,
@@ -603,6 +609,7 @@ function FriendsScreenInner() {
     { name: string; phone?: string; email?: string }[]
   >([]);
   const [inviteSearch, setInviteSearch] = useState("");
+  const [inviteExpanded, setInviteExpanded] = useState(false);
 
   // Persist invite contacts to AsyncStorage
   const CONTACTS_STORAGE_KEY = "@niyah/invite_contacts";
@@ -932,19 +939,25 @@ function FriendsScreenInner() {
     [myUid],
   );
 
-  // Filter + cap the invite list once per (contacts, query) change instead of
-  // re-running the filter inside JSX on every render. Only the capped slice is
-  // mounted; `total` drives the "search to find more" hint when truncated.
+  // Filter + cap the invite list once per (contacts, query, expanded) change
+  // instead of re-running the filter inside JSX on every render. Only the
+  // capped slice is mounted. Plain rows (no nested ScrollView — the old
+  // maxHeight box clipped row 6 mid-card and fought the outer list's scroll);
+  // collapsed shows a handful, "Show more" expands to the cap, searching
+  // always shows up to the cap.
   const inviteList = useMemo(() => {
     const q = inviteSearch.trim().toLowerCase();
     const matched = q
       ? nonMatchedContacts.filter((c) => c.name.toLowerCase().includes(q))
       : nonMatchedContacts;
+    const limit =
+      q || inviteExpanded ? INVITE_VISIBLE_LIMIT : INVITE_COLLAPSED_COUNT;
     return {
-      visible: matched.slice(0, INVITE_VISIBLE_LIMIT),
+      visible: matched.slice(0, limit),
       total: matched.length,
+      collapsed: !q && !inviteExpanded,
     };
-  }, [nonMatchedContacts, inviteSearch]);
+  }, [nonMatchedContacts, inviteSearch, inviteExpanded]);
 
   const handleFollowMatch = useCallback(
     async (targetUid: string) => {
@@ -967,8 +980,13 @@ function FriendsScreenInner() {
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Text style={styles.title}>Friends</Text>
-          <Pressable onPress={() => router.push("/invite")}>
-            <Text style={styles.inviteLink}>Invite →</Text>
+          <Pressable
+            onPress={() => router.push("/invite")}
+            hitSlop={10}
+            accessibilityLabel="Invite friends"
+            accessibilityRole="button"
+          >
+            <Ionicons name="person-add" size={22} color={Colors.primaryLight} />
           </Pressable>
         </View>
 
@@ -1064,39 +1082,61 @@ function FriendsScreenInner() {
               autoCorrect={false}
               clearButtonMode="while-editing"
             />
-            <ScrollView
-              style={styles.inviteScrollBox}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator
-            >
-              {inviteList.visible.map((contact, index) => (
-                <View
-                  key={`invite-${contact.phone || contact.email || index}`}
-                  style={[styles.inviteRow, { marginBottom: Spacing.xs }]}
-                >
-                  <View style={styles.inviteAvatar}>
-                    <Text style={styles.inviteAvatarText}>
-                      {contact.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={styles.inviteContactName} numberOfLines={1}>
-                    {contact.name}
+            {inviteList.visible.map((contact, index) => (
+              <View
+                key={`invite-${contact.phone || contact.email || index}`}
+                style={[styles.inviteRow, { marginBottom: Spacing.xs }]}
+              >
+                <View style={styles.inviteAvatar}>
+                  <Text style={styles.inviteAvatarText}>
+                    {contact.name.charAt(0).toUpperCase()}
                   </Text>
-                  <Pressable
-                    style={styles.inviteBtn}
-                    onPress={() => handleInviteContact(contact)}
-                  >
-                    <Text style={styles.inviteBtnText}>Invite</Text>
-                  </Pressable>
                 </View>
-              ))}
-            </ScrollView>
-            {inviteList.total > inviteList.visible.length && (
-              <Text style={styles.inviteTruncatedHint}>
-                Showing {inviteList.visible.length} of {inviteList.total} —
-                search to find anyone.
-              </Text>
-            )}
+                <Text style={styles.inviteContactName} numberOfLines={1}>
+                  {contact.name}
+                </Text>
+                <Pressable
+                  style={styles.inviteBtn}
+                  onPress={() => handleInviteContact(contact)}
+                >
+                  <Text style={styles.inviteBtnText}>Invite</Text>
+                </Pressable>
+              </View>
+            ))}
+            {inviteList.collapsed &&
+              inviteList.total > inviteList.visible.length && (
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setInviteExpanded(true);
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={styles.inviteShowMore}>
+                    Show more ({inviteList.total - inviteList.visible.length})
+                  </Text>
+                </Pressable>
+              )}
+            {inviteList.collapsed &&
+              inviteList.total > inviteList.visible.length && (
+                <Text style={styles.inviteTruncatedHint}>
+                  Showing {inviteList.visible.length} of {inviteList.total} —
+                  search to find anyone.
+                </Text>
+              )}
+            {!inviteList.collapsed &&
+              inviteExpanded &&
+              !inviteSearch.trim() && (
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setInviteExpanded(false);
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={styles.inviteShowMore}>Show less</Text>
+                </Pressable>
+              )}
           </View>
         )}
 
@@ -1112,6 +1152,7 @@ function FriendsScreenInner() {
       contactMatches,
       nonMatchedContacts,
       inviteList,
+      inviteExpanded,
       isImporting,
       hasImported,
       loadingUids,
