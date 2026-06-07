@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, Pressable, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import * as Linking from "expo-linking";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -112,11 +111,14 @@ function InviteScreenInner() {
 
   const [shared, setShared] = useState(false);
 
-  const inviteLink = Linking.createURL("/", {
-    queryParams: uid ? { ref: uid } : undefined,
-  });
+  // https Universal Link (not a niyah:// custom scheme) so it's openable by a
+  // recipient who doesn't have the app yet: niyah.live/i routes installed users
+  // straight in and sends everyone else to install, carrying the referral.
+  const inviteLink = uid
+    ? `https://niyah.live/i?ref=${uid}`
+    : "https://niyah.live";
   const message =
-    `I'm using Niyah to stay focused by putting real money on the line. ` +
+    `I'm using Niyah to stay focused by putting my own money on the line. ` +
     `Join me and we can keep each other accountable!\n\n${inviteLink}`;
 
   const handleShare = async () => {

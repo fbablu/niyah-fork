@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { View, Text, StyleSheet, TextInput, Platform } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Platform,
+  Pressable,
+} from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
 import {
@@ -21,6 +28,19 @@ import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useAuthStore } from "../../src/store/authStore";
 import { formatMoney } from "../../src/utils/format";
 import { logger } from "../../src/utils/logger";
+import { AI_DATA_CAPTURE_ENABLED } from "../../src/constants/config";
+import { updateSession } from "../../src/config/firebase";
+import type { SurrenderReason } from "../../src/types";
+
+// AI Phase-0 capture (analytics only; no money meaning) — see docs/ai-integration.md.
+const REASON_OPTIONS: { value: SurrenderReason; label: string }[] = [
+  { value: "distracted", label: "Distracted" },
+  { value: "interrupted", label: "Interrupted" },
+  { value: "too_long", label: "Too long" },
+  { value: "lost_motivation", label: "Lost motivation" },
+  { value: "emergency", label: "Emergency" },
+  { value: "other", label: "Other" },
+];
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +113,52 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.bodySmall,
       color: Colors.text,
     },
+    reasonCard: {
+      marginBottom: Spacing.md,
+    },
+    reasonTitle: {
+      fontSize: Typography.titleSmall,
+      ...Font.semibold,
+      color: Colors.text,
+      marginBottom: Spacing.sm,
+    },
+    chipRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.xs,
+      marginBottom: Spacing.sm,
+    },
+    chip: {
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      backgroundColor: Colors.backgroundCard,
+    },
+    chipSelected: {
+      borderColor: Colors.primary,
+    },
+    chipText: {
+      fontSize: Typography.bodySmall,
+      color: Colors.textSecondary,
+      ...Font.medium,
+    },
+    chipTextSelected: {
+      color: Colors.primary,
+      ...Font.semibold,
+    },
+    noteInput: {
+      backgroundColor: Colors.backgroundCard,
+      borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      padding: Spacing.sm,
+      minHeight: 44,
+      fontSize: Typography.bodySmall,
+      color: Colors.text,
+      textAlignVertical: "top",
+    },
     confirmSection: {
       marginBottom: Spacing.lg,
     },
@@ -138,6 +204,9 @@ function SurrenderScreenInner() {
   const userId = useAuthStore((state) => state.user?.id);
   const [surrendering, setSurrendering] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [surrenderReason, setSurrenderReason] =
+    useState<SurrenderReason | null>(null);
+  const [surrenderNote, setSurrenderNote] = useState("");
 
   const canSurrender = confirmText.toLowerCase() === "quit";
   const stakeAmount = activeGroupSession?.stakePerParticipant ?? 0;
@@ -146,6 +215,19 @@ function SurrenderScreenInner() {
     if (!canSurrender || surrendering) return;
     setSurrendering(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+    // AI Phase-0: best-effort capture of the structured surrender reason
+    // (analytics only; no money meaning). Persists for sessions-collection docs
+    // (rule-allowlisted); server-only group docs reject this write harmlessly.
+    if (AI_DATA_CAPTURE_ENABLED && surrenderReason && activeSession) {
+      const trimmed = surrenderNote.trim();
+      updateSession(activeSession.id, {
+        surrenderReason,
+        ...(trimmed ? { surrenderNote: trimmed.slice(0, 500) } : {}),
+      }).catch((err) =>
+        logger.warn("Failed to persist surrender reason:", err),
+      );
+    }
 
     // Firestore-backed session: report surrender to the server, which forfeits
     // only this user's own stake. Stakes are de-pooled — nothing is transferred
@@ -231,6 +313,47 @@ function SurrenderScreenInner() {
             ))}
           </View>
         </Card>
+
+        {/* Surrender reason — AI Phase-0 capture (optional, analytics only) */}
+        {AI_DATA_CAPTURE_ENABLED && (
+          <Card style={styles.reasonCard}>
+            <Text style={styles.reasonTitle}>
+              What made you stop? (optional)
+            </Text>
+            <View style={styles.chipRow}>
+              {REASON_OPTIONS.map((opt) => {
+                const selected = surrenderReason === opt.value;
+                return (
+                  <Pressable
+                    key={opt.value}
+                    onPress={() =>
+                      setSurrenderReason(selected ? null : opt.value)
+                    }
+                    style={[styles.chip, selected && styles.chipSelected]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        selected && styles.chipTextSelected,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <TextInput
+              style={styles.noteInput}
+              value={surrenderNote}
+              onChangeText={setSurrenderNote}
+              placeholder="Anything else? (optional)"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              maxLength={500}
+            />
+          </Card>
+        )}
 
         {/* Confirm Section */}
         <View style={styles.confirmSection}>

@@ -6,6 +6,7 @@ import {
   GroupSessionStatus,
   GroupInvite,
   GroupInviteStatus,
+  GroupLeaderboardEntry,
   SessionParticipant,
   CadenceType,
   UserReputation,
@@ -27,6 +28,7 @@ import {
   startGroupSessionCF as cloudStartSession,
   reportSessionStatus as cloudReportStatus,
   cancelGroupSession as cloudCancelSession,
+  getGroupLeaderboard as cloudGetGroupLeaderboard,
 } from "../config/functions";
 import {
   subscribeToGroupSession,
@@ -41,7 +43,10 @@ import {
   updateLiveActivity,
   endLiveActivity,
   stopBlocking,
+  getSavedAppBlockSummary,
+  getViolationsByCategory,
 } from "../config/screentime";
+import { logEvent } from "../utils/analytics";
 import {
   scheduleSessionEndNotification,
   cancelSessionEndNotification,
@@ -91,6 +96,13 @@ function parseParticipants(
       surrendered: p.surrendered as boolean | undefined,
       surrenderedAt: parseTimestamp(p.surrenderedAt),
       violationCount: (p.violationCount as number) ?? 0,
+      // Server-written (CF-sanitized) block summary + stake-mode. MUST be
+      // carried through here — the waiting-room start-gate reads
+      // participant.appBlockSummary, so dropping it would make
+      // everyoneHasBlockSelection permanently false (proposer can never start).
+      appBlockSummary:
+        p.appBlockSummary as GroupSessionParticipant["appBlockSummary"],
+      stakeMode: p.stakeMode as GroupSessionParticipant["stakeMode"],
     };
   }
   return result;
@@ -237,6 +249,10 @@ interface GroupSessionState {
   pendingInvites: GroupInvite[];
   activeGroupSessions: GroupSessionDoc[];
 
+  // Computed (non-real-time) group leaderboard — fetched on demand, cached.
+  leaderboard: GroupLeaderboardEntry[] | null;
+  leaderboardLoading: boolean;
+
   // Legacy local-only state (keep for backward compat with existing screens)
   activeGroupSession: GroupSession | null;
   groupSessionHistory: GroupSession[];
@@ -263,6 +279,7 @@ interface GroupSessionState {
   reportCompletion: (sessionId: string) => Promise<void>;
   reportSurrender: (sessionId: string) => Promise<void>;
   cancelSession: (sessionId: string) => Promise<void>;
+  fetchGroupLeaderboard: () => Promise<void>;
 
   // Legacy lifecycle (keep for backward compat, wraps new Cloud Function calls)
   startGroupSession: (
@@ -285,6 +302,8 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
   activeSession: null,
   pendingInvites: [],
   activeGroupSessions: [],
+  leaderboard: null,
+  leaderboardLoading: false,
 
   // Legacy state
   activeGroupSession: null,
@@ -371,18 +390,21 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
   // ─── Cloud Function actions ───────────────────────────────────────────────
 
   proposeSession: async (params) => {
+    // Attach this device's own block summary (display + start-gate). Derived
+    // from the saved selection so it always matches what actually gets blocked.
     const result = await cloudCreateGroupSession(
       params.cadence,
       params.stakePerParticipant,
       params.duration,
       params.inviteeIds,
       params.customStake,
+      getSavedAppBlockSummary(),
     );
     return result.sessionId;
   },
 
   acceptInvite: async (inviteId: string) => {
-    await cloudRespondToGroupInvite(inviteId, true);
+    await cloudRespondToGroupInvite(inviteId, true, getSavedAppBlockSummary());
   },
 
   declineInvite: async (inviteId: string) => {
@@ -408,6 +430,17 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
 
   cancelSession: async (sessionId: string) => {
     await cloudCancelSession(sessionId);
+  },
+
+  fetchGroupLeaderboard: async () => {
+    set({ leaderboardLoading: true });
+    try {
+      const { standings } = await cloudGetGroupLeaderboard();
+      set({ leaderboard: standings, leaderboardLoading: false });
+    } catch (err) {
+      logger.warn("fetchGroupLeaderboard failed:", err);
+      set({ leaderboardLoading: false });
+    }
   },
 
   // ─── Legacy lifecycle (backward compat) ───────────────────────────────────
@@ -497,9 +530,12 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       );
     }
 
-    // Sync participant names + stake to shared UserDefaults so the shield
-    // extension can show dynamic messages like "Sarah and Mike are watching."
-    if (fullParticipants.length > 1) {
+    // Sync names + stake to shared UserDefaults so the shield extension can
+    // show dynamic messages. Stake-driven, not participant-count-driven: the
+    // shield must know about EVERY staked session (solo included) so it can
+    // show forfeit copy, and must see stake 0 for free quick-blocks so it
+    // shows free copy — so clear any stale context on the free path.
+    if (stake > 0) {
       const myId = useAuthStore.getState().user?.id;
       const otherNames = fullParticipants
         .filter((p) => p.userId !== myId)
@@ -507,8 +543,10 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       setSessionContext({
         names: otherNames,
         stake,
-        type: "group",
+        type: isSoloSession ? "solo" : "group",
       }).catch(() => {});
+    } else {
+      clearSessionContext().catch(() => {});
     }
   },
 
@@ -596,6 +634,26 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       }
     }
 
+    // Per-category blocked-attempt summary (covers group + free quick-block
+    // ends — solo staked sessions flatten these into their own events).
+    // Read BEFORE stopBlocking-adjacent cleanup; zero-attempt sessions skip.
+    {
+      const counts = getViolationsByCategory();
+      const entries = Object.entries(counts).filter(([, n]) => n > 0);
+      if (entries.length > 0) {
+        logEvent("blocked_attempts_summary", {
+          sessionType:
+            completedSession.participants.length > 1 ? "group" : "quick",
+          ...Object.fromEntries(
+            entries.map(([key, n]) => [
+              `violations${key[0].toUpperCase()}${key.slice(1)}`,
+              n,
+            ]),
+          ),
+        });
+      }
+    }
+
     // Clear dynamic shield context now that the session is over
     clearSessionContext().catch(() => {});
 
@@ -631,6 +689,8 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       activeSession: null,
       pendingInvites: [],
       activeGroupSessions: [],
+      leaderboard: null,
+      leaderboardLoading: false,
       // Legacy local state
       activeGroupSession: null,
       groupSessionHistory: [],

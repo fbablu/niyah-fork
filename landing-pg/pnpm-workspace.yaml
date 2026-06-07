@@ -1,0 +1,5 @@
+# Isolates landing-pg from the root pnpm workspace (own lockfile/node_modules).
+# Without this, pnpm walks up and applies the root workspace to this project.
+overrides:
+  lodash: '>=4.18.1' # recharts — code injection via _.template + prototype pollution in _.unset/_.omit
+  postcss: '>=8.5.10' # XSS via unescaped </style> in CSS stringify

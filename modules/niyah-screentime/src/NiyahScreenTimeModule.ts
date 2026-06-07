@@ -3,6 +3,7 @@ import type {
   NiyahScreenTimeModuleEvents,
   AuthorizationStatus,
   AppSelectionToken,
+  SelectionTemplate,
   BaselineApp,
 } from "./types";
 
@@ -37,6 +38,53 @@ declare class NiyahScreenTimeModuleClass extends NativeModule<NiyahScreenTimeMod
   clearSelection(): Promise<void>;
 
   // ------------------------------------------------------------------
+  // Block-list templates (named selections)
+  // ------------------------------------------------------------------
+
+  /**
+   * Snapshot the CURRENT selection under `name`. Same-name saves overwrite.
+   * Throws if nothing is selected or the name is empty.
+   */
+  saveSelectionTemplate(name: string): Promise<SelectionTemplate>;
+
+  /** Index of saved templates (no tokens — summaries only). */
+  listSelectionTemplates(): SelectionTemplate[];
+
+  /**
+   * Load a template into the ACTIVE selection (write-through, so
+   * startBlocking/monitor/gates all keep working unchanged). Returns the
+   * applied selection summary, or null if no template matches.
+   */
+  applySelectionTemplate(name: string): Promise<AppSelectionToken | null>;
+
+  /** Delete a template by name (slug match). */
+  deleteSelectionTemplate(name: string): Promise<void>;
+
+  // ------------------------------------------------------------------
+  // Never-block list
+  // ------------------------------------------------------------------
+
+  /**
+   * Present the picker (seeded with the saved never-block selection) for
+   * apps that stay AVAILABLE during every block. Persists on Done; throws
+   * on cancel (same contract as presentAppPicker).
+   */
+  presentNeverBlockPicker(): Promise<AppSelectionToken>;
+
+  /** Summary of the saved never-block selection, or null when none is set. */
+  getNeverBlockSummary(): AppSelectionToken | null;
+
+  /** Remove the never-block selection entirely. */
+  clearNeverBlockSelection(): Promise<void>;
+
+  /**
+   * Sign-out/delete hygiene: wipe the active selection, all templates, the
+   * never-block list, the shield session context, and violation counters
+   * from the app group so the next account starts clean.
+   */
+  clearAllSelections(): Promise<void>;
+
+  // ------------------------------------------------------------------
   // Blocking (session lifecycle)
   // ------------------------------------------------------------------
 
@@ -55,6 +103,14 @@ declare class NiyahScreenTimeModuleClass extends NativeModule<NiyahScreenTimeMod
 
   /** Check if apps are currently being blocked. */
   isBlocking(): boolean;
+
+  /**
+   * Per-category blocked-app attempt counts for the current session
+   * (cleared on startBlocking). Keys are the shield's coarse variants
+   * ("social" | "video" | "gaming" | "news" | "other") — iOS privacy
+   * never exposes which specific app was attempted.
+   */
+  getViolationsByCategory(): Record<string, number>;
 
   // ------------------------------------------------------------------
   // Scheduled blocking (DeviceActivitySchedule)

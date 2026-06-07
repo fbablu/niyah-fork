@@ -14,7 +14,7 @@ React Native Firebase packages provide Auth and Firestore:
 | `@react-native-firebase/firestore` | User profiles, wallets, sessions, follows              |
 | `@react-native-firebase/messaging` | FCM push notifications (token management, foreground)  |
 
-**Config files**: `GoogleService-Info.plist` (iOS) and `google-services.json` (Android) live in `firebase/` (gitignored). Injected at build time by the `withGoogleServicesPlist` and `withGoogleServicesJson` config plugins. `withFirebaseStaticFrameworks` handles CocoaPods static framework linking.
+**Config file**: `GoogleService-Info.plist` (iOS) lives in `firebase/` (gitignored). Injected at build time by the `withGoogleServicesPlist` config plugin. `withFirebaseStaticFrameworks` handles CocoaPods static framework linking.
 
 **JS wrapper**: `src/config/firebase.ts` -- all auth, Firestore CRUD, and social helpers.
 
@@ -23,6 +23,10 @@ React Native Firebase packages provide Auth and Firestore:
 Custom Expo module bridging iOS Screen Time API to JavaScript.
 
 ### Swift Components
+
+The first two files live in `modules/niyah-screentime/ios/`; the three extension files
+(`DeviceActivityMonitorExtension`, `ShieldActionExtension`, `ShieldConfigurationExtension`) now live
+under `targets/` and are registered by `@bacons/apple-targets` (see [iOS Extension Targets](#ios-extension-targets)).
 
 | File                                   | Purpose                                                                                                                                                                                                                               |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,12 +45,14 @@ Custom Expo module bridging iOS Screen Time API to JavaScript.
 - Blocking (`startBlocking` / `stopBlocking`)
 - Violation events (`onShieldViolation` subscription)
 
-### Config Plugins
+### Extension Registration
 
-| Plugin                         | What it does                                                                                                                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `withScreenTimeEntitlement.js` | Adds FamilyControls, App Groups (`group.com.niyah.app`), Push Notifications entitlements                                                                                     |
-| `withDeviceActivityMonitor.js` | Injects DeviceActivityMonitor extension target into Xcode project. Reads `config.version` for dynamic versioning. Extension embed phase currently disabled (see note below). |
+The Screen Time / Live Activity app extensions are **no longer injected by config plugins**. As of
+Lane B (2026-05-16) they live in top-level `targets/` (`monitor`, `report`, `shieldaction`,
+`shieldconfig`, `widget`) and are registered by `@bacons/apple-targets` via each target's
+`expo-target.config.json` (FamilyControls + App Group `group.com.niyah.app` entitlements declared
+there). The old `withScreenTimeEntitlement.js` / `withDeviceActivityMonitor.js` plugins were removed.
+See [iOS Extension Targets](#ios-extension-targets) below.
 
 ### Requirements
 
@@ -57,7 +63,7 @@ Custom Expo module bridging iOS Screen Time API to JavaScript.
 
 Swift code is production-quality. JS wrapper complete. Custom shield UI built and branded. Quick-block flow (`quick-block.tsx`) and group session flow (`active.tsx`) are wired to `startBlocking()`/`stopBlocking()`. Shield surrender desync fixed: shield sets `niyah_surrender_requested` flag + opens app via deep link, JS listener catches it and calls `stopBlocking()`. Scheduled blocking APIs (`startScheduledBlocking`/`stopScheduledBlocking`) exported but deferred post-demo.
 
-The extension embed phase in `withDeviceActivityMonitor.js` is intentionally disabled (caused `lstat` build failures). Will be re-enabled when Screen Time is fully wired into sessions. See [Roadmap](./roadmap.md).
+Extension targets are embedded by `@bacons/apple-targets` from `targets/` (see [iOS Extension Targets](#ios-extension-targets)); the old `withDeviceActivityMonitor.js` embed-phase workaround was retired with the migration. See [Roadmap](./roadmap.md).
 
 ### Custom Shield UX
 
@@ -84,8 +90,8 @@ iOS 16+ app extension built on the `DeviceActivityReport` API — the only sanct
 
 | File | Purpose |
 | ---- | ------- |
-| `ios/NiyahDeviceActivityReport/DeviceActivityReport.swift` | Extension entry point with SwiftUI scenes for daily/weekly views. |
-| `ios/NiyahDeviceActivityReport/Info.plist` | Bundle id `com.niyah.app.device-activity-report`, FamilyControls Distribution entitlement attached. |
+| `targets/report/DeviceActivityReport.swift` | Extension entry point with SwiftUI scenes for daily/weekly views. |
+| `targets/report/expo-target.config.json` | `type: device-activity-report`, bundle id suffix `.device-activity-report`, FamilyControls Distribution entitlement + App Group declared here. |
 | App Group `UserDefaults` (`group.com.niyah.app`) | Extension writes baseline snapshots (top apps + daily-average minutes per category). Main app reads via `getScreenTimeBaseline()`. |
 
 Bridge method on `NiyahScreenTimeModule.swift`:
@@ -99,7 +105,7 @@ JS wrapper in `src/config/screentime.ts`. Powers:
 - Redesigned app-selection onboarding (Lane B3 — "Select all apps to monitor" + per-app prioritization with usage badges).
 - Group equity cap-target model (see [Group Equity](./group-equity.md)) — provides the trusted `baselineMs` input to `calculatePayouts`.
 
-Plugin: `plugins/withScreenTimeExtensions.ts` is extended to register the new target alongside `device-activity-monitor`, `shield-action`, `shield-config`.
+Registration: declared as the `report` target (`targets/report/expo-target.config.json`) and picked up by `@bacons/apple-targets` alongside `monitor`, `shieldaction`, `shieldconfig`, and `widget`.
 
 ### `NiyahLiveActivity`
 
@@ -114,7 +120,7 @@ ActivityKit + WidgetKit widget extension for **lock-screen + Dynamic Island** in
 
 `ActivityAttributes` carries `sessionId`, `sessionType` (solo/group), `endsAt`, `blobAssetName`, and a compact leaderboard array (name + status + violations).
 
-Bridge methods (on a new `NiyahLiveActivityModule.swift` or extended `NiyahScreenTimeModule.swift`):
+Bridge methods (on `NiyahScreenTimeModule.swift`, exposed as `AsyncFunction`s):
 
 ```swift
 func startLiveActivity(attrs)

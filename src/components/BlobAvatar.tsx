@@ -10,16 +10,33 @@ import Svg, {
   ClipPath,
 } from "react-native-svg";
 import type {
-  BlobAvatarColorPreset,
   BlobAvatarConfig,
   BlobAvatarEyesPreset,
   BlobAvatarShapePreset,
 } from "../constants/blobAvatar";
+import { BLOB_PALETTES, generateBlobPath } from "../constants/blobAvatar";
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
 
 interface BlobAvatarProps {
   size?: number;
   config: BlobAvatarConfig;
+  /** Seed for the procedural "unique" shape (e.g. the user id). Ignored for
+   *  named preset shapes. */
+  seed?: string;
+  /** Opt-in subtle breathing idle — use sparingly on hero avatars only. */
+  animated?: boolean;
   onPress?: () => void;
+  /** VoiceOver label for the pressable avatar (role "button" is applied
+   *  automatically when onPress is set). */
+  accessibilityLabel?: string;
 }
 
 type ShapeConfig = {
@@ -59,41 +76,15 @@ const SHAPES: Record<BlobAvatarShapePreset, ShapeConfig> = {
     eyeGap: 22,
     eyeRadius: 4,
   },
-};
-
-const PALETTES: Record<
-  BlobAvatarColorPreset,
-  { start: string; end: string; backdrop: string }
-> = {
-  sunset: {
-    start: "#F0A090",
-    end: "#E07A5F",
-    backdrop: "#725A50",
-  },
-  ocean: {
-    start: "#64BFEE",
-    end: "#329DD8",
-    backdrop: "#2F5D78",
-  },
-  forest: {
-    start: "#5CB88A",
-    end: "#40916C",
-    backdrop: "#2E5C49",
-  },
-  berry: {
-    start: "#D38ECF",
-    end: "#A65EA1",
-    backdrop: "#5E3B66",
-  },
-  lemon: {
-    start: "#F5D76E",
-    end: "#E8B830",
-    backdrop: "#8B7D3C",
-  },
-  coral: {
-    start: "#FF8A80",
-    end: "#E05555",
-    backdrop: "#7A3535",
+  // Procedural blob: bodyPath is a placeholder; BlobAvatar regenerates it from
+  // the per-user `seed` at render. Centered in a 100×100 box with centered eyes.
+  unique: {
+    viewBox: "0 0 100 100",
+    bodyPath: generateBlobPath("niyah"),
+    eyeCenterX: 50,
+    eyeCenterY: 46,
+    eyeGap: 18,
+    eyeRadius: 4.2,
   },
 };
 
@@ -206,22 +197,58 @@ const Eyes: React.FC<{
 export const BlobAvatar: React.FC<BlobAvatarProps> = ({
   size = 84,
   config,
+  seed,
+  animated = false,
   onPress,
+  accessibilityLabel,
 }) => {
   const shape = SHAPES[config.shapePreset];
-  const palette = PALETTES[config.colorPreset];
+  const palette = BLOB_PALETTES[config.colorPreset];
   const idSuffix = React.useRef(Math.random().toString(36).slice(2, 9)).current;
+
+  // "unique" shapes are procedurally generated from a per-user seed so every
+  // user gets a stable, one-of-a-kind blob; named presets use their fixed
+  // path. A shuffled shapeSeed (onboarding Blob Maker) wins over the uid.
+  const bodyPath = React.useMemo(
+    () =>
+      config.shapePreset === "unique"
+        ? generateBlobPath(config.shapeSeed || seed || "guest")
+        : shape.bodyPath,
+    [config.shapePreset, config.shapeSeed, seed, shape.bodyPath],
+  );
+
+  // Opt-in subtle "breathing" idle so hero avatars feel alive (used sparingly).
+  const breathe = useSharedValue(1);
+  const reducedMotion = useReducedMotion();
+  React.useEffect(() => {
+    if (!animated || reducedMotion) {
+      breathe.value = 1;
+      return;
+    }
+    breathe.value = withRepeat(
+      withTiming(1.025, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+    return () => cancelAnimation(breathe);
+  }, [animated, reducedMotion, breathe]);
+  const breathingStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: breathe.value }],
+  }));
 
   const centerX = shape.eyeCenterX;
 
   const avatarBody = (
-    <View
-      style={{
-        width: size,
-        height: size,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
+    <Animated.View
+      style={[
+        {
+          width: size,
+          height: size,
+          alignItems: "center",
+          justifyContent: "center",
+        },
+        breathingStyle,
+      ]}
     >
       <View
         style={{
@@ -249,19 +276,19 @@ export const BlobAvatar: React.FC<BlobAvatarProps> = ({
             <Stop offset="1" stopColor={palette.end} stopOpacity={1} />
           </LinearGradient>
           <ClipPath id={`blobClip-${idSuffix}`}>
-            <Path d={shape.bodyPath} />
+            <Path d={bodyPath} />
           </ClipPath>
         </Defs>
 
         <Path
-          d={shape.bodyPath}
+          d={bodyPath}
           fill={`url(#blobGrad-${idSuffix})`}
           stroke="#120505"
           strokeWidth={2.6}
         />
 
         <G clipPath={`url(#blobClip-${idSuffix})`}>
-          <Path d={shape.bodyPath} fill="#000" opacity={0.1} x={2} y={3} />
+          <Path d={bodyPath} fill="#000" opacity={0.1} x={2} y={3} />
         </G>
 
         <Eyes
@@ -272,12 +299,17 @@ export const BlobAvatar: React.FC<BlobAvatarProps> = ({
           eyeRadius={shape.eyeRadius}
         />
       </Svg>
-    </View>
+    </Animated.View>
   );
 
   if (onPress) {
     return (
-      <Pressable onPress={onPress} hitSlop={8}>
+      <Pressable
+        onPress={onPress}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+      >
         {avatarBody}
       </Pressable>
     );

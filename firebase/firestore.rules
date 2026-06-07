@@ -15,6 +15,33 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if request.auth != null;
 
+      // blobAvatar is owner-writable but world-readable (every signed-in user
+      // reads it via profiles), so cap its shape server-side: known keys only,
+      // string values, bounded sizes. shapeSeed is the Blob Maker's procedural
+      // shape identifier (`uid:nonce`, ~45 chars — capped at 64). The client
+      // additionally whitelists preset *values* in normalizeBlobAvatarConfig;
+      // rules only bound key/type/size so a new preset doesn't need a rules
+      // deploy. Checks run on the post-merge state, so partial merge writes
+      // can't sneak junk keys into an existing map either.
+      function validBlobAvatar(data) {
+        return !('blobAvatar' in data.keys())
+          || (data.blobAvatar is map
+              && data.blobAvatar.keys().hasOnly(
+                   ['colorPreset', 'shapePreset', 'eyesPreset', 'shapeSeed'])
+              && (!('colorPreset' in data.blobAvatar)
+                  || (data.blobAvatar.colorPreset is string
+                      && data.blobAvatar.colorPreset.size() <= 16))
+              && (!('shapePreset' in data.blobAvatar)
+                  || (data.blobAvatar.shapePreset is string
+                      && data.blobAvatar.shapePreset.size() <= 16))
+              && (!('eyesPreset' in data.blobAvatar)
+                  || (data.blobAvatar.eyesPreset is string
+                      && data.blobAvatar.eyesPreset.size() <= 16))
+              && (!('shapeSeed' in data.blobAvatar)
+                  || (data.blobAvatar.shapeSeed is string
+                      && data.blobAvatar.shapeSeed.size() <= 64)));
+      }
+
       // Owner: full write access (profile setup, profile updates) EXCEPT
       // tamper-resistant fields written only by Cloud Functions:
       //   - legal acceptance (acceptLegalTerms CF)
@@ -48,6 +75,11 @@ service cloud.firestore {
         && (!('name' in request.resource.data.keys())
             || (request.resource.data.name is string
                 && request.resource.data.name.size() <= 120))
+        // Only enforced when the write touches blobAvatar, so a legacy doc
+        // with a pre-rule malformed map can still write unrelated fields.
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['blobAvatar'])
+            || validBlobAvatar(request.resource.data))
         && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
                 'legalAcceptanceVersion', 'legalAcceptedAt', 'ageAttested18',
@@ -86,6 +118,7 @@ service cloud.firestore {
         && (!('name' in request.resource.data.keys())
             || (request.resource.data.name is string
                 && request.resource.data.name.size() <= 120))
+        && validBlobAvatar(request.resource.data)
         && !request.resource.data.keys().hasAny([
              'legalAcceptanceVersion', 'legalAcceptedAt', 'ageAttested18',
              'stripeAccountId', 'stripeAccountStatus', 'stripeKycProvidedAt',
@@ -211,7 +244,28 @@ service cloud.firestore {
       allow update: if request.auth != null
         && resource.data.userId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'completedAt', 'updatedAt', 'violationCount']);
+             .hasOnly(['status', 'completedAt', 'updatedAt', 'violationCount',
+                       'surrenderReason', 'surrenderNote',
+                       'startedAtLocalHour', 'dayOfWeek'])
+        // AI Phase-0 capture fields (surrenderReason / surrenderNote /
+        // startedAtLocalHour / dayOfWeek) are benign analytics — NO money
+        // meaning. Bound them so a client can't bloat the doc. Financial fields
+        // (stakeAmount, potentialPayout, endsAt, actualPayout, cadence) remain
+        // immutable — not in the allowlist above.
+        && (!('surrenderReason' in request.resource.data.keys())
+            || (request.resource.data.surrenderReason is string
+                && request.resource.data.surrenderReason.size() <= 20))
+        && (!('surrenderNote' in request.resource.data.keys())
+            || (request.resource.data.surrenderNote is string
+                && request.resource.data.surrenderNote.size() <= 500))
+        && (!('startedAtLocalHour' in request.resource.data.keys())
+            || (request.resource.data.startedAtLocalHour is int
+                && request.resource.data.startedAtLocalHour >= 0
+                && request.resource.data.startedAtLocalHour <= 23))
+        && (!('dayOfWeek' in request.resource.data.keys())
+            || (request.resource.data.dayOfWeek is int
+                && request.resource.data.dayOfWeek >= 0
+                && request.resource.data.dayOfWeek <= 6));
 
       // No client-side deletes
       allow delete: if false;
@@ -313,10 +367,15 @@ service cloud.firestore {
     // Public read-only server-controlled kill switches. Fields:
     //   acceptingDeposits, acceptingWithdrawals, groupSessionsEnabled,
     //   soloSessionsEnabled
-    // Any authenticated user can read so the client can honor a toggle live.
+    // PUBLIC read (no auth gate) on purpose: the client attaches this snapshot
+    // listener at app boot — BEFORE Firebase Auth resolves — and a Firestore
+    // listener that hits permission-denied is torn down for good (the store's
+    // subscribe() never re-runs), so an auth gate left flags stuck on defaults
+    // for the whole session. These are non-sensitive UX kill switches (no PII,
+    // no money, no secrets), so global read is safe. Do NOT re-add an auth gate.
     // Writes are console-only (admin console, or gcloud) — never client.
     match /config/featureFlags {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if false;
     }
 

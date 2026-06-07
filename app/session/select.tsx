@@ -1,5 +1,23 @@
-import React, { useState, useRef, useMemo } from "react";
-import { View, Text, StyleSheet, Pressable, Animated } from "react-native";
+import React, { useState, useMemo } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedRef,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  type SharedValue,
+} from "react-native-reanimated";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   Typography,
@@ -39,8 +57,15 @@ const makeStyles = (Colors: ThemeColors) =>
       marginBottom: Spacing.sm,
       marginTop: Spacing.md,
     },
-    options: {
-      gap: Spacing.md,
+    carouselWrap: {
+      // Escape the scaffold's horizontal padding so cards peek edge-to-edge.
+      marginHorizontal: -Spacing.lg,
+    },
+    carouselHint: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      textAlign: "center",
+      marginTop: Spacing.sm,
       marginBottom: Spacing.lg,
     },
     optionCard: {
@@ -68,16 +93,17 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.bold,
       color: Colors.text,
     },
-    checkmark: {
-      backgroundColor: Colors.primary,
+    sectionChip: {
+      backgroundColor: Colors.backgroundTertiary,
       paddingHorizontal: Spacing.sm,
       paddingVertical: 2,
-      borderRadius: Radius.xs,
+      borderRadius: Radius.full,
     },
-    checkmarkText: {
+    sectionChipText: {
       fontSize: Typography.labelSmall,
       ...Font.semibold,
-      color: Colors.background,
+      color: Colors.textSecondary,
+      letterSpacing: 0.5,
     },
     optionDuration: {
       fontSize: Typography.labelSmall,
@@ -188,46 +214,61 @@ const makeStyles = (Colors: ThemeColors) =>
     },
   });
 
-interface CadenceOptionProps {
+interface CarouselCadenceCardProps {
   config: (typeof CADENCES)[CadenceType];
+  /** "QUICK" | "ENDURANCE" — section chip shown on the card itself since the
+   *  carousel merges both preset groups into one row. */
+  sectionLabel: string;
   isSelected: boolean;
   canAfford: boolean;
+  index: number;
+  scrollX: SharedValue<number>;
+  cardWidth: number;
+  snapInterval: number;
   onSelect: () => void;
 }
 
-const CadenceOption: React.FC<CadenceOptionProps> = ({
+const CarouselCadenceCard: React.FC<CarouselCadenceCardProps> = ({
   config,
+  sectionLabel,
   isSelected,
   canAfford,
+  index,
+  scrollX,
+  cardWidth,
+  snapInterval,
   onSelect,
 }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const reducedMotion = useReducedMotion();
 
-  const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.98,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
-  };
-
-  const handleSelect = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onSelect();
-  };
+  // The centered card sits at full scale; neighbors peek in slightly shrunk.
+  const animatedStyle = useAnimatedStyle(() => {
+    if (reducedMotion) return {};
+    const center = index * snapInterval;
+    return {
+      transform: [
+        {
+          scale: interpolate(
+            scrollX.value,
+            [center - snapInterval, center, center + snapInterval],
+            [0.94, 1, 0.94],
+            Extrapolation.CLAMP,
+          ),
+        },
+      ],
+    };
+  });
 
   return (
     <Pressable
-      onPress={canAfford ? handleSelect : undefined}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onSelect();
+      }}
     >
-      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <Animated.View style={[{ width: cardWidth }, animatedStyle]}>
         <View
           style={[
             styles.optionCard,
@@ -237,11 +278,9 @@ const CadenceOption: React.FC<CadenceOptionProps> = ({
         >
           <View style={styles.optionHeader}>
             <Text style={styles.optionName}>{config.name}</Text>
-            {isSelected && (
-              <View style={styles.checkmark}>
-                <Text style={styles.checkmarkText}>Selected</Text>
-              </View>
-            )}
+            <View style={styles.sectionChip}>
+              <Text style={styles.sectionChipText}>{sectionLabel}</Text>
+            </View>
           </View>
           <Text style={styles.optionDuration}>
             {USE_SHORT_TIMERS
@@ -274,11 +313,57 @@ function SelectCadenceScreenInner() {
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { width: windowWidth } = useWindowDimensions();
   const balance = useWalletStore((state) => state.balance);
-  const [selectedCadence, setSelectedCadence] = useState<CadenceType>(
-    (params.cadence as CadenceType) || "focus",
-  );
   const sessionType = params.type === "solo" ? "solo" : undefined;
+
+  // One horizontal carousel instead of a long vertical stack (swipe fatigue
+  // was a build-21 finding). Quick + Endurance merge into one row — each card
+  // carries its section chip. The "Test" dev preset is gated out of prod.
+  const visibleCadences = useMemo(
+    () =>
+      [...SHORT_CADENCES, ...LONG_CADENCES].filter(
+        (key) => USE_SHORT_TIMERS || key !== "test",
+      ) as CadenceType[],
+    [],
+  );
+  const sectionFor = (key: CadenceType) =>
+    (SHORT_CADENCES as readonly string[]).includes(key) ? "QUICK" : "ENDURANCE";
+
+  const CARD_WIDTH = Math.round(windowWidth * 0.78);
+  const SNAP_INTERVAL = CARD_WIDTH + Spacing.md;
+  const sidePadding = (windowWidth - CARD_WIDTH) / 2;
+
+  const initialCadence = (params.cadence as CadenceType) || "focus";
+  const initialIndex = Math.max(0, visibleCadences.indexOf(initialCadence));
+  const [selectedCadence, setSelectedCadence] = useState<CadenceType>(
+    visibleCadences[initialIndex] ?? "focus",
+  );
+
+  const scrollX = useSharedValue(initialIndex * SNAP_INTERVAL);
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollX.value = event.contentOffset.x;
+  });
+
+  const selectIndex = (index: number) => {
+    const key = visibleCadences[index];
+    if (!key || key === selectedCadence) return;
+    Haptics.selectionAsync();
+    setSelectedCadence(key);
+  };
+
+  const handleMomentumEnd = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / SNAP_INTERVAL);
+    selectIndex(Math.min(visibleCadences.length - 1, Math.max(0, index)));
+  };
+
+  const handleCardPress = (index: number) => {
+    selectIndex(index);
+    scrollRef.current?.scrollTo({ x: index * SNAP_INTERVAL, animated: true });
+  };
 
   const config = CADENCES[selectedCadence];
   const canAfford = balance >= config.stake;
@@ -320,33 +405,50 @@ function SelectCadenceScreenInner() {
         </>
       }
     >
-      {/* Quick Sessions */}
-      <Text style={styles.sectionTitle}>Quick Sessions</Text>
-      <View style={styles.options}>
-        {(SHORT_CADENCES as CadenceType[]).map((key) => (
-          <CadenceOption
-            key={key}
-            config={CADENCES[key]}
-            isSelected={selectedCadence === key}
-            canAfford={balance >= CADENCES[key].stake}
-            onSelect={() => setSelectedCadence(key)}
-          />
-        ))}
+      {/* Preset carousel — swipe sideways, snap to one card at a time */}
+      <Text style={styles.sectionTitle}>Pick a session</Text>
+      <View style={styles.carouselWrap}>
+        <Animated.ScrollView
+          ref={scrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={SNAP_INTERVAL}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          contentOffset={{ x: initialIndex * SNAP_INTERVAL, y: 0 }}
+          contentContainerStyle={{
+            paddingHorizontal: sidePadding,
+            gap: Spacing.md,
+          }}
+          onScroll={scrollHandler}
+          scrollEventThrottle={16}
+          onMomentumScrollEnd={handleMomentumEnd}
+          // iOS skips onMomentumScrollEnd when a drag releases with zero
+          // velocity already resting at a snap offset — without this fallback
+          // the centered card and the selection silently disagree.
+          onScrollEndDrag={(event) => {
+            if (Math.abs(event.nativeEvent.velocity?.x ?? 0) < 0.05) {
+              handleMomentumEnd(event);
+            }
+          }}
+        >
+          {visibleCadences.map((key, index) => (
+            <CarouselCadenceCard
+              key={key}
+              config={CADENCES[key]}
+              sectionLabel={sectionFor(key)}
+              isSelected={selectedCadence === key}
+              canAfford={balance >= CADENCES[key].stake}
+              index={index}
+              scrollX={scrollX}
+              cardWidth={CARD_WIDTH}
+              snapInterval={SNAP_INTERVAL}
+              onSelect={() => handleCardPress(index)}
+            />
+          ))}
+        </Animated.ScrollView>
       </View>
-
-      {/* Endurance Sessions */}
-      <Text style={styles.sectionTitle}>Endurance Sessions</Text>
-      <View style={styles.options}>
-        {(LONG_CADENCES as CadenceType[]).map((key) => (
-          <CadenceOption
-            key={key}
-            config={CADENCES[key]}
-            isSelected={selectedCadence === key}
-            canAfford={balance >= CADENCES[key].stake}
-            onSelect={() => setSelectedCadence(key)}
-          />
-        ))}
-      </View>
+      <Text style={styles.carouselHint}>Swipe to compare · tap to select</Text>
 
       {/* Summary */}
       <Card style={styles.summaryCard}>

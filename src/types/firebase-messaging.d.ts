@@ -10,6 +10,7 @@ declare module "@react-native-firebase/messaging" {
 
   export interface Messaging {
     requestPermission(): Promise<number>;
+    hasPermission(): Promise<number>;
     getToken(): Promise<string | null>;
     getAPNSToken(): Promise<string | null>;
     registerDeviceForRemoteMessages(): Promise<void>;
@@ -35,6 +36,7 @@ declare module "@react-native-firebase/messaging" {
 
   export function getMessaging(): Messaging;
   export function requestPermission(messaging: Messaging): Promise<number>;
+  export function hasPermission(messaging: Messaging): Promise<number>;
   export function getToken(messaging: Messaging): Promise<string | null>;
   export function getAPNSToken(messaging: Messaging): Promise<string | null>;
   export function registerDeviceForRemoteMessages(

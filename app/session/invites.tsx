@@ -28,6 +28,7 @@ import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useWalletStore } from "../../src/store/walletStore";
 import { formatMoney } from "../../src/utils/format";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
+import { validateAndPromptForAppSelection } from "../../src/config/screentime";
 import type { GroupInvite } from "../../src/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,6 +66,22 @@ function GroupInvitesScreenInner() {
     async (inviteId: string) => {
       const invite = pendingInvites.find((i) => i.id === inviteId);
       if (!invite) return;
+
+      // You block your OWN apps for the session — ensure auth + a selection
+      // before staking, so your block summary joins the group and you're
+      // actually shielded. Prompts inline; aborts (no stake) if declined.
+      const gate = await validateAndPromptForAppSelection();
+      if (!gate.ok) {
+        StatusBanner.show({
+          severity: "warn",
+          message:
+            gate.reason === "needs-auth"
+              ? "Screen Time access is required to block apps for this session."
+              : "Pick at least one app or category to block before accepting.",
+        });
+        return;
+      }
+
       setLoadingAccept(inviteId);
       try {
         await acceptInvite(inviteId);
@@ -151,6 +168,12 @@ function GroupInvitesScreenInner() {
             </Text>
           </View>
         </View>
+
+        {/* Solo-stake semantics (de-pool): your money, your outcome. */}
+        <Text style={styles.soloNote}>
+          You stake your own money. Finish your session and you get it back —
+          your friends&apos; results never change yours.
+        </Text>
 
         {/* Action buttons */}
         <View style={styles.buttonRow}>
@@ -333,6 +356,12 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.bodySmall,
       ...Font.medium,
       color: Colors.text,
+    },
+    soloNote: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: Spacing.md,
+      lineHeight: 18,
     },
 
     // ─── Buttons ──────────────────────────────────────────────────────

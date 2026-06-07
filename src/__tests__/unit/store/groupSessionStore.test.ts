@@ -1,3 +1,13 @@
+// startGroupSession is the legacy DEMO-only local path (it throws in live mode —
+// "use proposeSession instead"), so force DEMO to exercise it. The cloud group
+// flow (proposeSession + CFs) is covered by groupSessionStore.parsing.test.ts.
+// MUST precede imports — babel-jest hoists jest.mock().
+jest.mock("../../../constants/config", () => ({
+  ...jest.requireActual("../../../constants/config"),
+  DEMO_MODE: true,
+  USE_SHORT_TIMERS: true,
+}));
+
 import { useGroupSessionStore } from "../../../store/groupSessionStore";
 import { useWalletStore } from "../../../store/walletStore";
 import { useAuthStore } from "../../../store/authStore";

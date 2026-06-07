@@ -28,20 +28,22 @@ import { useColors } from "../../src/hooks/useColors";
 import { useScreenProtection } from "../../src/hooks/useScreenProtection";
 import * as Haptics from "expo-haptics";
 import {
-  Button,
+  SlideToConfirm,
   NumPad,
   AmountDisplay,
+  AnimatedNote,
+  MoneySuccessOverlay,
   SessionScreenScaffold,
   withErrorBoundary,
 } from "../../src/components";
 import { useWalletStore } from "../../src/store/walletStore";
 import { useFeatureFlagsStore } from "../../src/store/featureFlagsStore";
-import { formatMoney } from "../../src/utils/format";
+import { formatMoney, formatAmountInput } from "../../src/utils/format";
 import {
   createPaymentIntent,
   verifyAndCreditDeposit,
 } from "../../src/config/functions";
-import { DEMO_MODE } from "../../src/constants/config";
+import { DEMO_MODE, MAX_DEPOSIT_CENTS } from "../../src/constants/config";
 import { logger } from "../../src/utils/logger";
 import { logEvent } from "../../src/utils/analytics";
 import {
@@ -120,7 +122,9 @@ const getDepositErrorMessage = (error: unknown): string => {
   }
 
   if (/network request failed/i.test(message)) {
-    return "We couldn't reach the payment service. Check your connection and try again.";
+    // Not necessarily the user's connection — a stale SSL pin set kills these
+    // calls too (build 21 outage), and only a new app version fixes that.
+    return "We couldn't reach the payment service. Please try again in a moment — if it keeps happening, update to the latest version of Niyah.";
   }
 
   if (
@@ -205,9 +209,16 @@ function DepositScreenInner() {
     null,
   );
   const [isLoading, setIsLoading] = useState(false);
-  // Store paymentIntentId for retry if verify fails after payment succeeds
-  const [pendingVerifyId, setPendingVerifyId] = useState<string | null>(null);
+  // Store paymentIntentId for retry if verify fails after payment succeeds.
+  // The ref is the source of truth inside async closures — the state value is
+  // captured at render time, so reading it in handleStripeDeposit's catch saw
+  // null on first attempt and the "Retry" path was unreachable (the user got
+  // a generic "Deposit Failed" right after a successful charge).
+  const pendingVerifyIdRef = useRef<string | null>(null);
+  const [, setPendingVerifyId] = useState<string | null>(null);
   const [pendingVerifyAmount, setPendingVerifyAmount] = useState<number>(0);
+  // Set to the credited amount (cents) to show the celebratory success overlay.
+  const [successAmount, setSuccessAmount] = useState<number | null>(null);
 
   // Guard against setState after unmount + double router.back() crashes when
   // Stripe sheet dismisses mid-navigation ("every other time" black screen).
@@ -239,8 +250,22 @@ function DepositScreenInner() {
   const amountInCents = inputValue
     ? Math.round(parseFloat(inputValue) * 100)
     : 0;
-  const displayAmount = inputValue ? `$${inputValue}` : "";
-  const isValidAmount = amountInCents >= 100; // Minimum $1
+  const displayAmount = formatAmountInput(inputValue);
+  const isOverMax = amountInCents > MAX_DEPOSIT_CENTS;
+  // Min $1, max $500/transaction — mirrors the server ceiling so an over-limit
+  // amount is blocked here instead of round-tripping to Stripe and erroring.
+  const isValidAmount = amountInCents >= 100 && !isOverMax;
+  const maxDepositLabel = formatMoney(MAX_DEPOSIT_CENTS, false);
+
+  // Fire one warning haptic the moment the entered amount crosses the cap —
+  // Robinhood-style tactile feedback that the limit's been hit.
+  const wasOverMaxRef = useRef(false);
+  useEffect(() => {
+    if (isOverMax && !wasOverMaxRef.current) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    wasOverMaxRef.current = isOverMax;
+  }, [isOverMax]);
 
   const handleKeyPress = useCallback(
     (key: string) => {
@@ -289,7 +314,8 @@ function DepositScreenInner() {
           text: "Confirm",
           onPress: () => {
             deposit(finalAmount);
-            safeBack();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setSuccessAmount(finalAmount);
           },
         },
       ],
@@ -298,7 +324,8 @@ function DepositScreenInner() {
 
   const handleStripeDeposit = async () => {
     const finalAmount = selectedQuickAmount ?? amountInCents;
-    if (finalAmount < 100 || isLoading) return;
+    if (finalAmount < 100 || finalAmount > MAX_DEPOSIT_CENTS || isLoading)
+      return;
 
     if (!isStripePaymentsAvailable) {
       Alert.alert("Payments Unavailable", STRIPE_UNAVAILABLE_MESSAGE);
@@ -326,6 +353,7 @@ function DepositScreenInner() {
       }
 
       // Save for potential retry if verify fails after payment succeeds
+      pendingVerifyIdRef.current = paymentIntentId;
       setPendingVerifyId(paymentIntentId);
       setPendingVerifyAmount(finalAmount);
 
@@ -358,6 +386,10 @@ function DepositScreenInner() {
       });
 
       if (initError) {
+        logEvent("deposit_failed", {
+          reason: "init_failed",
+          amountCents: finalAmount,
+        });
         Alert.alert(
           "Payment Error",
           getErrorMessage(initError, "We couldn't open payments right now."),
@@ -369,6 +401,10 @@ function DepositScreenInner() {
 
       if (presentError) {
         if (!isUserCancellationError(presentError)) {
+          logEvent("deposit_failed", {
+            reason: "payment_failed",
+            amountCents: finalAmount,
+          });
           Alert.alert(
             "Payment Failed",
             getErrorMessage(
@@ -376,11 +412,17 @@ function DepositScreenInner() {
               "We couldn't complete your payment. Please try again.",
             ),
           );
+        } else {
+          logEvent("deposit_failed", {
+            reason: "cancelled",
+            amountCents: finalAmount,
+          });
         }
         return;
       }
 
       const result = await verifyAndCreditDeposit(paymentIntentId);
+      pendingVerifyIdRef.current = null;
       setPendingVerifyId(null);
 
       if ("processing" in result) {
@@ -395,16 +437,16 @@ function DepositScreenInner() {
         deposit(finalAmount, result.newBalance);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         logEvent("deposit_completed", { amountCents: finalAmount });
-        Alert.alert(
-          "Funds Added",
-          `${formatMoney(finalAmount)} added to your Niyah balance.`,
-          [{ text: "Done", onPress: safeBack }],
-        );
+        setSuccessAmount(finalAmount);
       }
     } catch (err) {
       logger.error("Deposit error:", err);
       // If payment sheet succeeded but verify failed, save for retry
-      if (pendingVerifyId) {
+      if (pendingVerifyIdRef.current) {
+        logEvent("deposit_failed", {
+          reason: "verify_failed",
+          amountCents: finalAmount,
+        });
         Alert.alert(
           "Verification Failed",
           "Your payment went through but we couldn't verify it. Tap Retry to try again — you won't be charged twice.",
@@ -414,6 +456,16 @@ function DepositScreenInner() {
           ],
         );
       } else {
+        // "network_failed" separates connectivity/pin outages from logic
+        // errors. logEvent writes via the native Firestore SDK (unpinned),
+        // so these events still flow even when the pinned fetch is dead.
+        const failureMessage = getFunctionErrorMessage(err, "");
+        logEvent("deposit_failed", {
+          reason: /network request failed/i.test(failureMessage)
+            ? "network_failed"
+            : "error",
+          amountCents: finalAmount,
+        });
         Alert.alert("Deposit Failed", getDepositErrorMessage(err));
       }
       // Resync wallet from Firestore in case server credited but client missed it
@@ -430,10 +482,12 @@ function DepositScreenInner() {
   };
 
   const handleRetryVerify = async () => {
-    if (!pendingVerifyId) return;
+    const verifyId = pendingVerifyIdRef.current;
+    if (!verifyId) return;
     setIsLoading(true);
     try {
-      const result = await verifyAndCreditDeposit(pendingVerifyId);
+      const result = await verifyAndCreditDeposit(verifyId);
+      pendingVerifyIdRef.current = null;
       setPendingVerifyId(null);
 
       if ("processing" in result) {
@@ -446,11 +500,7 @@ function DepositScreenInner() {
       } else {
         deposit(pendingVerifyAmount, result.newBalance);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert(
-          "Funds Added",
-          `${formatMoney(pendingVerifyAmount)} added to your Niyah balance.`,
-          [{ text: "Done", onPress: safeBack }],
-        );
+        setSuccessAmount(pendingVerifyAmount);
       }
     } catch (err) {
       logger.error("Retry verify error:", err);
@@ -473,90 +523,112 @@ function DepositScreenInner() {
   const handleDeposit = DEMO_MODE ? handleDemoDeposit : handleStripeDeposit;
 
   return (
-    <SessionScreenScaffold
-      headerVariant="centered"
-      headerTitle="Add Funds"
-      scrollable={false}
-    >
-      {/* Balance Info */}
-      <View style={styles.balanceInfo}>
-        <Text style={styles.balanceLabel}>Current Balance</Text>
-        <Text style={styles.balanceAmount}>{formatMoney(balance)}</Text>
-      </View>
-
-      {/* Amount Display */}
-      <AmountDisplay
-        amount={displayAmount}
-        label="Enter amount"
-        placeholder="$0"
-      />
-
-      {/* Quick Amounts */}
-      <View style={styles.quickAmountsContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.quickAmounts}
-        >
-          {QUICK_AMOUNTS.map((amount) => (
-            <QuickAmountButton
-              key={amount}
-              amount={amount}
-              onPress={handleQuickAmount}
-              isSelected={selectedQuickAmount === amount}
-            />
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* NumPad */}
-      <View style={styles.numPadContainer}>
-        <NumPad
-          onKeyPress={handleKeyPress}
-          onBackspace={handleBackspace}
-          showDecimal={true}
-        />
-      </View>
-
-      {/* CTA */}
-      <View style={styles.footer}>
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={Colors.primary} />
-            <Text style={styles.loadingText}>Processing payment...</Text>
-          </View>
-        ) : (
-          <Button
-            title={
-              depositsPaused
-                ? "Deposits paused"
-                : paymentsUnavailable
-                  ? "Payments unavailable"
-                  : isValidAmount
-                    ? `Add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
-                    : "Enter an amount"
-            }
-            onPress={handleDeposit}
-            disabled={
-              !isValidAmount ||
-              isLoading ||
-              paymentsUnavailable ||
-              depositsPaused
-            }
-            size="large"
-          />
-        )}
-        {(DEMO_MODE || paymentsUnavailable || depositsPaused) && (
-          <Text style={styles.disclaimer}>
-            {depositsPaused
-              ? "Deposits are temporarily paused. Try again soon."
-              : DEMO_MODE
-                ? "Demo mode - no real money"
-                : "Payments unavailable in this build"}
+    <>
+      <SessionScreenScaffold
+        headerVariant="centered"
+        headerTitle="Add Funds"
+        scrollable={false}
+      >
+        {/* Balance Info */}
+        <View style={styles.balanceInfo}>
+          <Text style={styles.balanceLabel}>Current Balance</Text>
+          <Text style={styles.balanceAmount}>{formatMoney(balance)}</Text>
+          <Text style={styles.balanceCap}>
+            Min $1 · max {maxDepositLabel} per deposit
           </Text>
+        </View>
+
+        {/* Amount Display */}
+        <AmountDisplay
+          amount={displayAmount}
+          label="Enter amount"
+          placeholder="$0"
+          isError={isOverMax}
+        />
+        {isOverMax && (
+          <AnimatedNote style={styles.errorText}>
+            You can deposit up to {maxDepositLabel} at a time.
+          </AnimatedNote>
         )}
-      </View>
-    </SessionScreenScaffold>
+
+        {/* Quick Amounts */}
+        <View style={styles.quickAmountsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickAmounts}
+          >
+            {QUICK_AMOUNTS.map((amount) => (
+              <QuickAmountButton
+                key={amount}
+                amount={amount}
+                onPress={handleQuickAmount}
+                isSelected={selectedQuickAmount === amount}
+              />
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* NumPad */}
+        <View style={styles.numPadContainer}>
+          <NumPad
+            onKeyPress={handleKeyPress}
+            onBackspace={handleBackspace}
+            showDecimal={true}
+          />
+        </View>
+
+        {/* CTA */}
+        <View style={styles.footer}>
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.loadingText}>Processing payment...</Text>
+            </View>
+          ) : (
+            <SlideToConfirm
+              title={
+                depositsPaused
+                  ? "Deposits paused"
+                  : paymentsUnavailable
+                    ? "Payments unavailable"
+                    : isValidAmount
+                      ? `Slide to add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
+                      : isOverMax
+                        ? `Max ${maxDepositLabel} per deposit`
+                        : "Enter an amount"
+              }
+              onConfirm={handleDeposit}
+              disabled={
+                !isValidAmount ||
+                isLoading ||
+                paymentsUnavailable ||
+                depositsPaused
+              }
+            />
+          )}
+          {(DEMO_MODE || paymentsUnavailable || depositsPaused) && (
+            <Text style={styles.disclaimer}>
+              {depositsPaused
+                ? "Deposits are temporarily paused. Try again soon."
+                : DEMO_MODE
+                  ? "Demo mode - no real money"
+                  : "Payments unavailable in this build"}
+            </Text>
+          )}
+        </View>
+      </SessionScreenScaffold>
+      <MoneySuccessOverlay
+        visible={successAmount !== null}
+        amountCents={successAmount ?? 0}
+        title="Funds Added"
+        subtitle="Added to your Niyah balance"
+        onDone={() => {
+          setSuccessAmount(null);
+          safeBack();
+        }}
+      />
+    </>
   );
 }
 
@@ -578,6 +650,18 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.titleMedium,
       ...Font.semibold,
       color: Colors.textSecondary,
+    },
+    balanceCap: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: Spacing.xs,
+    },
+    errorText: {
+      textAlign: "center",
+      color: Colors.danger,
+      fontSize: Typography.bodySmall,
+      marginTop: -Spacing.sm,
+      marginBottom: Spacing.sm,
     },
     quickAmountsContainer: {
       marginBottom: Spacing.lg,

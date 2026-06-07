@@ -23,6 +23,14 @@ import {
   withdrawDrawOrder,
   cardRefundableCents,
   drawDown,
+  computeDailyStakeState,
+  clampScheduledStake,
+  clampRewardMultiplier,
+  cappedRewardSurplus,
+  scheduledSessionDocId,
+  SCHEDULED_STAKE_MIN_CENTS,
+  SCHEDULED_STAKE_MAX_CENTS,
+  SCHEDULED_SURPLUS_CAP_CENTS,
   type Buckets,
 } from "./wallet";
 
@@ -168,4 +176,133 @@ test("promo credit to bonus keeps balance == sum(buckets)", () => {
     creditBalance: 0,
   };
   assert.equal(after.balance, sumBuckets(readBuckets(after)));
+});
+
+// ── scheduled staked session: stake clamp ────────────────────────────────────
+// Auto-staking runs while the user is away, so the stake size is NEVER trusted
+// from the client — it's clamped to [$2, $25] server-side.
+test("clampScheduledStake bounds a stake to [$2, $25]", () => {
+  assert.equal(clampScheduledStake(50), SCHEDULED_STAKE_MIN_CENTS); // below floor → $2
+  assert.equal(clampScheduledStake(0), SCHEDULED_STAKE_MIN_CENTS);
+  assert.equal(clampScheduledStake(-1000), SCHEDULED_STAKE_MIN_CENTS); // negative → floor
+  assert.equal(clampScheduledStake(99999), SCHEDULED_STAKE_MAX_CENTS); // above cap → $25
+  assert.equal(clampScheduledStake(500), 500); // in range, untouched
+  assert.equal(clampScheduledStake(SCHEDULED_STAKE_MIN_CENTS), 200);
+  assert.equal(clampScheduledStake(SCHEDULED_STAKE_MAX_CENTS), 2500);
+  assert.equal(clampScheduledStake(250.7), 251); // rounds to whole cents
+  // Non-finite garbage → the safe floor ($2, least money at risk), never max.
+  assert.equal(clampScheduledStake(Number.NaN), SCHEDULED_STAKE_MIN_CENTS);
+  assert.equal(clampScheduledStake(Infinity), SCHEDULED_STAKE_MIN_CENTS);
+});
+
+// ── scheduled staked session: reward multiplier clamp ────────────────────────
+test("clampRewardMultiplier bounds the reward to [1.0, 1.1]", () => {
+  assert.equal(clampRewardMultiplier(0.5), 1.0); // can't ever reduce principal
+  assert.equal(clampRewardMultiplier(1.0), 1.0);
+  assert.equal(clampRewardMultiplier(1.05), 1.05);
+  assert.equal(clampRewardMultiplier(1.1), 1.1);
+  assert.equal(clampRewardMultiplier(2.0), 1.1); // runaway → capped at 1.1
+  assert.equal(clampRewardMultiplier(Number.NaN), 1.0); // garbage → no surplus
+});
+
+// ── scheduled staked session: capped house-funded surplus ────────────────────
+test("cappedRewardSurplus: 1.0x grants zero surplus", () => {
+  assert.equal(cappedRewardSurplus(2500, 1.0, 100000), 0);
+});
+
+test("cappedRewardSurplus: bounded by the multiplier (10% of principal)", () => {
+  // $25 stake, 1.1x, plenty of deposits → +$2.50 surplus.
+  assert.equal(cappedRewardSurplus(2500, 1.1, 100000), 250);
+  // $2 stake, 1.1x → +$0.20.
+  assert.equal(cappedRewardSurplus(200, 1.1, 100000), 20);
+});
+
+test("cappedRewardSurplus: a promo-only wallet (no net deposits) earns nothing", () => {
+  // Skin-in-the-game rule: no real-money deposits → no house reward.
+  assert.equal(cappedRewardSurplus(2500, 1.1, 0), 0);
+});
+
+test("cappedRewardSurplus: never exceeds the $50 surplus cap", () => {
+  // Contrived huge principal + deposits: still capped at $50.
+  assert.equal(
+    cappedRewardSurplus(1_000_000, 1.1, 1_000_000),
+    SCHEDULED_SURPLUS_CAP_CENTS,
+  );
+});
+
+test("cappedRewardSurplus: net-deposits brake binds below the multiplier reward", () => {
+  // principal $25 @1.1x would be $2.50, but only $1 of net deposits → $1 cap.
+  assert.equal(cappedRewardSurplus(2500, 1.1, 100), 100);
+});
+
+// ── scheduled staked session: idempotency doc id ─────────────────────────────
+test("scheduledSessionDocId is stable within a UTC day, distinct across days", () => {
+  const uid = "user123";
+  const tid = "tmpl_morning";
+  const t1 = Date.parse("2026-06-03T00:00:01Z");
+  const t2 = Date.parse("2026-06-03T23:59:59Z");
+  const t3 = Date.parse("2026-06-04T00:00:01Z");
+  assert.equal(scheduledSessionDocId(uid, tid, t1), scheduledSessionDocId(uid, tid, t2));
+  assert.notEqual(scheduledSessionDocId(uid, tid, t1), scheduledSessionDocId(uid, tid, t3));
+  assert.equal(scheduledSessionDocId(uid, tid, t1), "scheduled_user123_tmpl_morning_2026-06-03");
+  // Different user or template → different key (no cross-contamination).
+  assert.notEqual(
+    scheduledSessionDocId(uid, tid, t1),
+    scheduledSessionDocId("other", tid, t1),
+  );
+  assert.notEqual(
+    scheduledSessionDocId(uid, tid, t1),
+    scheduledSessionDocId(uid, "tmpl_evening", t1),
+  );
+});
+
+// ── daily stake cap (atomic per-wallet counter) ──────────────────────────────
+// Replaces the old query-of-two-collections cap, which double-counted solo/
+// scheduled stakes (txn + session doc) and was racy. The counter counts each
+// stake once and the in-txn read/write makes the cap atomic.
+const STAKE_CAP = 2500; // $25
+const STAKE_DAY = Date.parse("2026-06-03T12:00:00Z"); // → "2026-06-03"
+
+test("daily stake: first stake of the day counts from 0", () => {
+  const s = computeDailyStakeState(undefined, undefined, 1000, STAKE_CAP, STAKE_DAY);
+  assert.equal(s.priorToday, 0);
+  assert.equal(s.newTotal, 1000);
+  assert.equal(s.exceedsCap, false);
+  assert.equal(s.dayKey, "2026-06-03");
+});
+
+test("daily stake: accumulates within the same UTC day (no double-count)", () => {
+  const s = computeDailyStakeState("2026-06-03", 2000, 400, STAKE_CAP, STAKE_DAY);
+  assert.equal(s.priorToday, 2000);
+  assert.equal(s.newTotal, 2400);
+  assert.equal(s.exceedsCap, false);
+});
+
+test("daily stake: exactly at the cap is allowed; one cent over is refused", () => {
+  assert.equal(
+    computeDailyStakeState("2026-06-03", 2000, 500, STAKE_CAP, STAKE_DAY).exceedsCap,
+    false, // 2000 + 500 == 2500 == cap
+  );
+  assert.equal(
+    computeDailyStakeState("2026-06-03", 2000, 501, STAKE_CAP, STAKE_DAY).exceedsCap,
+    true, // 2501 > cap
+  );
+});
+
+test("daily stake: a counter from a prior UTC day resets to 0", () => {
+  const s = computeDailyStakeState("2026-06-02", 2500, 1000, STAKE_CAP, STAKE_DAY);
+  assert.equal(s.priorToday, 0); // yesterday's total ignored
+  assert.equal(s.newTotal, 1000);
+  assert.equal(s.exceedsCap, false);
+});
+
+test("daily stake: garbage / negative stored total is treated as 0", () => {
+  assert.equal(
+    computeDailyStakeState("2026-06-03", -5, 1000, STAKE_CAP, STAKE_DAY).priorToday,
+    0,
+  );
+  assert.equal(
+    computeDailyStakeState("2026-06-03", "oops", 1000, STAKE_CAP, STAKE_DAY).priorToday,
+    0,
+  );
 });

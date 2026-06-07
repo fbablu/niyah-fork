@@ -29,7 +29,7 @@ pnpm install           # Install deps
 pnpm start             # Dev server (build dev client first)
 pnpm build:local       # iOS build to USB device
 pnpm test              # Run all tests
-pnpm ci                # lint + typecheck + test
+pnpm run ci            # lint + typecheck + test
 pnpm typecheck         # TypeScript check
 ```
 

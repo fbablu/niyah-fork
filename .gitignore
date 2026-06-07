@@ -71,3 +71,14 @@ expo-env.d.ts
 functions/.env*
 docs/misc/
 .claude/scheduled_tasks.lock
+
+# Local iOS build/submit logs
+build.log
+submit.log
+
+# Large local Expo docs snapshot (reconstructable from docs.expo.dev/llms/)
+expo-docs/*.rtf
+
+# Local tool/session artifacts
+.playwright-mcp/
+firestore-debug.log

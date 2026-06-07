@@ -32,13 +32,15 @@ import {
   Button,
   NumPad,
   AmountDisplay,
+  AnimatedNote,
+  MoneySuccessOverlay,
   SessionScreenScaffold,
   withErrorBoundary,
 } from "../../src/components";
 import { useWalletStore } from "../../src/store/walletStore";
 import { useAuthStore } from "../../src/store/authStore";
 import { useFeatureFlagsStore } from "../../src/store/featureFlagsStore";
-import { formatMoney } from "../../src/utils/format";
+import { formatMoney, formatAmountInput } from "../../src/utils/format";
 import {
   requestWithdrawal,
   createAccountLink,
@@ -75,6 +77,11 @@ function WithdrawScreenInner() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  // Set on a sent withdrawal to show the celebratory success overlay.
+  const [successInfo, setSuccessInfo] = useState<{
+    amount: number;
+    subtitle: string;
+  } | null>(null);
 
   // Guard against setState after unmount + double navigation, which crashes
   // "every other time" when Stripe modal dismiss races with React unmount.
@@ -115,7 +122,7 @@ function WithdrawScreenInner() {
   const amountInCents = inputValue
     ? Math.round(parseFloat(inputValue) * 100)
     : 0;
-  const displayAmount = inputValue ? `$${inputValue}` : "";
+  const displayAmount = formatAmountInput(inputValue);
   const isValidAmount =
     amountInCents >= 1000 &&
     amountInCents <= balance &&
@@ -319,11 +326,10 @@ function WithdrawScreenInner() {
           ? "within 30 minutes"
           : "in 1–2 business days";
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        "Withdrawal Sent",
-        `${formatMoney(amountInCents)} is on its way to your bank — arrives ${methodLabel}.`,
-        [{ text: "Done", onPress: safeBack }],
-      );
+      setSuccessInfo({
+        amount: amountInCents,
+        subtitle: `On its way to your bank — arrives ${methodLabel}.`,
+      });
       void result;
     } catch (err: unknown) {
       Alert.alert(
@@ -354,185 +360,205 @@ function WithdrawScreenInner() {
   // ── Method selection step ──────────────────────────────────────────────────
   if (step === "method") {
     return (
-      <SessionScreenScaffold
-        headerVariant="centered"
-        backLabel="Back"
-        headerTitle="Withdraw"
-        onBack={() => setStep("amount")}
-        scrollable={true}
-      >
-        {/* Amount summary */}
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Withdrawal Amount</Text>
-          <Text style={styles.summaryAmount}>{formatMoney(amountInCents)}</Text>
-        </View>
+      <>
+        <SessionScreenScaffold
+          headerVariant="centered"
+          backLabel="Back"
+          headerTitle="Withdraw"
+          onBack={() => setStep("amount")}
+          scrollable={true}
+        >
+          {/* Amount summary */}
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Withdrawal Amount</Text>
+            <Text style={styles.summaryAmount}>
+              {formatMoney(amountInCents)}
+            </Text>
+          </View>
 
-        {hasBankLinked && linkedBank ? (
-          <>
-            {/* Bank info */}
-            <View style={styles.bankCard}>
-              <View style={styles.bankIcon}>
-                <Text style={styles.bankIconText}>{"🏦"}</Text>
+          {hasBankLinked && linkedBank ? (
+            <>
+              {/* Bank info */}
+              <View style={styles.bankCard}>
+                <View style={styles.bankIcon}>
+                  <Text style={styles.bankIconText}>{"🏦"}</Text>
+                </View>
+                <View style={styles.bankInfo}>
+                  <Text style={styles.bankName}>
+                    {linkedBank.institutionName}
+                  </Text>
+                  <Text style={styles.bankMask}>
+                    Account ending in {linkedBank.mask}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={handleManageBank}
+                  style={styles.bankManageButton}
+                  hitSlop={10}
+                >
+                  <Text style={styles.bankManageText}>Manage</Text>
+                </Pressable>
               </View>
-              <View style={styles.bankInfo}>
-                <Text style={styles.bankName}>
-                  {linkedBank.institutionName}
-                </Text>
-                <Text style={styles.bankMask}>
-                  Account ending in {linkedBank.mask}
-                </Text>
-              </View>
-              <Pressable
-                onPress={handleManageBank}
-                style={styles.bankManageButton}
-                hitSlop={10}
-              >
-                <Text style={styles.bankManageText}>Manage</Text>
+
+              <Text style={styles.sectionLabel}>Select transfer speed</Text>
+
+              {/* Standard */}
+              <Pressable onPress={() => setSelectedMethod("standard")}>
+                <View
+                  style={[
+                    styles.methodCard,
+                    selectedMethod === "standard" && styles.methodCardSelected,
+                  ]}
+                >
+                  <View style={styles.methodCardHeader}>
+                    <View style={styles.methodInfo}>
+                      <Text
+                        style={[
+                          styles.methodTitle,
+                          selectedMethod === "standard" &&
+                            styles.methodTitleSelected,
+                        ]}
+                      >
+                        Standard Transfer
+                      </Text>
+                      <Text style={styles.methodSubtitle}>
+                        1–2 business days
+                      </Text>
+                    </View>
+                    <View style={styles.methodBadge}>
+                      <Text style={styles.methodBadgeText}>Free</Text>
+                    </View>
+                  </View>
+                </View>
               </Pressable>
-            </View>
 
-            <Text style={styles.sectionLabel}>Select transfer speed</Text>
-
-            {/* Standard */}
-            <Pressable onPress={() => setSelectedMethod("standard")}>
-              <View
-                style={[
-                  styles.methodCard,
-                  selectedMethod === "standard" && styles.methodCardSelected,
-                ]}
-              >
-                <View style={styles.methodCardHeader}>
-                  <View style={styles.methodInfo}>
-                    <Text
-                      style={[
-                        styles.methodTitle,
-                        selectedMethod === "standard" &&
-                          styles.methodTitleSelected,
-                      ]}
+              {/* Instant */}
+              <Pressable onPress={() => setSelectedMethod("instant")}>
+                <View
+                  style={[
+                    styles.methodCard,
+                    selectedMethod === "instant" && styles.methodCardSelected,
+                  ]}
+                >
+                  <View style={styles.methodCardHeader}>
+                    <View style={styles.methodInfo}>
+                      <Text
+                        style={[
+                          styles.methodTitle,
+                          selectedMethod === "instant" &&
+                            styles.methodTitleSelected,
+                        ]}
+                      >
+                        Instant Transfer
+                      </Text>
+                      <Text style={styles.methodSubtitle}>
+                        Within 30 minutes
+                      </Text>
+                    </View>
+                    <View
+                      style={[styles.methodBadge, styles.methodBadgeAccent]}
                     >
-                      Standard Transfer
-                    </Text>
-                    <Text style={styles.methodSubtitle}>1–2 business days</Text>
-                  </View>
-                  <View style={styles.methodBadge}>
-                    <Text style={styles.methodBadgeText}>Free</Text>
+                      <Text style={styles.methodBadgeTextAccent}>
+                        {formatMoney(instantFee)} fee
+                      </Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-            </Pressable>
+              </Pressable>
 
-            {/* Instant */}
-            <Pressable onPress={() => setSelectedMethod("instant")}>
-              <View
-                style={[
-                  styles.methodCard,
-                  selectedMethod === "instant" && styles.methodCardSelected,
-                ]}
-              >
-                <View style={styles.methodCardHeader}>
-                  <View style={styles.methodInfo}>
-                    <Text
-                      style={[
-                        styles.methodTitle,
-                        selectedMethod === "instant" &&
-                          styles.methodTitleSelected,
-                      ]}
-                    >
-                      Instant Transfer
-                    </Text>
-                    <Text style={styles.methodSubtitle}>Within 30 minutes</Text>
-                  </View>
-                  <View style={[styles.methodBadge, styles.methodBadgeAccent]}>
-                    <Text style={styles.methodBadgeTextAccent}>
-                      {formatMoney(instantFee)} fee
+              {/* Withdraw button + disclaimer */}
+              <View style={styles.footer}>
+                {isLoading ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                    <Text style={styles.loadingText}>
+                      Processing withdrawal...
                     </Text>
                   </View>
-                </View>
+                ) : (
+                  <>
+                    <Button
+                      title={`Withdraw ${formatMoney(amountInCents)}`}
+                      onPress={handleStripeWithdraw}
+                      size="large"
+                    />
+                    <Text style={styles.disclaimer}>
+                      Withdrawals are processed securely via Stripe. Niyah does
+                      not collect or store your banking information.
+                    </Text>
+                  </>
+                )}
               </View>
-            </Pressable>
-
-            {/* Withdraw button + disclaimer */}
-            <View style={styles.footer}>
-              {isLoading ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator size="small" color={Colors.primary} />
-                  <Text style={styles.loadingText}>
-                    Processing withdrawal...
+            </>
+          ) : (
+            /* Stripe not set up — onboarding */
+            <>
+              {isSettingUp || isCheckingStatus ? (
+                <View style={styles.linkingContainer}>
+                  <ActivityIndicator size="large" color={Colors.primary} />
+                  <Text style={styles.linkingText}>
+                    {isCheckingStatus
+                      ? "Checking account status..."
+                      : "Setting up withdrawals..."}
                   </Text>
                 </View>
               ) : (
-                <>
-                  <Button
-                    title={`Withdraw ${formatMoney(amountInCents)}`}
-                    onPress={handleStripeWithdraw}
-                    size="large"
-                  />
-                  <Text style={styles.disclaimer}>
-                    Withdrawals are processed securely via Stripe. Niyah does
-                    not collect or store your banking information.
+                <View style={styles.setupContainer}>
+                  <View style={styles.setupIconRow}>
+                    <Text style={styles.setupIcon}>{"🔒"}</Text>
+                  </View>
+                  <Text style={styles.setupTitle}>
+                    {!hasActiveStripe
+                      ? "Verify Your Identity"
+                      : "Connect Your Bank"}
                   </Text>
-                </>
-              )}
-            </View>
-          </>
-        ) : (
-          /* Stripe not set up — onboarding */
-          <>
-            {isSettingUp || isCheckingStatus ? (
-              <View style={styles.linkingContainer}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={styles.linkingText}>
-                  {isCheckingStatus
-                    ? "Checking account status..."
-                    : "Setting up withdrawals..."}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.setupContainer}>
-                <View style={styles.setupIconRow}>
-                  <Text style={styles.setupIcon}>{"🔒"}</Text>
+                  <Text style={styles.setupDescription}>
+                    {!hasActiveStripe
+                      ? "Complete a quick, secure verification to enable withdrawals. You'll verify your identity and connect your bank account."
+                      : "Add a bank account to receive your withdrawals."}
+                  </Text>
+                  <Button
+                    title={
+                      !hasActiveStripe
+                        ? "Continue to Verification"
+                        : "Add Bank Account"
+                    }
+                    onPress={handleSetupStripe}
+                    size="large"
+                    style={styles.setupButton}
+                  />
+                  {(stripeStatus === "pending" ||
+                    stripeStatus === "restricted") && (
+                    <Pressable
+                      onPress={checkStripeStatus}
+                      style={styles.refreshButton}
+                    >
+                      <Text style={styles.refreshText}>
+                        Already completed? Tap to refresh
+                      </Text>
+                    </Pressable>
+                  )}
+                  <Text style={styles.disclaimer}>
+                    Verification is handled by Stripe, a trusted payment
+                    processor. Niyah never sees or stores your sensitive
+                    information.
+                  </Text>
                 </View>
-                <Text style={styles.setupTitle}>
-                  {!hasActiveStripe
-                    ? "Verify Your Identity"
-                    : "Connect Your Bank"}
-                </Text>
-                <Text style={styles.setupDescription}>
-                  {!hasActiveStripe
-                    ? "Complete a quick, secure verification to enable withdrawals. You'll verify your identity and connect your bank account."
-                    : "Add a bank account to receive your withdrawals."}
-                </Text>
-                <Button
-                  title={
-                    !hasActiveStripe
-                      ? "Continue to Verification"
-                      : "Add Bank Account"
-                  }
-                  onPress={handleSetupStripe}
-                  size="large"
-                  style={styles.setupButton}
-                />
-                {(stripeStatus === "pending" ||
-                  stripeStatus === "restricted") && (
-                  <Pressable
-                    onPress={checkStripeStatus}
-                    style={styles.refreshButton}
-                  >
-                    <Text style={styles.refreshText}>
-                      Already completed? Tap to refresh
-                    </Text>
-                  </Pressable>
-                )}
-                <Text style={styles.disclaimer}>
-                  Verification is handled by Stripe, a trusted payment
-                  processor. Niyah never sees or stores your sensitive
-                  information.
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-      </SessionScreenScaffold>
+              )}
+            </>
+          )}
+        </SessionScreenScaffold>
+        <MoneySuccessOverlay
+          visible={successInfo !== null}
+          amountCents={successInfo?.amount ?? 0}
+          title="Withdrawal Sent"
+          subtitle={successInfo?.subtitle}
+          onDone={() => {
+            setSuccessInfo(null);
+            safeBack();
+          }}
+        />
+      </>
     );
   }
 
@@ -567,8 +593,9 @@ function WithdrawScreenInner() {
         amount={displayAmount}
         label="Enter amount"
         placeholder="$0"
+        isError={!!error}
       />
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {error && <AnimatedNote style={styles.errorText}>{error}</AnimatedNote>}
 
       <View style={styles.numPadContainer}>
         <NumPad

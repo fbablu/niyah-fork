@@ -15,6 +15,10 @@ export interface FeatureFlags {
   acceptingWithdrawals: boolean;
   groupSessionsEnabled: boolean;
   soloSessionsEnabled: boolean;
+  /** Gates the never-block UI (Profile card + reads). The native subtraction
+   *  itself is a no-op until a never-block list is saved, so flag-off both
+   *  hides the entry point and prevents new lists from being created. */
+  neverBlockEnabled: boolean;
 }
 
 const DEFAULTS: FeatureFlags = {
@@ -22,6 +26,7 @@ const DEFAULTS: FeatureFlags = {
   acceptingWithdrawals: true,
   groupSessionsEnabled: true,
   soloSessionsEnabled: true,
+  neverBlockEnabled: true,
 };
 
 interface FeatureFlagsState {
@@ -55,6 +60,8 @@ export const useFeatureFlagsStore = create<FeatureFlagsState>((set) => ({
               data?.groupSessionsEnabled ?? DEFAULTS.groupSessionsEnabled,
             soloSessionsEnabled:
               data?.soloSessionsEnabled ?? DEFAULTS.soloSessionsEnabled,
+            neverBlockEnabled:
+              data?.neverBlockEnabled ?? DEFAULTS.neverBlockEnabled,
           },
           loaded: true,
         });

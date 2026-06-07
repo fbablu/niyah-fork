@@ -16,7 +16,12 @@ import { INITIAL_BALANCE } from "../../../constants/config";
 describe("walletStore", () => {
   // Reset stores before each test
   beforeEach(() => {
-    // Reset wallet store to initial state
+    // Logout FIRST — in the de-pooled wallet, logout()/reset wipes the wallet
+    // to balance 0 (non-DEMO has no welcome bonus). Seed the known fixture
+    // AFTER, so these arithmetic tests start from a deterministic balance.
+    useAuthStore.getState().logout();
+
+    // Seed wallet store with a known fixture for the math tests below.
     useWalletStore.setState({
       balance: INITIAL_BALANCE,
       transactions: [
@@ -30,9 +35,6 @@ describe("walletStore", () => {
       ],
       pendingWithdrawal: 0,
     });
-
-    // Logout to reset auth store
-    useAuthStore.getState().logout();
   });
 
   describe("initial state", () => {

@@ -10,13 +10,26 @@
  * to control Platform.OS and Platform.Version before the module loads.
  */
 
+import type { AppSelectionToken } from "../../../../modules/niyah-screentime";
+
+// Default token returned by the selection mocks (real native type is a token
+// object, not a string — keep the mock type-accurate).
+const DEFAULT_TOKEN: AppSelectionToken = {
+  id: "sel-default",
+  appCount: 5,
+  categoryCount: 0,
+  label: "5 apps, 0 categories",
+};
+
 // Shared mock for the native module — kept outside isolateModules so we can
 // inspect calls from any test.
 const mockNativeModule = {
   requestAuthorization: jest.fn(() => Promise.resolve("authorized")),
   getAuthorizationStatus: jest.fn(() => "authorized"),
-  presentAppPicker: jest.fn(() => Promise.resolve("mock-token")),
-  getSavedSelection: jest.fn(() => "mock-selection"),
+  presentAppPicker: jest.fn(
+    (): Promise<AppSelectionToken> => Promise.resolve(DEFAULT_TOKEN),
+  ),
+  getSavedSelection: jest.fn((): AppSelectionToken | null => DEFAULT_TOKEN),
   clearSelection: jest.fn(() => Promise.resolve()),
   startBlocking: jest.fn(() => Promise.resolve()),
   stopBlocking: jest.fn(() => Promise.resolve()),
@@ -35,10 +48,8 @@ function resetNativeMocks() {
     .mockReturnValue("authorized");
   mockNativeModule.presentAppPicker
     .mockClear()
-    .mockImplementation(() => Promise.resolve("mock-token"));
-  mockNativeModule.getSavedSelection
-    .mockClear()
-    .mockReturnValue("mock-selection");
+    .mockImplementation(() => Promise.resolve(DEFAULT_TOKEN));
+  mockNativeModule.getSavedSelection.mockClear().mockReturnValue(DEFAULT_TOKEN);
   mockNativeModule.clearSelection
     .mockClear()
     .mockImplementation(() => Promise.resolve());
@@ -239,13 +250,13 @@ describe("screentime", () => {
     it("presentAppPicker delegates to NiyahScreenTime", async () => {
       const result = await st.presentAppPicker();
       expect(mockNativeModule.presentAppPicker).toHaveBeenCalled();
-      expect(result).toBe("mock-token");
+      expect(result).toEqual(DEFAULT_TOKEN);
     });
 
     it("getSavedAppSelection delegates to NiyahScreenTime", () => {
       const result = st.getSavedAppSelection();
       expect(mockNativeModule.getSavedSelection).toHaveBeenCalled();
-      expect(result).toBe("mock-selection");
+      expect(result).toEqual(DEFAULT_TOKEN);
     });
 
     it("clearAppSelection delegates to NiyahScreenTime", async () => {
@@ -324,6 +335,152 @@ describe("screentime", () => {
 
       unsub();
       expect(mockRemove).toHaveBeenCalled();
+    });
+  });
+
+  // ─── App-selection gate (Phase 1: never start a session unshielded) ───────
+
+  const token = (appCount: number, categoryCount: number) => ({
+    id: "sel-1",
+    appCount,
+    categoryCount,
+    label: `${appCount} apps, ${categoryCount} categories`,
+  });
+
+  describe("app-selection gate — unavailable device", () => {
+    let st: ReturnType<typeof loadScreenTimeModule>;
+    beforeEach(() => {
+      mockPlatformOS = "android";
+      mockPlatformVersion = 33;
+      st = loadScreenTimeModule();
+    });
+
+    it("getAppSelectionStatus reports available:false but does not trap the user", () => {
+      const s = st.getAppSelectionStatus();
+      expect(s).toEqual({
+        available: false,
+        authorized: true,
+        hasApps: true,
+        selection: null,
+      });
+    });
+
+    it("validateAndPromptForAppSelection resolves ok (blocking can't apply here)", async () => {
+      const r = await st.validateAndPromptForAppSelection();
+      expect(r.ok).toBe(true);
+      expect(r).toMatchObject({ reason: "unavailable" });
+      expect(mockNativeModule.presentAppPicker).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("app-selection gate — available device", () => {
+    let st: ReturnType<typeof loadScreenTimeModule>;
+    beforeEach(() => {
+      mockPlatformOS = "ios";
+      mockPlatformVersion = "16";
+      st = loadScreenTimeModule();
+    });
+
+    it("ready when authorized with a non-empty app selection", () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(token(5, 0));
+      expect(st.getAppSelectionStatus()).toMatchObject({
+        available: true,
+        authorized: true,
+        hasApps: true,
+      });
+    });
+
+    it("counts a category-only selection as non-empty (appCount 0, categoryCount 2)", () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(token(0, 2));
+      expect(st.getAppSelectionStatus().hasApps).toBe(true);
+    });
+
+    it("hasApps:false when the selection names no apps and no categories", () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(token(0, 0));
+      expect(st.getAppSelectionStatus().hasApps).toBe(false);
+    });
+
+    it("authorized:false when Screen Time auth is not 'approved'", () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("denied");
+      mockNativeModule.getSavedSelection.mockReturnValue(token(5, 0));
+      expect(st.getAppSelectionStatus().authorized).toBe(false);
+    });
+
+    it("gate ok without prompting when already authorized + selected", async () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(token(3, 0));
+      const r = await st.validateAndPromptForAppSelection();
+      expect(r).toMatchObject({ ok: true, reason: "ready" });
+      expect(mockNativeModule.requestAuthorization).not.toHaveBeenCalled();
+      expect(mockNativeModule.presentAppPicker).not.toHaveBeenCalled();
+    });
+
+    it("gate returns needs-auth when auth is declined", async () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("notDetermined");
+      mockNativeModule.requestAuthorization.mockResolvedValue("denied");
+      const r = await st.validateAndPromptForAppSelection();
+      expect(r).toEqual({ ok: false, reason: "needs-auth" });
+      expect(mockNativeModule.presentAppPicker).not.toHaveBeenCalled();
+    });
+
+    it("gate prompts the picker when selection is empty, then succeeds", async () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(null);
+      mockNativeModule.presentAppPicker.mockResolvedValue(token(4, 1));
+      const r = await st.validateAndPromptForAppSelection();
+      expect(mockNativeModule.presentAppPicker).toHaveBeenCalled();
+      expect(r).toMatchObject({ ok: true, reason: "ready" });
+    });
+
+    it("gate returns no-selection when the picker yields an empty selection", async () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(null);
+      mockNativeModule.presentAppPicker.mockResolvedValue(token(0, 0));
+      const r = await st.validateAndPromptForAppSelection();
+      expect(r).toEqual({ ok: false, reason: "no-selection" });
+    });
+
+    it("gate returns no-selection when the picker is cancelled (throws)", async () => {
+      mockNativeModule.getAuthorizationStatus.mockReturnValue("approved");
+      mockNativeModule.getSavedSelection.mockReturnValue(null);
+      mockNativeModule.presentAppPicker.mockRejectedValue(
+        new Error("cancelled"),
+      );
+      const r = await st.validateAndPromptForAppSelection();
+      expect(r).toEqual({ ok: false, reason: "no-selection" });
+    });
+
+    // getSavedAppBlockSummary — the shareable summary attached to group sessions
+    it("getSavedAppBlockSummary maps a non-empty selection to counts + label", () => {
+      mockNativeModule.getSavedSelection.mockReturnValue(token(4, 1));
+      expect(st.getSavedAppBlockSummary()).toEqual({
+        appCount: 4,
+        categoryCount: 1,
+        label: "4 apps, 1 categories",
+      });
+    });
+
+    it("getSavedAppBlockSummary returns undefined for an empty selection", () => {
+      mockNativeModule.getSavedSelection.mockReturnValue(token(0, 0));
+      expect(st.getSavedAppBlockSummary()).toBeUndefined();
+    });
+
+    it("getSavedAppBlockSummary returns undefined when nothing is saved", () => {
+      mockNativeModule.getSavedSelection.mockReturnValue(null);
+      expect(st.getSavedAppBlockSummary()).toBeUndefined();
+    });
+  });
+
+  describe("getSavedAppBlockSummary — unavailable device", () => {
+    it("returns undefined (no selection possible)", () => {
+      mockPlatformOS = "android";
+      mockPlatformVersion = 33;
+      const st = loadScreenTimeModule();
+      expect(st.getSavedAppBlockSummary()).toBeUndefined();
+      expect(mockNativeModule.getSavedSelection).not.toHaveBeenCalled();
     });
   });
 });

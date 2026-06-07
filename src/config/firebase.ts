@@ -19,6 +19,7 @@ import {
   signInWithPhoneNumber as rnfbSignInWithPhoneNumber,
 } from "@react-native-firebase/auth";
 import type { FirebaseAuthTypes } from "@react-native-firebase/auth";
+import type { BlobAvatarConfig } from "../constants/blobAvatar";
 import {
   getFirestore,
   collection,
@@ -269,11 +270,7 @@ export const saveUserProfile = async (
     email?: string;
     phone?: string;
     profileImage?: string;
-    blobAvatar?: {
-      colorPreset: "sunset" | "ocean" | "forest" | "berry" | "lemon" | "coral";
-      shapePreset: "peach" | "wave" | "petal";
-      eyesPreset: "classic" | "happy" | "wink" | "sleepy" | "surprised";
-    };
+    blobAvatar?: BlobAvatarConfig;
     authProvider: "google" | "apple" | "email" | "phone";
   },
 ): Promise<void> => {
@@ -517,6 +514,11 @@ export interface SessionDoc {
   status: string;
   completedAt?: FirebaseFirestoreTypes.Timestamp;
   actualPayout?: number;
+  // AI Phase-0 capture (analytics only; no money meaning).
+  startedAtLocalHour?: number;
+  dayOfWeek?: number;
+  surrenderReason?: string;
+  surrenderNote?: string;
 }
 
 export const writeSession = async (
@@ -529,6 +531,8 @@ export const writeSession = async (
     startedAt: Date;
     endsAt: Date;
     status: string;
+    startedAtLocalHour?: number;
+    dayOfWeek?: number;
   },
 ): Promise<void> => {
   await setDoc(doc(db, COLLECTIONS.SESSIONS, sessionId), {
@@ -542,20 +546,41 @@ export const writeSession = async (
 export const updateSession = async (
   sessionId: string,
   data: {
-    status: string;
+    status?: string;
     completedAt?: Date;
     violationCount?: number;
+    // AI Phase-0 capture (analytics only; no money meaning). Persisting these
+    // requires the matching keys in the sessions update allowlist in
+    // firebase/firestore.rules; the writes are fire-and-forget either way.
+    surrenderReason?: string;
+    surrenderNote?: string;
+    startedAtLocalHour?: number;
+    dayOfWeek?: number;
   },
 ): Promise<void> => {
   const updateData: Record<string, unknown> = {
-    status: data.status,
     updatedAt: serverTimestamp(),
   };
+  if (data.status !== undefined) {
+    updateData.status = data.status;
+  }
   if (data.completedAt) {
     updateData.completedAt = Timestamp.fromDate(data.completedAt);
   }
   if (data.violationCount !== undefined) {
     updateData.violationCount = data.violationCount;
+  }
+  if (data.surrenderReason !== undefined) {
+    updateData.surrenderReason = data.surrenderReason;
+  }
+  if (data.surrenderNote !== undefined) {
+    updateData.surrenderNote = data.surrenderNote;
+  }
+  if (data.startedAtLocalHour !== undefined) {
+    updateData.startedAtLocalHour = data.startedAtLocalHour;
+  }
+  if (data.dayOfWeek !== undefined) {
+    updateData.dayOfWeek = data.dayOfWeek;
   }
   // actualPayout is written exclusively by Cloud Functions (admin SDK).
   // Client writes to this field are blocked by Firestore security rules.

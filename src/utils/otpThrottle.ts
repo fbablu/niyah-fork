@@ -35,8 +35,15 @@ interface ThrottleRecord {
   hardCooldownUntil?: number;
 }
 
+// expo-secure-store keys must match /^[A-Za-z0-9._-]+$/. BOTH parts of the key
+// have to satisfy that: the old "@niyah/otp_throttle:" prefix (illegal "@", "/",
+// ":") AND the leading "+" of an E.164 phone both made every read/write throw
+// "Invalid key provided to SecureStore", so the throttle silently never
+// persisted. Use an all-legal prefix and strip the phone to digits only (still
+// normalises differently-formatted spellings of the same number to one record).
+const KEY_PREFIX = "niyah_otp_throttle_";
 const keyFor = (phone: string): string =>
-  `@niyah/otp_throttle:${phone.replace(/[^+0-9]/g, "")}`;
+  `${KEY_PREFIX}${phone.replace(/[^0-9]/g, "")}`;
 
 async function read(phone: string): Promise<ThrottleRecord | null> {
   try {

@@ -34,6 +34,20 @@ export interface AppSelectionToken {
 }
 
 /**
+ * A named block-list template — a saved FamilyActivitySelection the user can
+ * re-apply without re-doing the picker. Tokens stay native; this is the
+ * JS-visible summary row from the app-group index.
+ */
+export interface SelectionTemplate extends AppSelectionToken {
+  /** Display name as entered by the user ("Work block"). */
+  name: string;
+  /** Stable key derived from the name; same-name saves overwrite. */
+  slug: string;
+  /** ms since epoch */
+  createdAt: number;
+}
+
+/**
  * Event fired when a user opens a shielded/blocked app during a session.
  * This is the key event that triggers money deduction in Niyah.
  */
@@ -41,6 +55,13 @@ export interface ShieldViolationEvent {
   /** Timestamp (ms since epoch) when the violation occurred */
   timestamp: number;
 }
+
+/**
+ * Coarse category of a blocked-app attempt, classified by the shield
+ * extension. Per-app identification is impossible (Apple privacy model);
+ * these variants are the ceiling of what the host app can know.
+ */
+export type ViolationCategory = "social" | "video" | "gaming" | "news" | "other";
 
 /**
  * Events emitted by the NiyahScreenTime native module.

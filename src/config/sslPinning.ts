@@ -6,11 +6,24 @@
  * certificate validation that bypasses React Native's networking layer.
  *
  * Pin hashes are derived from the server's PUBLIC key (safe to publish).
- * Pinned to intermediate CA (WE2) and root CA (GTS Root R4), NOT the leaf
- * cert, since Google rotates leaf certs frequently.
  *
- * To refresh pin hashes if Google rotates their CA chain, replace
- * <YOUR_PROJECT_ID> with the Firebase project ID and run:
+ * PIN THE FULL GTS ROOT SET (R1-R4) — never leaves or intermediates. Google
+ * rotates intermediates without notice (the WE2 → WR2 rotation broke every
+ * prod CF call on build 21: deposits, delete-account, legal acceptance all
+ * died as "Network request failed") and freely switches between the RSA
+ * (R1/R2 via WR*) and ECDSA (R3/R4 via WE*) chain families per connection.
+ * Pinning all four roots survives both. The GlobalSign cross-signed
+ * "GTS Root R1" cert carries the same public key as the self-signed R1, so
+ * the R1 pin matches it too — no separate GlobalSign pin needed.
+ *
+ * To re-derive the root pins from Google's authoritative repository:
+ *    for r in r1 r2 r3 r4; do
+ *      curl -fsS "https://i.pki.goog/${r}.pem" | openssl x509 -pubkey -noout \
+ *        | openssl pkey -pubin -outform der \
+ *        | openssl dgst -sha256 -binary | openssl enc -base64
+ *    done
+ *
+ * To inspect what the server currently chains to:
  *    openssl s_client -showcerts -connect us-central1-<YOUR_PROJECT_ID>.cloudfunctions.net:443 \
  *      -servername us-central1-<YOUR_PROJECT_ID>.cloudfunctions.net 2>/dev/null \
  *      | openssl x509 -pubkey -noout \
@@ -57,14 +70,21 @@ export async function initializeSslPinning(): Promise<void> {
       [FUNCTIONS_HOST]: {
         includeSubdomains: false,
         publicKeyHashes: [
-          // Pin to intermediate + root CAs (NOT the leaf cert, which Google rotates).
-          // Intermediate: Google Trust Services WE2 (issues the leaf cert)
-          "vh78KSg1Ry4NaqGDV10w/cTb9VH3BQUZoCWNa93W/EY=",
-          // Root: GTS Root R4 (backup — survives intermediate rotation)
+          // All four GTS roots — covers both the RSA (WR*) and ECDSA (WE*)
+          // intermediate families Google rotates between. Derived from
+          // https://i.pki.goog/{r1..r4}.pem on 2026-06-06 (see header).
+          // GTS Root R1 (RSA family — current prod chain: leaf ← WR2 ← R1)
+          "hxqRlPTu1bMS/0DITB1SSu0vd4u/8l8TjPgfaAp63Gc=",
+          // GTS Root R2 (RSA family)
+          "Vfd95BwDeSQo+NUYxVEEIlvkOlWY2SalKK1lPhzOx78=",
+          // GTS Root R3 (ECDSA family)
+          "QXnt2YHvdHR3tJYmQIr0Paosp6t/nggsEGD4QJZ3Q0g=",
+          // GTS Root R4 (ECDSA family)
           "mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=",
         ],
         // Safety valve: if pins expire, degrade to normal TLS rather than
-        // bricking the app. Set this to ~1 year from now and rotate before expiry.
+        // bricking the app. Re-verify pins against pki.goog and extend
+        // before this date (GTS roots themselves are stable to 2036+).
         expirationDate: "2027-01-01",
       },
     });

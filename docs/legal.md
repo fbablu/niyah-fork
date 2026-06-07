@@ -2,7 +2,7 @@
 
 > Legal framing, gambling analysis, and App Store strategy.
 > Reflects the **de-pooled commitment-contract** model shipped on `wallet-ledger` (2026-05).
-> See also: [Payments](./payments.md) | [Features](./features.md) | hosted docs in [`/legal`](../legal/)
+> See also: [Payments](./payments.md) | [Features](./features.md) | hosted docs at `niyah.live/legal/{privacy,terms}` ([source](../landing-pg/app/legal/))
 
 ## Commitment Contract, Not Gambling
 
@@ -65,9 +65,9 @@ Posture (not counsel — revisit at scale):
 - **Category**: Productivity (NOT Games).
 - **Avoid words**: "bet," "wager," "gamble," "win." **Use**: "stake," "commitment," "goal," "complete," "Earned."
 - **Real money via Stripe, not IAP**: deposits/stakes/withdrawals are the user's **own funds**, not digital content unlocking app features — so external payment (Stripe) is correct, not Apple IAP. Be ready to explain this in App Review notes.
-- **Mandatory privacy-policy URL** → hosted `legal/privacy.html`.
+- **Mandatory privacy-policy URL** → hosted `niyah.live/legal/privacy` (`landing-pg/app/legal/privacy/page.tsx`).
 - **Account deletion** in-app (Profile) satisfies guideline **5.1.1(v)**.
-- **Custom EULA** must carry Apple's minimum terms (Apple not a party; third-party-beneficiary clause) — included in `legal/terms.html`.
+- **Custom EULA** must carry Apple's minimum terms (Apple not a party; third-party-beneficiary clause) — included in `landing-pg/app/legal/terms/page.tsx`.
 
 ## Legal Docs — Status
 

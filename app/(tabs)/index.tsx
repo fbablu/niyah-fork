@@ -1,33 +1,40 @@
-import React, { useRef, useMemo } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import BlobsBackground from "../../src/components/BlobsBackground";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Animated,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useRouter, type RelativePathString } from "expo-router";
 import { Typography, Spacing, Radius, Font } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Card,
   Balance,
   Button,
-  MoneyPlant,
   BlobAvatar,
+  Skeleton,
   withErrorBoundary,
 } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { useWalletStore } from "../../src/store/walletStore";
-import { usePartnerStore } from "../../src/store/partnerStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
+import { useScheduleStore } from "../../src/store/scheduleStore";
 import { formatMoney, formatRelativeTime } from "../../src/utils/format";
+import {
+  getActiveScheduledBlock,
+  getBlockProgress,
+  formatBlockTimeLeft,
+} from "../../src/utils/scheduledBlock";
+import { formatWindow } from "../../src/constants/scheduleTemplates";
+import { MIN_STAKE_CENTS } from "../../src/constants/config";
 import { generateBlobAvatarPreset } from "../../src/constants/blobAvatar";
 
 interface ActionButtonProps {
@@ -42,18 +49,19 @@ const ActionButton: React.FC<ActionButtonProps> = ({
   variant = "primary",
 }) => {
   const Colors = useColors();
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const scale = useSharedValue(1);
 
   const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.95,
-      useNativeDriver: true,
-    }).start();
+    scale.value = withSpring(0.95, { damping: 15, stiffness: 220 });
   };
 
   const handlePressOut = () => {
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
+    scale.value = withSpring(1, { damping: 15, stiffness: 220 });
   };
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
 
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -96,7 +104,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({
         style={[
           styles.actionButton,
           variant === "secondary" && styles.actionButtonSecondary,
-          { transform: [{ scale: scaleAnim }] },
+          animatedStyle,
         ]}
       >
         <Text
@@ -116,9 +124,15 @@ interface StatCardProps {
   value: string | number;
   label: string;
   color?: string;
+  loading?: boolean;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ value, label, color }) => {
+const StatCardBase: React.FC<StatCardProps> = ({
+  value,
+  label,
+  color,
+  loading = false,
+}) => {
   const Colors = useColors();
   const styles = useMemo(
     () =>
@@ -145,23 +159,86 @@ const StatCard: React.FC<StatCardProps> = ({ value, label, color }) => {
     [Colors],
   );
 
+  // Pop the value in on mount and re-pop whenever it changes (e.g. the streak
+  // ticks up after a completed session) so the stat feels alive, not static.
+  const scale = useSharedValue(0.8);
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    scale.value = 0.8;
+    scale.value = withSpring(1, { damping: 9, stiffness: 140 });
+    opacity.value = withTiming(1, { duration: 300 });
+  }, [value, scale, opacity]);
+  const valueAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
   return (
     <View style={styles.statCard}>
-      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
+      {loading ? (
+        <Skeleton
+          width={44}
+          height={24}
+          radius={6}
+          style={{ marginVertical: 2 }}
+        />
+      ) : (
+        <Animated.Text
+          style={[
+            styles.statValue,
+            color ? { color } : null,
+            valueAnimatedStyle,
+          ]}
+        >
+          {value}
+        </Animated.Text>
+      )}
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 };
+
+// Memoized: stat cards take only primitive props, so a dashboard re-render that
+// doesn't change a card's value/label/color/loading skips re-rendering it.
+const StatCard = React.memo(StatCardBase);
+StatCard.displayName = "StatCard";
 
 function DashboardScreenInner() {
   const Colors = useColors();
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const balance = useWalletStore((state) => state.balance);
-  const { partners } = usePartnerStore();
-  const { activeGroupSession, groupSessionHistory, pendingInvites } =
-    useGroupSessionStore();
+  const isWalletHydrated = useWalletStore((state) => state.isHydrated);
+  // Granular selectors: the dashboard no longer re-renders on every unrelated
+  // group-store mutation, only when one of these three fields changes.
+  const activeGroupSession = useGroupSessionStore((s) => s.activeGroupSession);
+  const activeGroupSessions = useGroupSessionStore(
+    (s) => s.activeGroupSessions,
+  );
+  const subscribeToSession = useGroupSessionStore((s) => s.subscribeToSession);
+  const groupSessionHistory = useGroupSessionStore(
+    (s) => s.groupSessionHistory,
+  );
+  const pendingInvites = useGroupSessionStore((s) => s.pendingInvites);
   const activeSoloSession = useSessionStore((s) => s.currentSession);
+  const scheduledTemplates = useScheduleStore((s) => s.templates);
+
+  // Tick a clock so the "scheduled block running" indicator turns on/off as the
+  // window opens/closes without the user reopening the app. 30s is snappy enough
+  // for a block boundary and cheap.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const activeScheduledBlock = useMemo(
+    () => getActiveScheduledBlock(scheduledTemplates, now),
+    [scheduledTemplates, now],
+  );
+  // A real (running) session always takes visual precedence over a scheduled
+  // block; the block indicator + CTA-gating only apply when neither is running.
+  const hasRunningSession = !!activeGroupSession || !!activeSoloSession;
+  const showScheduledBlock = !hasRunningSession && !!activeScheduledBlock;
 
   const completionRate =
     user && user.totalSessions > 0
@@ -173,18 +250,18 @@ function DashboardScreenInner() {
   // First-run onboarding callout: visible until the user has completed at
   // least one session. Steps tick as the user progresses through deposit →
   // session → completion, so cold installs have a clear path from zero.
-  const hasDeposited = balance > 0;
+  // "Deposited" for onboarding means "has enough to actually stake" — a $1
+  // deposit can't fund the $2 minimum stake, so don't tick the step on balance
+  // alone. Keeps the checklist honest with the min-stake floor.
+  const hasDeposited = balance >= MIN_STAKE_CENTS;
   const hasStartedSession =
     !!activeSoloSession ||
     !!activeGroupSession ||
     (user?.totalSessions ?? 0) > 0;
   const hasCompletedSession = (user?.completedSessions ?? 0) > 0;
-  const showGettingStarted = !hasCompletedSession;
-
-  const totalLeaves = groupSessionHistory.filter(
-    (s) => s.participants.find((p) => p.userId === user?.id)?.completed,
-  ).length;
-  const growthStage = Math.min(5, Math.floor(totalLeaves / 3) + 1);
+  // Hide the getting-started checklist while a scheduled block is enforcing —
+  // the user is mid-focus; the Start CTAs are gated below for the same reason.
+  const showGettingStarted = !hasCompletedSession && !showScheduledBlock;
 
   const styles = useMemo(
     () =>
@@ -259,6 +336,33 @@ function DashboardScreenInner() {
           borderWidth: 1,
           marginBottom: Spacing.md,
           overflow: "hidden",
+        },
+        groupRecoveryRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+        },
+        groupRecoveryTitle: {
+          fontSize: Typography.bodyMedium,
+          ...Font.semibold,
+          color: Colors.text,
+        },
+        blockProgressTrack: {
+          height: 3,
+          backgroundColor: Colors.backgroundTertiary,
+          borderRadius: Radius.full,
+          overflow: "hidden",
+          marginTop: Spacing.sm,
+        },
+        blockProgressFill: {
+          height: "100%",
+          backgroundColor: Colors.primary,
+          borderRadius: Radius.full,
+        },
+        blockProgressLabel: {
+          fontSize: Typography.labelSmall,
+          color: Colors.textSecondary,
+          marginTop: Spacing.xs,
         },
         activeSessionIndicator: {
           width: 4,
@@ -380,40 +484,12 @@ function DashboardScreenInner() {
         plantCard: {
           padding: Spacing.md,
         },
-        inviteCard: {
-          backgroundColor: Colors.primaryMuted,
-          borderRadius: Radius.lg,
-          borderWidth: 1,
-          borderColor: Colors.primaryLight,
-          paddingVertical: Spacing.md,
-          paddingHorizontal: Spacing.lg,
-          marginBottom: Spacing.lg,
-        },
-        inviteCardContent: {
-          flexDirection: "row",
-          justifyContent: "space-between",
+        headerInviteBtn: {
+          width: 44,
+          height: 44,
           alignItems: "center",
-        },
-        inviteCardTitle: {
-          fontSize: Typography.titleSmall,
-          ...Font.semibold,
-          color: Colors.text,
-        },
-        inviteCardSubtitle: {
-          fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
-          marginTop: 2,
-        },
-        inviteBadge: {
-          backgroundColor: Colors.primary,
-          borderRadius: Radius.full,
-          paddingVertical: 4,
-          paddingHorizontal: Spacing.md,
-        },
-        inviteBadgeText: {
-          fontSize: Typography.labelLarge,
-          ...Font.bold,
-          color: Colors.white,
+          justifyContent: "center",
+          marginRight: Spacing.sm,
         },
         statsSection: {
           marginBottom: Spacing.lg,
@@ -511,12 +587,32 @@ function DashboardScreenInner() {
               <Text style={styles.greeting}>Welcome back</Text>
               <Text style={styles.name}>{user?.name || "there"}</Text>
             </View>
+            {/* Invite lives here as a quiet header action (the old "+10"
+                dashboard card read as noise); the +10 explainer stays on the
+                invite screen itself. */}
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/invite" as never);
+              }}
+              hitSlop={10}
+              accessibilityLabel="Invite friends"
+              accessibilityRole="button"
+              style={styles.headerInviteBtn}
+            >
+              <Ionicons
+                name="person-add"
+                size={22}
+                color={Colors.textSecondary}
+              />
+            </Pressable>
             <BlobAvatar
               size={56}
               config={
                 user?.blobAvatar ??
                 generateBlobAvatarPreset(user?.id || "guest")
               }
+              seed={user?.id || "guest"}
               onPress={() => router.push("/(tabs)/profile")}
             />
           </View>
@@ -524,7 +620,11 @@ function DashboardScreenInner() {
           {/* Balance Card */}
           <Card style={styles.balanceCard} variant="elevated">
             <Text style={styles.balanceLabel}>Total Balance</Text>
-            <Balance amount={balance} size="display" />
+            {isWalletHydrated ? (
+              <Balance amount={balance} size="display" />
+            ) : (
+              <Skeleton width={170} height={56} radius={12} />
+            )}
             <View style={styles.balanceChange}>
               <Text
                 style={[
@@ -590,10 +690,11 @@ function DashboardScreenInner() {
                       hasDeposited && styles.onboardingStepLabelDone,
                     ]}
                   >
-                    Add $5 to your wallet
+                    Add at least {formatMoney(MIN_STAKE_CENTS, false)} to your
+                    wallet
                   </Text>
                   <Text style={styles.onboardingStepHint}>
-                    Staked money you earn back when you complete.
+                    Staked money you get back when you complete.
                   </Text>
                 </View>
                 {!hasDeposited && (
@@ -725,8 +826,60 @@ function DashboardScreenInner() {
             </Pressable>
           )}
 
-          {/* Quick Start CTA */}
-          {!activeGroupSession && !activeSoloSession && (
+          {/* Scheduled focus block running — Opal-style indicator. A
+              DeviceActivitySchedule isn't a currentSession, so without this the
+              dashboard would still show Start CTAs during an enforced block.
+              Tapping opens the Schedule tab to manage it. */}
+          {showScheduledBlock &&
+            activeScheduledBlock &&
+            (() => {
+              // Live remaining-time line (build-21 ask: "there's no timer, no
+              // tracker"). The 30s `now` tick above keeps it fresh; no pause —
+              // blocks are end-only by design.
+              const { fraction, minutesLeft } = getBlockProgress(
+                activeScheduledBlock,
+                now,
+              );
+              return (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/(tabs)/schedule");
+                  }}
+                >
+                  <Card style={styles.activeSessionCard}>
+                    <View style={styles.activeSessionIndicator} />
+                    <View style={styles.activeSessionContent}>
+                      <Text style={styles.activeSessionLabel}>
+                        FOCUS BLOCK RUNNING
+                      </Text>
+                      <Text style={styles.activeSessionText}>
+                        {activeScheduledBlock.name}
+                      </Text>
+                      <Text style={styles.activeSessionPayout}>
+                        {formatWindow(activeScheduledBlock)}
+                      </Text>
+                      <View style={styles.blockProgressTrack}>
+                        <View
+                          style={[
+                            styles.blockProgressFill,
+                            { width: `${Math.round(fraction * 100)}%` },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.blockProgressLabel}>
+                        {formatBlockTimeLeft(minutesLeft)}
+                      </Text>
+                    </View>
+                    <Text style={styles.activeSessionArrow}>Manage</Text>
+                  </Card>
+                </Pressable>
+              );
+            })()}
+
+          {/* Quick Start CTA — hidden while a session OR a scheduled block is
+              running (you're already focusing; don't offer to start another). */}
+          {!activeGroupSession && !activeSoloSession && !showScheduledBlock && (
             <Card style={styles.ctaCard}>
               <Text style={styles.ctaTitle}>Ready to focus?</Text>
               <Text style={styles.ctaSubtitle}>
@@ -734,12 +887,12 @@ function DashboardScreenInner() {
               </Text>
               <View style={{ gap: Spacing.sm, width: "100%" }}>
                 <Button
-                  title="Block Apps Now"
+                  title="Start a Focus Session (Free)"
                   onPress={() => router.push("/session/quick-block")}
                   size="large"
                 />
                 <Button
-                  title="Solo Focus (Staked)"
+                  title="Stake a Solo Session"
                   onPress={() =>
                     router.push(
                       "/session/select?type=solo" as RelativePathString,
@@ -749,7 +902,7 @@ function DashboardScreenInner() {
                   variant="outline"
                 />
                 <Button
-                  title="Group Challenge"
+                  title="Stake a Group Session"
                   onPress={() => router.push("/session/propose")}
                   size="large"
                   variant="outline"
@@ -757,6 +910,41 @@ function DashboardScreenInner() {
               </View>
             </Card>
           )}
+
+          {/* Group sessions waiting / recovering — the only surface that can
+              re-enter a waiting room (or a live session this client lost
+              track of) after a force-quit. Ported from the removed Focus tab. */}
+          {activeGroupSessions &&
+            activeGroupSessions.length > 0 &&
+            activeGroupSessions.map((session) => (
+              <Pressable
+                key={session.id}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (session.status === "active") {
+                    // Subscribe so active.tsx can render on recovery
+                    subscribeToSession(session.id);
+                    router.push("/session/active");
+                  } else {
+                    router.push(
+                      `/session/waiting-room?sessionId=${session.id}` as RelativePathString,
+                    );
+                  }
+                }}
+                style={{ marginBottom: Spacing.sm }}
+              >
+                <Card variant="interactive">
+                  <View style={styles.groupRecoveryRow}>
+                    <Text style={styles.groupRecoveryTitle}>
+                      {session.status === "active"
+                        ? "Session Active"
+                        : `Group Session ${session.status === "ready" ? "Ready" : "Pending"}`}
+                    </Text>
+                    <Text style={{ color: Colors.primary }}>View →</Text>
+                  </View>
+                </Card>
+              </Pressable>
+            ))}
 
           {/* Pending Group Invites Banner */}
           {pendingInvites && pendingInvites.length > 0 && (
@@ -823,27 +1011,6 @@ function DashboardScreenInner() {
             </Pressable>
           )}
 
-          {/* Invite Friends Card */}
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/invite" as never);
-            }}
-            style={styles.inviteCard}
-          >
-            <View style={styles.inviteCardContent}>
-              <View>
-                <Text style={styles.inviteCardTitle}>Invite Friends</Text>
-                <Text style={styles.inviteCardSubtitle}>
-                  Earn +10 social credit per referral
-                </Text>
-              </View>
-              <View style={styles.inviteBadge}>
-                <Text style={styles.inviteBadgeText}>+10</Text>
-              </View>
-            </View>
-          </Pressable>
-
           {/* Stats Grid */}
           <View style={styles.statsSection}>
             <Text style={styles.sectionTitle}>Your Stats</Text>
@@ -852,28 +1019,25 @@ function DashboardScreenInner() {
                 value={user?.currentStreak || 0}
                 label="Current Streak"
                 color={user?.currentStreak ? Colors.primary : undefined}
+                loading={!user}
               />
               <StatCard
                 value={formatMoney(totalEarnings, false)}
                 label="Total Earned"
                 color={totalEarnings > 0 ? Colors.gain : undefined}
+                loading={!user}
               />
-              <StatCard value={`${completionRate}%`} label="Success Rate" />
-              <StatCard value={user?.longestStreak || 0} label="Best Streak" />
+              <StatCard
+                value={`${completionRate}%`}
+                label="Success Rate"
+                loading={!user}
+              />
+              <StatCard
+                value={user?.longestStreak || 0}
+                label="Best Streak"
+                loading={!user}
+              />
             </View>
-          </View>
-
-          {/* Money Plant Section */}
-          <View style={styles.plantSection}>
-            <Text style={styles.sectionTitle}>Your Money Plant</Text>
-            <Card style={styles.plantCard}>
-              <MoneyPlant
-                partners={partners}
-                totalLeaves={totalLeaves}
-                growthStage={growthStage}
-                totalEarned={totalEarnings}
-              />
-            </Card>
           </View>
 
           {/* Recent Activity */}

@@ -22,6 +22,13 @@ import {
   computeWithdrawable,
   withdrawDrawOrder,
   cardRefundableCents,
+  computeDailyWithdrawalState,
+  computeDailyStakeState,
+  shouldUnfreezeWallet,
+  clampScheduledStake,
+  clampRewardMultiplier,
+  cappedRewardSurplus,
+  scheduledSessionDocId,
   STAKE_DRAW_ORDER,
   type Buckets,
 } from "./wallet";
@@ -36,6 +43,7 @@ import {
 import type { Response } from "express";
 import {
   authUsersShareVerifiedContact,
+  buildGroupLeaderboard,
   buildStoredPayouts,
   calculateGroupSessionPayouts,
   calculateReferralReputation,
@@ -44,6 +52,8 @@ import {
   decideReferralClaim,
   evaluateAppCheckToken,
   isValidFirebaseUid,
+  parseAppBlockSummary,
+  type LeaderboardSessionInput,
   type MinimalAuthRecord,
 } from "./security";
 
@@ -411,6 +421,17 @@ const MAX_DEPOSIT_CENTS: number = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 50000;
 })();
 
+// Per-UTC-day aggregate withdrawal cap ($25,000). Enforced atomically via a
+// counter on the wallet doc (dailyWithdrawalDate/dailyWithdrawalTotal), read +
+// written inside the same transaction as the debit so concurrent requests can't
+// each pass a stale pre-check and collectively exceed it. Override via env.
+const DAILY_WITHDRAWAL_CAP_CENTS: number = (() => {
+  const raw = process.env.DAILY_WITHDRAWAL_CAP_CENTS;
+  if (!raw) return 2_500_000;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2_500_000;
+})();
+
 /**
  * URL the Plaid `plaidWebhook` Cloud Function listens on. Plaid stores this
  * per-Item at /link/token/create time so ITEM events (ERROR,
@@ -500,57 +521,43 @@ function assertEndsAtMatchesCadence(
 }
 
 /**
- * Sum of absolute stake amounts the user committed today (UTC day window).
- * Aggregates from two sources:
- *   1. `transactions` where type="stake" — group session stakes (written by
- *      createGroupSession / respondToGroupInvite).
- *   2. `sessions` started today — solo session stakes (written client-side
- *      via writeSession; no transactions doc exists at start time).
+ * In-transaction daily-stake-cap check + counter advance. Reads the per-wallet
+ * counter (`dailyStakeDate`/`dailyStakeTotal`) off the wallet doc already loaded
+ * in the caller's transaction, throws if this stake would breach
+ * DAILY_STAKE_CAP_CENTS, and returns the two counter fields to MERGE into the
+ * SAME `txn.update(walletRef, …)` that debits the stake.
+ *
+ * This replaces the old query-of-two-collections approach, which both
+ * double-counted solo/scheduled stakes (each writes a stake txn AND a
+ * sessions/{id} doc) and was racy (a collection query inside a txn can't see a
+ * concurrent uncommitted sibling stake). A single counter field, read+written in
+ * the same transaction as the debit, is atomic (the loser retries) and counts
+ * each stake exactly once — mirroring the daily-WITHDRAWAL counter.
+ *
+ * Transition note: a wallet with no `dailyStakeDate` (pre-deploy, or first stake
+ * of a new UTC day) starts today's counter at 0 — so on the deploy day, stakes
+ * already made earlier that day via the old mechanism aren't carried in. A
+ * one-time, deploy-day-only leniency on the user's OWN-money cap; rate limits
+ * still apply. Fully correct from the next UTC day onward.
  */
-async function getDailyStakeTotalCents(uid: string): Promise<number> {
-  const startOfDay = new Date();
-  startOfDay.setUTCHours(0, 0, 0, 0);
-  const startTs = admin.firestore.Timestamp.fromDate(startOfDay);
-
-  const [txnSnap, sessionSnap] = await Promise.all([
-    db
-      .collection("transactions")
-      .where("userId", "==", uid)
-      .where("type", "==", "stake")
-      .where("createdAt", ">=", startTs)
-      .get(),
-    db
-      .collection("sessions")
-      .where("userId", "==", uid)
-      .where("startedAt", ">=", startTs)
-      .get(),
-  ]);
-
-  let total = 0;
-  txnSnap.forEach((doc) => {
-    const amount = doc.data().amount;
-    if (typeof amount === "number") total += Math.abs(amount);
-  });
-  sessionSnap.forEach((doc) => {
-    const stake = doc.data().stakeAmount;
-    if (typeof stake === "number") total += stake;
-  });
-  return total;
-}
-
-async function assertDailyStakeCap(
-  uid: string,
-  newStakeCents: number,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const current = await getDailyStakeTotalCents(uid);
-  if (current + newStakeCents > DAILY_STAKE_CAP_CENTS) {
-    const remaining = Math.max(0, DAILY_STAKE_CAP_CENTS - current);
-    return {
-      ok: false,
-      message: `Daily stake cap reached. Remaining today: $${(remaining / 100).toFixed(2)}. Cap resets at midnight UTC.`,
-    };
+function stakeCapCounterFields(
+  walletData: Record<string, unknown>,
+  stakeCents: number,
+): { dailyStakeDate: string; dailyStakeTotal: number } {
+  const s = computeDailyStakeState(
+    walletData.dailyStakeDate,
+    walletData.dailyStakeTotal,
+    stakeCents,
+    DAILY_STAKE_CAP_CENTS,
+    Date.now(),
+  );
+  if (s.exceedsCap) {
+    const remaining = Math.max(0, DAILY_STAKE_CAP_CENTS - s.priorToday);
+    throw new Error(
+      `Daily stake cap reached. Remaining today: $${(remaining / 100).toFixed(2)}. Cap resets at midnight UTC.`,
+    );
   }
-  return { ok: true };
+  return { dailyStakeDate: s.dayKey, dailyStakeTotal: s.newTotal };
 }
 
 // Campus-launch withdrawal eligibility. Blocks cash-out until the user has
@@ -580,6 +587,26 @@ const SOLO_PAYOUT_MULTIPLIER: number = (() => {
   return Number.isFinite(parsed) && parsed >= 1.0 && parsed <= 2.0
     ? parsed
     : 1.0;
+})();
+
+// Scheduled-template auto-stake (Schedule Phase 2). Dormant by default: when
+// false, createScheduledStakedSession returns 501 and no scheduled session can
+// exist, so the completion-reward branch below is unreachable. Do NOT flip live
+// without the backfill + engagement gate (STATUS.md "Post-submit dormant flips")
+// and a coordinated native rebuild — flipping before the extension ships would
+// debit users who never opted in. INDEPENDENT of the client flag
+// EXPO_PUBLIC_SCHEDULED_STAKE_ENABLED (baked into the app bundle) — BOTH must be
+// set to go live. This server flag is load-bearing: with it off the CF returns
+// 501 and no money can move regardless of the client flag.
+const SCHEDULED_STAKE_ENABLED = process.env.SCHEDULED_STAKE_ENABLED === "true";
+
+// House-funded completion reward for a scheduled staked session. 1.1 = +10% of
+// the returned principal, routed to the gated `earned` bucket and capped by
+// cappedRewardSurplus (min($50, net deposits)). Clamped to [1.0, 1.1] at load.
+const SCHEDULED_REWARD_MULTIPLIER: number = (() => {
+  const raw = process.env.SCHEDULED_REWARD_MULTIPLIER;
+  const parsed = raw ? parseFloat(raw) : 1.1;
+  return clampRewardMultiplier(Number.isFinite(parsed) ? parsed : 1.1);
 })();
 
 // States that prohibit real-money skill gaming — withdrawals to a Stripe
@@ -918,6 +945,7 @@ const FAIL_CLOSED_FUNCTIONS = new Set<string>([
   "verifyAndCreditDeposit",
   "requestWithdrawal",
   "createSoloSession",
+  "createScheduledStakedSession",
   "handleSessionComplete",
   "handleSessionForfeit",
   "distributeGroupPayouts",
@@ -2933,12 +2961,6 @@ export const createSoloSession = onRequest(
     const durationMs = useShort ? (demoMs as number) : entry.duration;
     const stakeAmount = entry.stake;
 
-    const capCheck = await assertDailyStakeCap(uid, stakeAmount);
-    if (!capCheck.ok) {
-      sendError(res, 400, capCheck.message);
-      return;
-    }
-
     try {
       const walletRef = db.collection("wallets").doc(uid);
       const sessionRef = db.collection("sessions").doc(sessionId);
@@ -2980,6 +3002,10 @@ export const createSoloSession = onRequest(
           throw new Error("Insufficient balance to stake");
         }
 
+        // Atomic daily-stake cap: check + advance the per-wallet counter in the
+        // same transaction as the debit (no race, counts each stake once).
+        const capFields = stakeCapCounterFields(walletData, stakeAmount);
+
         // Bucket-aware debit: draw the stake from the user's own money first,
         // then promo, then winnings (never credit). Record the composition on
         // the session + stake txn so completion/refund returns principal to its
@@ -2993,6 +3019,7 @@ export const createSoloSession = onRequest(
           depositedBalance: buckets.deposited - drawn.deposited,
           bonusBalance: buckets.bonus - drawn.bonus,
           earnedBalance: buckets.earned - drawn.earned,
+          ...capFields,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
         txn.set(sessionRef, {
@@ -3034,6 +3061,7 @@ export const createSoloSession = onRequest(
       if (
         message.includes("Insufficient balance") ||
         message.includes("Wallet frozen") ||
+        message.includes("Daily stake cap") ||
         message.includes("Session ID collision")
       ) {
         sendError(res, 400, message);
@@ -3128,19 +3156,50 @@ export const handleSessionComplete = onRequest(
           throw new Error("Session has not ended yet");
         }
 
-        // Derive stake from server-authoritative cadence table. Firestore rules
-        // only validate `stakeAmount` shape — an attacker can write any value.
-        // Same for endsAt: reconstruct the cadence window and reject mismatch
-        // to block "endsAt=1970 + stakeAmount=$1M" minting.
-        const stakeAmount = resolveCadenceStake(sessionData.cadence);
+        // Derive stake from the server-authoritative cadence table. Firestore
+        // rules only validate `stakeAmount` shape — an attacker can write any
+        // value. Same for endsAt: reconstruct the cadence window and reject a
+        // mismatch to block "endsAt=1970 + stakeAmount=$1M" minting.
+        //
+        // SCHEDULED sessions carry a pseudo-cadence ("scheduled") that isn't in
+        // CADENCES_SERVER, so resolveCadenceStake/assertEndsAtMatchesCadence
+        // would throw. Their stake + endsAt are SERVER-written at creation
+        // (createScheduledStakedSession, clamped) and the rules forbid client
+        // create + restrict updates to benign fields — so trust the stored
+        // values and skip the cadence-window assertion. The timer "has it
+        // ended?" gate above still applies.
+        const isScheduled = sessionData?.kind === "scheduled";
         const startedAt = sessionData.startedAt?.toDate?.()
           ? sessionData.startedAt.toDate()
           : new Date(sessionData.startedAt);
-        assertEndsAtMatchesCadence(
-          sessionData.cadence,
-          startedAt.getTime(),
-          endsAt.getTime(),
-        );
+        const stakeAmount = isScheduled
+          ? typeof sessionData.stakeAmount === "number"
+            ? sessionData.stakeAmount
+            : 0
+          : resolveCadenceStake(sessionData.cadence);
+        if (!isScheduled) {
+          assertEndsAtMatchesCadence(
+            sessionData.cadence,
+            startedAt.getTime(),
+            endsAt.getTime(),
+          );
+        }
+
+        // Credit balance to wallets collection (protected from client writes).
+        // Read the wallet BEFORE computing surplus — scheduled reward is capped
+        // by the user's own (deposited) money. All reads precede writes.
+        const walletSnap = await txn.get(walletRef);
+        const wd = walletSnap.data() ?? {};
+        // Refuse to credit a frozen (drifted / under-review) wallet — mirrors
+        // the stake/withdraw paths so a wallet flagged by the nightly reconcile
+        // can't be paid out mid-review (and so the scheduled reward cap, which
+        // reads the deposited bucket, never runs against a drifted ledger).
+        if (wd.frozen === true) {
+          throw new Error("Wallet frozen — contact support");
+        }
+        const currentBalance: number =
+          typeof wd.balance === "number" ? wd.balance : 0;
+        const wb = readBucketsOrInit(wd, currentBalance);
 
         // Payout returns the staked principal to its SOURCE buckets and routes
         // only true surplus to the gated `earned` bucket. Solo is stickK 1x by
@@ -3154,18 +3213,23 @@ export const handleSessionComplete = onRequest(
             : { deposited: stakeAmount, earned: 0, bonus: 0 };
         const principalCents =
           principal.deposited + principal.earned + principal.bonus;
-        const surplus = Math.max(
-          0,
-          Math.round(principalCents * (SOLO_PAYOUT_MULTIPLIER - 1)),
-        );
+        // Scheduled completions earn a house-funded, GATED, CAPPED reward (the
+        // SERVER constant — never the doc field), capped to min($50, net
+        // deposits). Disabled flag → no reward (principal only). Everything else
+        // uses the global SOLO_PAYOUT_MULTIPLIER (dormant 1.0x).
+        const surplus =
+          isScheduled && SCHEDULED_STAKE_ENABLED
+            ? cappedRewardSurplus(
+                principalCents,
+                SCHEDULED_REWARD_MULTIPLIER,
+                wb.deposited,
+              )
+            : Math.max(
+                0,
+                Math.round(principalCents * (SOLO_PAYOUT_MULTIPLIER - 1)),
+              );
         const payout = principalCents + surplus;
 
-        // Credit balance to wallets collection (protected from client writes)
-        const walletSnap = await txn.get(walletRef);
-        const wd = walletSnap.data() ?? {};
-        const currentBalance: number =
-          typeof wd.balance === "number" ? wd.balance : 0;
-        const wb = readBucketsOrInit(wd, currentBalance);
         const updatedBalance = currentBalance + payout;
         txn.update(walletRef, {
           balance: updatedBalance,
@@ -3226,6 +3290,7 @@ export const handleSessionComplete = onRequest(
         message.includes("does not belong") ||
         message.includes("not active") ||
         message.includes("not ended") ||
+        message.includes("Wallet frozen") ||
         message.includes("Unknown cadence") ||
         message.includes("missing cadence") ||
         message.includes("does not match cadence")
@@ -3234,6 +3299,247 @@ export const handleSessionComplete = onRequest(
       } else {
         console.error("handleSessionComplete error:", err);
         sendError(res, 500, "Failed to process session completion");
+      }
+    }
+  },
+);
+
+// ─── createScheduledStakedSession ────────────────────────────────────────────
+/**
+ * Auto-stakes a recurring scheduled focus block (Schedule Phase 2). Fired at the
+ * block's start by the on-device DeviceActivityMonitor trigger → app → this CF.
+ * Mirrors createSoloSession's money path: bucket-aware debit + session write in
+ * one transaction.
+ *
+ * Body: { templateId: string, stakeCents: number, durationMinutes?: number }
+ * Returns: { success, sessionId, startedAt, endsAt, stakeAmount, newBalance }
+ *
+ * SECURITY (live money path, user is away):
+ *   - Flag-gated: returns 501 unless SCHEDULED_STAKE_ENABLED. While off, no
+ *     scheduled session can exist, so handleSessionComplete's reward branch is
+ *     dead code.
+ *   - The client is NEVER trusted for the stake: clampScheduledStake bounds it
+ *     to [$2, $25]; duration is clamped to [1 min, 24 h].
+ *   - Idempotent per (uid, templateId, UTC-day) via a deterministic doc id — a
+ *     retry / double-fire reads the existing session, never re-debits.
+ *   - Atomic daily-stake cap (stakeCapCounterFields, in-txn) + never stake more
+ *     than the wallet holds + frozen guard + ledger-drift guard.
+ *   - The session is server-written (kind:"scheduled", rewardMultiplier); the
+ *     Firestore rules forbid client create + restrict updates to benign fields,
+ *     so neither can be forged. Completion uses the SERVER constant regardless.
+ */
+export const createScheduledStakedSession = onRequest(
+  PUBLIC_HTTP_OPTIONS,
+  async (req, res) => {
+    if (!SCHEDULED_STAKE_ENABLED) {
+      sendError(res, 501, "Scheduled staking is not enabled");
+      return;
+    }
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req, { enforceAppCheck: APP_CHECK_ENFORCED });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("App Check")) {
+        sendError(res, 403, "App Check attestation required");
+      } else {
+        sendError(res, 401, "Unauthorized");
+      }
+      return;
+    }
+
+    if (
+      await checkRateLimit(
+        uid,
+        "createScheduledStakedSession",
+        RATE_LIMITS.createSoloSession,
+      )
+    ) {
+      sendError(res, 429, "Too many requests — try again later");
+      return;
+    }
+    if (
+      await checkIpRateLimit(
+        req,
+        "createScheduledStakedSession",
+        IP_RATE_LIMITS.createSoloSession,
+      )
+    ) {
+      sendError(
+        res,
+        429,
+        "Too many requests from your network — try again later",
+      );
+      return;
+    }
+
+    const { templateId, stakeCents, durationMinutes } = req.body as {
+      templateId: unknown;
+      stakeCents: unknown;
+      durationMinutes?: unknown;
+    };
+
+    if (
+      typeof templateId !== "string" ||
+      templateId.length < 1 ||
+      templateId.length > 64 ||
+      !/^[A-Za-z0-9_-]+$/.test(templateId)
+    ) {
+      sendError(res, 400, "Invalid templateId");
+      return;
+    }
+    if (typeof stakeCents !== "number" || !Number.isFinite(stakeCents)) {
+      sendError(res, 400, "Invalid stakeCents");
+      return;
+    }
+
+    // Never trust the client frame: clamp stake to [$2, $25] and duration to
+    // [1 min, 24 h] (default 30 min).
+    const clampedStake = clampScheduledStake(stakeCents);
+    const DEFAULT_DURATION_MS = 30 * 60 * 1000;
+    const MIN_DURATION_MS = 60 * 1000;
+    const MAX_DURATION_MS = 24 * 60 * 60 * 1000;
+    const durationMs =
+      typeof durationMinutes === "number" && Number.isFinite(durationMinutes)
+        ? Math.max(
+            MIN_DURATION_MS,
+            Math.min(MAX_DURATION_MS, Math.round(durationMinutes) * 60 * 1000),
+          )
+        : DEFAULT_DURATION_MS;
+
+    try {
+      const walletRef = db.collection("wallets").doc(uid);
+      const sessionId = scheduledSessionDocId(uid, templateId, Date.now());
+      const sessionRef = db.collection("sessions").doc(sessionId);
+      const stakeTxnRef = db.collection("transactions").doc();
+      const startedAt = new Date();
+      const endsAt = new Date(startedAt.getTime() + durationMs);
+
+      const result = await db.runTransaction(async (txn) => {
+        const walletSnap = await txn.get(walletRef);
+        const walletData = walletSnap.data() ?? {};
+        if (walletData.frozen === true) {
+          throw new Error("Wallet frozen — contact support");
+        }
+        const currentBalance: number =
+          typeof walletData.balance === "number" ? walletData.balance : 0;
+
+        // Idempotent per (uid, templateId, UTC-day): a re-fire returns the
+        // existing session unchanged (no second debit).
+        const existing = await txn.get(sessionRef);
+        if (existing.exists) {
+          const ex = existing.data()!;
+          if (ex.userId !== uid) {
+            throw new Error("Session ID collision");
+          }
+          return {
+            sessionId,
+            startedAtMs:
+              ex.startedAt?.toMillis?.() ?? new Date(ex.startedAt).getTime(),
+            endsAtMs: ex.endsAt?.toMillis?.() ?? new Date(ex.endsAt).getTime(),
+            stakeAmount: ex.stakeAmount,
+            newBalance: currentBalance,
+            idempotent: true,
+          };
+        }
+
+        if (currentBalance < clampedStake) {
+          throw new Error("Insufficient balance to stake");
+        }
+
+        // Atomic daily-stake cap: check + advance the per-wallet counter inside
+        // the debit transaction (no race, counts each stake once).
+        const capFields = stakeCapCounterFields(walletData, clampedStake);
+
+        // Bucket-aware debit (own money → promo → winnings), identical to
+        // createSoloSession, so completion returns principal to its source.
+        const buckets = readBucketsOrInit(walletData, currentBalance);
+        // Ledger-drift guard: a wallet whose buckets don't sum to balance is
+        // drifted/corrupt — refuse rather than debit-and-worsen it. SAFE here
+        // (scheduled stake only goes live POST-backfill, when the bucket
+        // invariant holds for every wallet — STATUS.md "dormant flips"). NOT
+        // added to the deployed createSoloSession/createGroupSession: pre-backfill
+        // that would false-reject un-backfilled legacy wallets (same STATUS.md
+        // gating). Those paths rely on the frozen guard + nightly reconcile.
+        if (sumBuckets(buckets) !== currentBalance) {
+          throw new Error("Wallet ledger drift — contact support");
+        }
+        const { drawn } = drawDown(buckets, clampedStake, STAKE_DRAW_ORDER);
+        const stakeComposition = toComposition(drawn);
+        const newBalance = currentBalance - clampedStake;
+        txn.update(walletRef, {
+          balance: newBalance,
+          depositedBalance: buckets.deposited - drawn.deposited,
+          bonusBalance: buckets.bonus - drawn.bonus,
+          earnedBalance: buckets.earned - drawn.earned,
+          ...capFields,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        txn.set(sessionRef, {
+          userId: uid,
+          // Pseudo-cadence: NOT in CADENCES_SERVER. handleSessionComplete
+          // branches on kind:"scheduled" to skip cadence-stake derivation and
+          // apply the capped reward instead.
+          // IMMUTABLE post-create: completion's payout branch keys off `kind`
+          // (and trusts the server-written `cadence`/`stakeAmount`). Firestore
+          // rules forbid client create + restrict updates to a benign allowlist,
+          // so neither can be forged; NO Cloud Function may patch them later.
+          cadence: "scheduled",
+          kind: "scheduled",
+          templateId,
+          stakeAmount: clampedStake,
+          potentialPayout: clampedStake,
+          stakeComposition,
+          // Recorded for audit/transparency only — completion uses the SERVER
+          // constant, never this field, so a (rules-blocked) tamper is moot.
+          rewardMultiplier: SCHEDULED_REWARD_MULTIPLIER,
+          startedAt: admin.firestore.Timestamp.fromDate(startedAt),
+          endsAt: admin.firestore.Timestamp.fromDate(endsAt),
+          status: "active",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        txn.set(stakeTxnRef, {
+          userId: uid,
+          type: "stake",
+          amount: -clampedStake,
+          description: "Scheduled block stake",
+          sessionId,
+          templateId,
+          deposited: stakeComposition.deposited,
+          bonus: stakeComposition.bonus,
+          earned: stakeComposition.earned,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return {
+          sessionId,
+          startedAtMs: startedAt.getTime(),
+          endsAtMs: endsAt.getTime(),
+          stakeAmount: clampedStake,
+          newBalance,
+          idempotent: false,
+        };
+      });
+
+      res.json({ success: true, ...result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      if (
+        message.includes("Insufficient balance") ||
+        message.includes("Wallet frozen") ||
+        message.includes("Daily stake cap") ||
+        message.includes("ledger drift") ||
+        message.includes("Session ID collision")
+      ) {
+        sendError(res, 400, message);
+      } else {
+        console.error("createScheduledStakedSession error:", err);
+        sendError(res, 500, "Failed to start scheduled session");
       }
     }
   },
@@ -3490,6 +3796,63 @@ export const getWithdrawalEligibility = onRequest(
   },
 );
 
+// ─── getGroupLeaderboard ────────────────────────────────────────────────────
+/**
+ * Computed (non-real-time) standings across the caller's COMPLETED group
+ * sessions: each co-member (and the caller) ranked by completion rate, tiebreak
+ * fewest blocked-app violations. De-pool: NEVER ranked by money — nobody wins
+ * another member's stake. Read-only; computed on request.
+ *
+ * Returns: { standings: LeaderboardEntry[], sessionsCounted: number }
+ */
+const LEADERBOARD_SESSION_SCAN_CAP = 500;
+export const getGroupLeaderboard = onRequest(
+  PUBLIC_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST" && req.method !== "GET") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    let uid: string;
+    try {
+      uid = await verifyAuth(req);
+    } catch {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+
+    try {
+      // Reuses the existing participantIds(array-contains)+status index.
+      // Capped scan (no orderBy → no extra index); ample for v1 and logged if
+      // we ever hit it, so a silent truncation can't masquerade as complete.
+      const snap = await db
+        .collection("groupSessions")
+        .where("participantIds", "array-contains", uid)
+        .where("status", "==", "completed")
+        .limit(LEADERBOARD_SESSION_SCAN_CAP)
+        .get();
+
+      if (snap.size === LEADERBOARD_SESSION_SCAN_CAP) {
+        console.warn(
+          `getGroupLeaderboard: hit ${LEADERBOARD_SESSION_SCAN_CAP}-session scan cap for ${uid}`,
+        );
+      }
+
+      const sessions: LeaderboardSessionInput[] = snap.docs.map((doc) => ({
+        participants: (doc.data().participants ??
+          {}) as LeaderboardSessionInput["participants"],
+      }));
+
+      const standings = buildGroupLeaderboard(sessions, uid);
+      res.json({ standings, sessionsCounted: snap.size });
+    } catch (err) {
+      console.error("getGroupLeaderboard error:", err);
+      sendError(res, 500, "Failed to compute leaderboard");
+    }
+  },
+);
+
 // ─── requestWithdrawal ──────────────────────────────────────────────────────
 /**
  * Transfers funds from Niyah's platform account to the user's Stripe Connect
@@ -3507,17 +3870,41 @@ export const getWithdrawalEligibility = onRequest(
  * (balance == Σbuckets) is preserved on every abort path. Atomic via
  * FieldValue.increment — no read-modify-write race with concurrent CF writes.
  */
-async function restoreWithdrawalReservation(
+/**
+ * Atomically undo an aborted withdrawal: restore the reserved balance AND
+ * delete the withdrawal transaction doc in a single WriteBatch. Previously
+ * these were two separate awaits — if the balance restore committed but the
+ * txn delete failed (or vice versa), the wallet drifted by ±amount and the
+ * nightly reconcile auto-froze it (the historical source of dev wallet drift,
+ * with no automated recovery). A batch commits all-or-nothing, closing that
+ * window.
+ *
+ * `reserved` is the bucket split drawn by the committed debit. It is non-null
+ * on every post-debit caller; the null branch only covers the impossible
+ * pre-debit path, where there is nothing to restore and we just void the txn.
+ * The dailyWithdrawalTotal decrement is paired 1:1 with the in-transaction
+ * bump; a rare cross-midnight decrement leaves a stale prior-day value, which
+ * computeDailyWithdrawalState ignores (treated as 0), so it never wrongly
+ * blocks the next day.
+ */
+async function restoreAndVoidWithdrawal(
   walletRef: FirebaseFirestore.DocumentReference,
+  txnRef: FirebaseFirestore.DocumentReference,
   amount: number,
-  reserved: Buckets,
+  reserved: Buckets | null,
 ): Promise<void> {
-  await walletRef.update({
-    balance: admin.firestore.FieldValue.increment(amount),
-    depositedBalance: admin.firestore.FieldValue.increment(reserved.deposited),
-    earnedBalance: admin.firestore.FieldValue.increment(reserved.earned),
-    bonusBalance: admin.firestore.FieldValue.increment(reserved.bonus),
-  });
+  const batch = db.batch();
+  if (reserved) {
+    batch.update(walletRef, {
+      balance: admin.firestore.FieldValue.increment(amount),
+      depositedBalance: admin.firestore.FieldValue.increment(reserved.deposited),
+      earnedBalance: admin.firestore.FieldValue.increment(reserved.earned),
+      bonusBalance: admin.firestore.FieldValue.increment(reserved.bonus),
+      dailyWithdrawalTotal: admin.firestore.FieldValue.increment(-amount),
+    });
+  }
+  batch.delete(txnRef);
+  await batch.commit();
 }
 
 export const requestWithdrawal = onRequest(
@@ -3593,35 +3980,11 @@ export const requestWithdrawal = onRequest(
       return;
     }
 
-    // Daily aggregate withdrawal limit: $25,000
-    try {
-      const oneDayAgo = new Date(Date.now() - 86_400_000);
-      const recentWithdrawals = await db
-        .collection("transactions")
-        .where("userId", "==", uid)
-        .where("type", "==", "withdrawal")
-        .where("createdAt", ">=", oneDayAgo)
-        .get();
-      const dailyTotal = recentWithdrawals.docs.reduce(
-        (sum, doc) => sum + Math.abs(doc.data().amount ?? 0),
-        0,
-      );
-      if (dailyTotal + amount > 2_500_000) {
-        sendError(
-          res,
-          400,
-          `Daily withdrawal limit is $25,000. You've withdrawn ${(dailyTotal / 100).toFixed(2)} today.`,
-        );
-        return;
-      }
-    } catch (limitErr) {
-      console.error("Daily limit check failed:", limitErr);
-      // Fail closed: if we can't verify the user is under the $25k/day cap,
-      // refuse the withdrawal. Per-call rate limiting is a separate guardrail
-      // but doesn't bound aggregate damage on a compromised account.
-      sendError(res, 503, "Withdrawal temporarily unavailable — try again shortly");
-      return;
-    }
+    // Daily aggregate withdrawal cap ($25k/UTC-day) is enforced atomically
+    // inside the debit transaction below (via the wallet-doc counter), plus a
+    // friendly pre-check after the wallet read. Doing it pre-transaction as a
+    // read-then-check let concurrent requests each pass a stale total and
+    // collectively exceed the cap — see qa-2026-06-02.md finding #8.
 
     // Hoisted above the try so the catch handler can reference them.
     // txnRef is the withdrawal ledger row; stripeTransferId tracks whether
@@ -3645,6 +4008,28 @@ export const requestWithdrawal = onRequest(
       // pay out until an operator clears the freeze flag.
       if (walletPre.frozen === true) {
         sendError(res, 403, "Wallet frozen for review — contact support");
+        return;
+      }
+
+      // Daily-cap pre-check (friendly early rejection). Authoritative check is
+      // re-run inside the debit transaction below against the fresh snapshot,
+      // so a concurrent request that slips past this advisory check still can't
+      // exceed the cap. `nowMs` is fixed once and reused by both checks (and
+      // across any internal transaction retry) so the UTC day key is stable.
+      const nowMs = Date.now();
+      const dailyPre = computeDailyWithdrawalState(
+        walletPre.dailyWithdrawalDate,
+        walletPre.dailyWithdrawalTotal,
+        amount,
+        DAILY_WITHDRAWAL_CAP_CENTS,
+        nowMs,
+      );
+      if (dailyPre.exceedsCap) {
+        sendError(
+          res,
+          400,
+          `Daily withdrawal limit is $${(DAILY_WITHDRAWAL_CAP_CENTS / 100).toLocaleString("en-US")}. You've withdrawn $${(dailyPre.priorToday / 100).toFixed(2)} today.`,
+        );
         return;
       }
 
@@ -3694,12 +4079,32 @@ export const requestWithdrawal = onRequest(
         // so a shortfall here means a concurrent debit raced us — refuse
         // rather than overdraw a gated bucket.
         if (shortfall > 0) throw new Error("Insufficient withdrawable balance");
+
+        // Authoritative daily-cap check, against the FRESH in-transaction
+        // snapshot. Two concurrent withdrawals contend on this wallet doc, so
+        // the second re-reads the first's committed counter and is forced to
+        // honor the cap — closing the read-then-check race (finding #8). A
+        // throw here aborts cleanly: no debit, no counter bump.
+        const daily = computeDailyWithdrawalState(
+          data.dailyWithdrawalDate,
+          data.dailyWithdrawalTotal,
+          amount,
+          DAILY_WITHDRAWAL_CAP_CENTS,
+          nowMs,
+        );
+        if (daily.exceedsCap) throw new Error("DAILY_LIMIT");
+
         reserved = drawn;
         txn.update(walletRef, {
           balance: current - amount,
           depositedBalance: buckets.deposited - drawn.deposited,
           earnedBalance: buckets.earned - drawn.earned,
           bonusBalance: buckets.bonus - drawn.bonus,
+          // Counter set to an absolute value (resets across UTC days). Restore
+          // paths decrement it 1:1 with the balance restore, so it tracks
+          // committed withdrawals exactly.
+          dailyWithdrawalDate: daily.dayKey,
+          dailyWithdrawalTotal: daily.newTotal,
         });
         txn.set(txnRef, {
           userId: uid,
@@ -3723,11 +4128,9 @@ export const requestWithdrawal = onRequest(
       const connectedAccountId: string =
         (merged.stripeAccountId as string | undefined) ?? "";
       if (!connectedAccountId) {
-        // Restore the reservation since the Stripe transfer can't proceed
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRef, amount, reserved);
-        }
-        await txnRef.delete();
+        // Atomically restore the reservation + void the txn — the transfer
+        // can't proceed, and a non-atomic restore is what drifts the wallet.
+        await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
         sendError(
           res,
           400,
@@ -3736,11 +4139,9 @@ export const requestWithdrawal = onRequest(
         return;
       }
       if (merged.stripeAccountStatus !== "active") {
-        // Restore the reservation since the Stripe transfer can't proceed
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRef, amount, reserved);
-        }
-        await txnRef.delete();
+        // Atomically restore the reservation + void the txn — the transfer
+        // can't proceed, and a non-atomic restore is what drifts the wallet.
+        await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
         sendError(
           res,
           400,
@@ -3757,10 +4158,7 @@ export const requestWithdrawal = onRequest(
       try {
         const liveAccount = await stripe.accounts.retrieve(connectedAccountId);
         if (!liveAccount.payouts_enabled || !liveAccount.charges_enabled) {
-          if (reserved) {
-            await restoreWithdrawalReservation(walletRef, amount, reserved);
-          }
-          await txnRef.delete();
+          await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
           sendError(
             res,
             400,
@@ -3781,19 +4179,13 @@ export const requestWithdrawal = onRequest(
           .trim()
           .toUpperCase();
         if (payoutState && WITHDRAWAL_EXCLUDED_STATES.has(payoutState)) {
-          if (reserved) {
-            await restoreWithdrawalReservation(walletRef, amount, reserved);
-          }
-          await txnRef.delete();
+          await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
           sendError(res, 403, "Withdrawals aren't available in your state yet.");
           return;
         }
       } catch (err) {
         console.error("Stripe account retrieve failed:", err);
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRef, amount, reserved);
-        }
-        await txnRef.delete();
+        await restoreAndVoidWithdrawal(walletRef, txnRef, amount, reserved);
         sendError(res, 502, "Could not verify payout account with Stripe");
         return;
       }
@@ -3860,6 +4252,19 @@ export const requestWithdrawal = onRequest(
         estimatedArrival,
       });
     } catch (err) {
+      // A request that slipped past the advisory pre-check and hit the
+      // authoritative in-transaction cap. The throw aborted the debit txn, so
+      // nothing committed (no balance change, no counter bump, txnPersisted is
+      // still false) — return a clean 400 with no restoration needed.
+      if (err instanceof Error && err.message === "DAILY_LIMIT") {
+        sendError(
+          res,
+          400,
+          `Daily withdrawal limit is $${(DAILY_WITHDRAWAL_CAP_CENTS / 100).toLocaleString("en-US")}.`,
+        );
+        return;
+      }
+
       console.error("requestWithdrawal error:", err);
       const stripeErr = err as { message?: string; code?: string };
       const detail = stripeErr.message || "Unknown error";
@@ -3910,10 +4315,12 @@ export const requestWithdrawal = onRequest(
       }
       try {
         const walletRestoreRef = db.collection("wallets").doc(uid);
-        if (reserved) {
-          await restoreWithdrawalReservation(walletRestoreRef, amount, reserved);
-        }
-        await txnRef.delete();
+        await restoreAndVoidWithdrawal(
+          walletRestoreRef,
+          txnRef,
+          amount,
+          reserved,
+        );
       } catch (restoreErr) {
         console.error(
           "Failed to restore balance / delete txn after withdrawal error:",
@@ -4995,7 +5402,7 @@ export const findContactsOnNiyah = onRequest(
 // ─── createGroupSession ─────────────────────────────────────────────────────
 /**
  * Creates a new group session and sends invites to participants.
- * Body: { cadence: string, stakePerParticipant: number, duration: number, inviteeIds: string[], customStake?: boolean }
+ * Body: { cadence: string, stakePerParticipant: number, duration: number, inviteeIds: string[], customStake?: boolean, appBlockSummary?: {appCount,categoryCount,label} }
  * Returns: { sessionId: string, inviteIds: string[] }
  *
  * SECURITY: Validates proposer balance, deducts stake via Firestore transaction.
@@ -5043,14 +5450,22 @@ export const createGroupSession = onRequest(
       return;
     }
 
-    const { cadence, stakePerParticipant, duration, inviteeIds, customStake } =
-      req.body as {
-        cadence: unknown;
-        stakePerParticipant: unknown;
-        duration: unknown;
-        inviteeIds: unknown;
-        customStake?: boolean;
-      };
+    const {
+      cadence,
+      stakePerParticipant,
+      duration,
+      inviteeIds,
+      customStake,
+      appBlockSummary: rawAppBlockSummary,
+    } = req.body as {
+      cadence: unknown;
+      stakePerParticipant: unknown;
+      duration: unknown;
+      inviteeIds: unknown;
+      customStake?: boolean;
+      appBlockSummary?: unknown;
+    };
+    const proposerAppBlockSummary = parseAppBlockSummary(rawAppBlockSummary);
 
     // Validate input types
     if (typeof cadence !== "string" || !cadence) {
@@ -5107,13 +5522,8 @@ export const createGroupSession = onRequest(
       return;
     }
 
-    // Daily stake cap — blocks proposer if their committed stakes today
-    // (across solo + group) would exceed DAILY_STAKE_CAP_CENTS.
-    const capCheck = await assertDailyStakeCap(uid, stakePerParticipant);
-    if (!capCheck.ok) {
-      sendError(res, 400, capCheck.message);
-      return;
-    }
+    // Daily stake cap is enforced atomically inside the stake transaction below
+    // (stakeCapCounterFields) so it can't race a concurrent stake.
 
     try {
       // Fetch proposer profile
@@ -5142,6 +5552,12 @@ export const createGroupSession = onRequest(
           reputation: Record<string, unknown>;
           accepted: boolean;
           online: boolean;
+          stakeMode?: "solo";
+          appBlockSummary?: {
+            appCount: number;
+            categoryCount: number;
+            label: string;
+          };
         }
       > = {};
 
@@ -5151,6 +5567,13 @@ export const createGroupSession = onRequest(
         reputation: proposerData.reputation ?? {},
         accepted: true,
         online: false,
+        // De-pool: every member stakes their own money — solo is the only mode.
+        stakeMode: "solo",
+        // Proposer's own block selection summary (display + start-gate). Each
+        // member sets their own on accept; this is never enforced cross-device.
+        ...(proposerAppBlockSummary
+          ? { appBlockSummary: proposerAppBlockSummary }
+          : {}),
       };
 
       for (let i = 0; i < inviteeIds.length; i++) {
@@ -5161,6 +5584,9 @@ export const createGroupSession = onRequest(
           reputation: inviteeData.reputation ?? {},
           accepted: false,
           online: false,
+          // De-pool: solo is the only mode. Invitees also set their own
+          // appBlockSummary on accept; the label is consistent from creation.
+          stakeMode: "solo",
         };
       }
 
@@ -5182,6 +5608,10 @@ export const createGroupSession = onRequest(
           throw new Error("Insufficient balance to stake");
         }
 
+        // Atomic daily-stake cap: check + advance the per-wallet counter in the
+        // same transaction as the debit (no race, counts each stake once).
+        const capFields = stakeCapCounterFields(walletData, stakePerParticipant);
+
         const buckets = readBucketsOrInit(walletData, currentBalance);
         const { drawn } = drawDown(
           buckets,
@@ -5194,6 +5624,7 @@ export const createGroupSession = onRequest(
           depositedBalance: buckets.deposited - drawn.deposited,
           bonusBalance: buckets.bonus - drawn.bonus,
           earnedBalance: buckets.earned - drawn.earned,
+          ...capFields,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
         txn.set(stakeTxnRef, {
@@ -5267,7 +5698,10 @@ export const createGroupSession = onRequest(
       res.json({ sessionId, inviteIds });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      if (message.includes("Insufficient balance")) {
+      if (
+        message.includes("Insufficient balance") ||
+        message.includes("Daily stake cap")
+      ) {
         sendError(res, 400, message);
       } else {
         console.error("createGroupSession error:", err);
@@ -5328,15 +5762,21 @@ export const respondToGroupInvite = onRequest(
       return;
     }
 
-    const { inviteId, accept } = req.body as {
+    const {
+      inviteId,
+      accept,
+      appBlockSummary: rawAppBlockSummary,
+    } = req.body as {
       inviteId: string;
       accept: boolean;
+      appBlockSummary?: unknown;
     };
 
     if (!inviteId || typeof accept !== "boolean") {
       sendError(res, 400, "Missing required fields");
       return;
     }
+    const accepterAppBlockSummary = parseAppBlockSummary(rawAppBlockSummary);
 
     try {
       const inviteRef = db.collection("groupInvites").doc(inviteId);
@@ -5369,15 +5809,9 @@ export const respondToGroupInvite = onRequest(
       const sessionData = sessionSnap.data()!;
 
       if (accept) {
-        // Daily stake cap (advisory pre-check). Queries can't run inside a
-        // Firestore transaction, so we evaluate here. The txn below is still
-        // the serialization point — two concurrent accepts will both pass
-        // this check but only one will win the txn race.
-        const capCheck = await assertDailyStakeCap(uid, inviteData.stake);
-        if (!capCheck.ok) {
-          sendError(res, 400, capCheck.message);
-          return;
-        }
+        // Daily stake cap is enforced atomically inside the stake transaction
+        // below (stakeCapCounterFields), serialized on the wallet doc — so it
+        // can't race a concurrent accept/stake the way an out-of-txn query could.
 
         const walletRef = db.collection("wallets").doc(uid);
         const stakeTxnRef = db.collection("transactions").doc();
@@ -5409,6 +5843,10 @@ export const respondToGroupInvite = onRequest(
             throw new Error("Insufficient balance to stake");
           }
 
+          // Atomic daily-stake cap: check + advance the per-wallet counter in
+          // the same transaction as the debit (no race, counts each stake once).
+          const capFields = stakeCapCounterFields(walletData, inviteCur.stake);
+
           const buckets = readBucketsOrInit(walletData, currentBalance);
           const { drawn } = drawDown(buckets, inviteCur.stake, STAKE_DRAW_ORDER);
           const stakeComposition = toComposition(drawn);
@@ -5417,6 +5855,7 @@ export const respondToGroupInvite = onRequest(
             depositedBalance: buckets.deposited - drawn.deposited,
             bonusBalance: buckets.bonus - drawn.bonus,
             earnedBalance: buckets.earned - drawn.earned,
+            ...capFields,
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           });
           txn.set(stakeTxnRef, {
@@ -5436,9 +5875,14 @@ export const respondToGroupInvite = onRequest(
           });
         });
 
-        // Update session participant
+        // Update session participant. Persist this member's own block summary
+        // (display + start-gate) and the solo stake-mode label alongside accept.
         await sessionRef.update({
           [`participants.${uid}.accepted`]: true,
+          [`participants.${uid}.stakeMode`]: "solo",
+          ...(accepterAppBlockSummary
+            ? { [`participants.${uid}.appBlockSummary`]: accepterAppBlockSummary }
+            : {}),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -5570,6 +6014,7 @@ export const respondToGroupInvite = onRequest(
       const message = err instanceof Error ? err.message : "Unknown error";
       if (
         message.includes("Insufficient balance") ||
+        message.includes("Daily stake cap") ||
         message.includes("Invite already") ||
         message.includes("does not belong") ||
         message.includes("Invite not found")
@@ -7346,6 +7791,109 @@ export const reconcileWalletBalances = onSchedule(
     console.info(
       `reconcileWalletBalances run date=${dateId} processed=${processed} mismatches=${mismatchCount}`,
     );
+  },
+);
+
+// ─── unfreezeWallet (admin-only recovery) ───────────────────────────────────
+/**
+ * Clears the `frozen` flag that reconcileWalletBalances sets on balance drift.
+ * Without this there was NO automated recovery — a spurious freeze (e.g. a
+ * transient withdrawal-restore hiccup) locked a real user out of both staking
+ * (`createSoloSession`) and withdrawing (`requestWithdrawal`) until a manual
+ * Firebase Console edit. This re-sums the transaction log and clears the
+ * freeze ONLY if the drift is resolved (delta === 0); `force: true` overrides
+ * after an operator has reviewed the `walletAudits/{uid}_{date}` doc and
+ * credited/refunded by hand.
+ *
+ * Admin-only: header `x-admin-key: <ADMIN_API_KEY>`, constant-time compared
+ * (same gate as mergeDuplicateUsers). Body: `{ uid: string, force?: boolean }`.
+ */
+export const unfreezeWallet = onRequest(
+  PUBLIC_ADMIN_HTTP_OPTIONS,
+  async (req, res) => {
+    if (req.method !== "POST") {
+      sendError(res, 405, "Method not allowed");
+      return;
+    }
+
+    const provided = req.headers["x-admin-key"];
+    const expected = ADMIN_API_KEY.value();
+    if (!compareAdminKey(provided, expected)) {
+      sendError(res, 403, "Forbidden");
+      return;
+    }
+
+    const { uid, force } = (req.body ?? {}) as {
+      uid?: string;
+      force?: boolean;
+    };
+    if (!uid || typeof uid !== "string") {
+      sendError(res, 400, "Missing uid");
+      return;
+    }
+
+    try {
+      const walletRef = db.collection("wallets").doc(uid);
+      const walletSnap = await walletRef.get();
+      if (!walletSnap.exists) {
+        sendError(res, 404, "Wallet not found");
+        return;
+      }
+      const wallet = walletSnap.data() ?? {};
+      if (wallet.frozen !== true) {
+        res.json({ status: "not_frozen", uid });
+        return;
+      }
+
+      const storedBalance =
+        typeof wallet.balance === "number" ? wallet.balance : 0;
+      const txnSnap = await db
+        .collection("transactions")
+        .where("userId", "==", uid)
+        .get();
+      let summed = 0;
+      txnSnap.forEach((d) => {
+        const amount = d.data().amount;
+        if (typeof amount === "number") summed += amount;
+      });
+
+      const { unfreeze, delta } = shouldUnfreezeWallet(
+        storedBalance,
+        summed,
+        force === true,
+      );
+      if (!unfreeze) {
+        sendError(
+          res,
+          409,
+          `Drift not resolved (stored=${storedBalance} summed=${summed} delta=${delta}). Review walletAudits and pass force:true to override.`,
+        );
+        return;
+      }
+
+      await walletRef.update({
+        frozen: admin.firestore.FieldValue.delete(),
+        frozenReason: admin.firestore.FieldValue.delete(),
+        frozenAt: admin.firestore.FieldValue.delete(),
+        unfrozenAt: admin.firestore.FieldValue.serverTimestamp(),
+        unfrozenBy: force === true ? "admin_force" : "admin_reconciled",
+        unfrozenDelta: delta,
+      });
+      console.info(
+        `unfreezeWallet uid=${uid} delta=${delta} force=${force === true}`,
+      );
+      res.json({
+        status: "unfrozen",
+        uid,
+        storedBalance,
+        summed,
+        delta,
+        forced: force === true,
+      });
+    } catch (err) {
+      console.error("unfreezeWallet error:", err);
+      sendError(res, 500, "Internal error");
+    }
   },
 );
 

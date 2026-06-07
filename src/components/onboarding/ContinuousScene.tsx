@@ -26,7 +26,7 @@ import Animated, {
   withTiming,
   Easing,
 } from "react-native-reanimated";
-import Svg, { Circle, Path, Rect } from "react-native-svg";
+import Svg, { Circle, G, Path, Rect } from "react-native-svg";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -208,12 +208,7 @@ export const ContinuousScene: React.FC<ContinuousSceneProps> = ({
   }));
 
   const fruitsStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      progress.value,
-      [2.6, 3],
-      [0, 0.8],
-      Extrapolation.CLAMP,
-    ),
+    opacity: interpolate(progress.value, [2.6, 3], [0, 1], Extrapolation.CLAMP),
     transform: [{ translateX: interpolate(sway.value, [0, 1], [-2, 2]) }],
   }));
 
@@ -546,16 +541,9 @@ export const ContinuousScene: React.FC<ContinuousSceneProps> = ({
         ]}
       >
         <Svg width={size * 0.04} height={size * 0.25} viewBox="0 0 18 100">
-          {/* SHAPE: Trunk main body — wide brown rounded rectangle */}
-          <Rect
-            x={2}
-            y={0}
-            width={14}
-            height={100}
-            rx={4}
-            fill="#5C4A2E"
-            opacity={0.78}
-          />
+          {/* SHAPE: Trunk main body — wide brown rounded rectangle (solid;
+              the old 0.78 opacity contributed to the washed-out tree) */}
+          <Rect x={2} y={0} width={14} height={100} rx={4} fill="#5C4A2E" />
           {/* SHAPE: Trunk highlight stripe — thinner lighter strip for depth */}
           <Rect
             x={5}
@@ -564,7 +552,7 @@ export const ContinuousScene: React.FC<ContinuousSceneProps> = ({
             height={100}
             rx={2}
             fill="#6B5B3A"
-            opacity={0.25}
+            opacity={0.4}
           />
           {/* SHAPE: Right branch stub — small curved line going up-right */}
           <Path
@@ -598,18 +586,25 @@ export const ContinuousScene: React.FC<ContinuousSceneProps> = ({
         ]}
       >
         <Svg width={size * 0.36} height={size * 0.3} viewBox="0 0 150 120">
-          {/* SHAPE: Left foliage cluster — large light-green circle */}
-          <Circle cx={50} cy={60} r={40} fill="#9BC887" opacity={0.28} />
-          {/* SHAPE: Right foliage cluster — large light-green circle */}
-          <Circle cx={100} cy={56} r={36} fill="#9BC887" opacity={0.28} />
-          {/* SHAPE: Center foliage dome — largest teal circle (main canopy mass) */}
-          <Circle cx={75} cy={48} r={44} fill="#52B788" opacity={0.38} />
-          {/* SHAPE: Left shadow cluster — smaller dark-green circle for depth */}
-          <Circle cx={40} cy={68} r={30} fill="#2D6A4F" opacity={0.22} />
-          {/* SHAPE: Right shadow cluster — smaller dark-green circle for depth */}
-          <Circle cx={110} cy={64} r={28} fill="#2D6A4F" opacity={0.22} />
-          {/* SHAPE: Center shadow overlay — mid-green circle for dimension */}
-          <Circle cx={75} cy={65} r={34} fill="#40916C" opacity={0.18} />
+          {/* The three main foliage circles share one SOLID fill inside a
+              single group: per-circle translucency made every overlap seam
+              visible and the whole tree read washed-out on the final page
+              (build-21 finding). Group opacity keeps it soft against the
+              background while the silhouette stays one mass. */}
+          <G opacity={0.95}>
+            {/* SHAPE: Left foliage cluster */}
+            <Circle cx={50} cy={60} r={40} fill="#52B788" />
+            {/* SHAPE: Right foliage cluster */}
+            <Circle cx={100} cy={56} r={36} fill="#52B788" />
+            {/* SHAPE: Center foliage dome — largest (main canopy mass) */}
+            <Circle cx={75} cy={48} r={44} fill="#52B788" />
+          </G>
+          {/* SHAPE: Left shadow cluster — darker accent for depth */}
+          <Circle cx={40} cy={68} r={30} fill="#2D6A4F" opacity={0.45} />
+          {/* SHAPE: Right shadow cluster — darker accent for depth */}
+          <Circle cx={110} cy={64} r={28} fill="#2D6A4F" opacity={0.45} />
+          {/* SHAPE: Center highlight — lighter dome for dimension */}
+          <Circle cx={75} cy={42} r={26} fill="#9BC887" opacity={0.5} />
         </Svg>
       </Animated.View>
 
@@ -647,17 +642,11 @@ export const ContinuousScene: React.FC<ContinuousSceneProps> = ({
                   cx={fr + 2}
                   cy={fr + 5}
                   r={fr}
-                  fill="#6B5B3A"
-                  opacity={0.65}
+                  fill="#B89A4F"
+                  opacity={0.9}
                 />
                 {/* SHAPE: Fruit inner face — smaller brighter-gold center */}
-                <Circle
-                  cx={fr + 2}
-                  cy={fr + 5}
-                  r={fr * 0.65}
-                  fill="#6B5B35"
-                  opacity={0.75}
-                />
+                <Circle cx={fr + 2} cy={fr + 5} r={fr * 0.65} fill="#D4B45F" />
               </Svg>
             </View>
           );

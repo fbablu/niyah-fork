@@ -16,9 +16,20 @@ import {
   SessionScreenScaffold,
   withErrorBoundary,
   HoldToConfirmModal,
+  StatusBanner,
 } from "../../src/components";
 import * as Haptics from "expo-haptics";
-import Animated, { LinearTransition } from "react-native-reanimated";
+import Animated, {
+  LinearTransition,
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
 import { useAuthStore } from "../../src/store/authStore";
@@ -33,6 +44,9 @@ import {
   onSurrenderRequested,
   checkPendingSurrender,
   isScreenTimeAvailable,
+  getAppSelectionStatus,
+  setSessionContext,
+  getViolationsByCategory,
 } from "../../src/config/screentime";
 import { reportShieldViolation as reportShieldViolationCF } from "../../src/config/functions";
 import { logger } from "../../src/utils/logger";
@@ -91,27 +105,6 @@ function ActiveSessionScreenInner() {
           alignItems: "center",
           marginBottom: Spacing.md,
         },
-        progressSection: {
-          marginBottom: Spacing.md,
-        },
-        progressContainer: {
-          width: "100%",
-          height: 6,
-          backgroundColor: Colors.backgroundTertiary,
-          borderRadius: Radius.full,
-          overflow: "hidden",
-        },
-        progressBar: {
-          height: "100%",
-          backgroundColor: Colors.primary,
-          borderRadius: Radius.full,
-        },
-        progressText: {
-          fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
-          textAlign: "center",
-          marginTop: Spacing.sm,
-        },
         payoutCard: {
           alignItems: "center",
           backgroundColor: Colors.gainLight,
@@ -131,9 +124,6 @@ function ActiveSessionScreenInner() {
           color: Colors.gain,
         },
         violationCard: {
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
           backgroundColor: Colors.lossLight,
           borderWidth: 1,
           borderColor: Colors.loss,
@@ -141,6 +131,11 @@ function ActiveSessionScreenInner() {
           paddingHorizontal: Spacing.md,
           marginBottom: Spacing.md,
           borderRadius: Radius.lg,
+        },
+        violationRow: {
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
         },
         violationLabel: {
           fontSize: Typography.bodySmall,
@@ -151,6 +146,12 @@ function ActiveSessionScreenInner() {
           fontSize: Typography.titleMedium,
           ...Font.bold,
           color: Colors.loss,
+        },
+        violationBreakdown: {
+          fontSize: Typography.labelSmall,
+          color: Colors.textMuted,
+          ...Font.medium,
+          marginTop: 2,
         },
         tipsSection: {
           backgroundColor: Colors.backgroundCard,
@@ -270,6 +271,52 @@ function ActiveSessionScreenInner() {
   const isNavigatingAwayRef = useRef(false);
   const [violationCount, setViolationCount] = useState(0);
   const [surrenderModalVisible, setSurrenderModalVisible] = useState(false);
+
+  // Subtle ~1Hz pulse on the SESSION ACTIVE badge dot — the one piece of
+  // motion on an otherwise still screen. Static under Reduce Motion.
+  const reducedMotion = useReducedMotion();
+  const dotOpacity = useSharedValue(1);
+  useEffect(() => {
+    if (reducedMotion) return;
+    dotOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0.35, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+    );
+    return () => {
+      cancelAnimation(dotOpacity);
+      dotOpacity.value = 1;
+    };
+  }, [reducedMotion, dotOpacity]);
+  const dotStyle = useAnimatedStyle(() => ({ opacity: dotOpacity.value }));
+
+  // Per-category attempt breakdown ("Social ×3 · Video ×2") — refreshed from
+  // the app group whenever the total ticks. Categories only; iOS privacy
+  // never tells us which app was attempted.
+  const totalViolations = Math.max(soloViolationCount, violationCount);
+  const [violationsByCategory, setViolationsByCategory] = useState<
+    Record<string, number>
+  >({});
+  useEffect(() => {
+    if (totalViolations === 0) return;
+    setViolationsByCategory(getViolationsByCategory());
+  }, [totalViolations]);
+  const violationBreakdown = useMemo(() => {
+    const labels: Record<string, string> = {
+      social: "Social",
+      video: "Video",
+      gaming: "Gaming",
+      news: "News",
+      other: "Other",
+    };
+    return Object.entries(violationsByCategory)
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, n]) => `${labels[key] ?? "Other"} ×${n}`)
+      .join(" · ");
+  }, [violationsByCategory]);
 
   // Two-step shield surrender (Lane B5): shield extension fires a push with
   // category SURRENDER_CONFIRM. Tapping the push deep-links here with
@@ -427,6 +474,18 @@ function ActiveSessionScreenInner() {
   useEffect(() => {
     if (isSoloStaked) return;
     if (!isScreenTimeAvailable || !hasActiveSession) return;
+    // Don't silently run an unshielded session: if auth or an app selection is
+    // missing, blocking would no-op (or throw + get swallowed). Warn instead so
+    // the user can fix it rather than discovering nothing was blocked.
+    const { authorized, hasApps } = getAppSelectionStatus();
+    if (!authorized || !hasApps) {
+      StatusBanner.show({
+        severity: "warn",
+        message:
+          "Apps aren't blocked — set up Screen Time and pick apps in Profile.",
+      });
+      return;
+    }
     startBlocking().catch(() => {});
   }, [hasActiveSession, isSoloStaked]);
 
@@ -434,6 +493,25 @@ function ActiveSessionScreenInner() {
   // Firestore session updates (would race with rapid violations).
   const firestoreSessionIdRef = useRef<string | undefined>(undefined);
   firestoreSessionIdRef.current = effectiveFirestoreSession?.id;
+
+  // Live-mode (Firestore) group sessions arrive here via status change without
+  // passing through startGroupSession, so the shield session context is synced
+  // here too — otherwise the shield would show free-block copy on a staked
+  // group session. Ref keeps the effect keyed on the session ID, not on every
+  // snapshot. Stake 0 sessions are left alone (shield free copy is correct).
+  const firestoreSessionRef = useRef(effectiveFirestoreSession);
+  firestoreSessionRef.current = effectiveFirestoreSession;
+  const firestoreSessionId = effectiveFirestoreSession?.id;
+  useEffect(() => {
+    if (isSoloStaked || !isScreenTimeAvailable || !firestoreSessionId) return;
+    const session = firestoreSessionRef.current;
+    const stake = session?.stakePerParticipant ?? 0;
+    if (!session || stake <= 0) return;
+    const names = Object.entries(session.participants ?? {})
+      .filter(([uid]) => uid !== currentUserId)
+      .map(([, p]) => p.name || "Friend");
+    setSessionContext({ names, stake, type: "group" }).catch(() => {});
+  }, [firestoreSessionId, isSoloStaked, currentUserId]);
   useEffect(() => {
     // Solo staked: sessionStore.startSession already subscribes to onShieldViolation
     // and increments its own violationCount — skip here to avoid double counting.
@@ -578,11 +656,6 @@ function ActiveSessionScreenInner() {
     sessionEndsAtMs && sessionStartedAtMs
       ? sessionEndsAtMs - sessionStartedAtMs
       : (effectiveFirestoreSession?.duration ?? 0);
-  const progress = totalDuration > 0 ? 1 - timeRemaining / totalDuration : 0;
-  const progressPercent = Math.min(
-    100,
-    Math.max(0, Math.round(progress * 100)),
-  );
 
   return (
     <SessionScreenScaffold
@@ -592,7 +665,11 @@ function ActiveSessionScreenInner() {
       footer={
         <>
           <Button
-            title={mode === "solo_quick" ? "End Session" : "Surrender"}
+            title={
+              mode === "solo_quick"
+                ? "End Session"
+                : `💸 End early — forfeit ${formatMoney(stakeAmount)}`
+            }
             onPress={() => {
               if (mode === "solo_quick") {
                 Alert.alert(
@@ -637,35 +714,27 @@ function ActiveSessionScreenInner() {
       {/* Status Header */}
       <View style={styles.header}>
         <View style={styles.statusBadge}>
-          <View style={styles.statusDot} />
+          <Animated.View style={[styles.statusDot, dotStyle]} />
           <Text style={styles.statusText}>SESSION ACTIVE</Text>
         </View>
         <Text style={styles.title}>Stay Focused</Text>
         <Text style={styles.subtitle}>Distracting apps are blocked</Text>
       </View>
 
-      {/* Timer */}
+      {/* Timer — the depleting ring + MM:SS are the single progress readout.
+          (The old linear "% complete" bar contradicted the ring's remaining-%
+          on the same screen; removed after the build-21 test.) */}
       <View style={styles.timerSection}>
+        {/* No pause: a staked session is end-only (pausing would free the
+            phone mid-commitment). The countdown just runs; the only exit is
+            finishing or the money-stamped "end early" control below. */}
         <Timer
           timeRemaining={timeRemaining}
           totalTime={totalDuration}
           size="medium"
           showProgress={true}
-          mode={isSoloStaked ? "scrubber" : "ring"}
-          onPauseRequested={
-            isSoloStaked ? () => setSurrenderModalVisible(true) : undefined
-          }
+          mode="ring"
         />
-      </View>
-
-      {/* Progress Bar */}
-      <View style={styles.progressSection}>
-        <View style={styles.progressContainer}>
-          <View
-            style={[styles.progressBar, { width: `${progressPercent}%` }]}
-          />
-        </View>
-        <Text style={styles.progressText}>{progressPercent}% complete</Text>
       </View>
 
       {/* Payout Card — hidden for solo quick-block (no money involved) */}
@@ -737,10 +806,17 @@ function ActiveSessionScreenInner() {
       {leaderboard.length < 2 &&
         (isSoloStaked ? soloViolationCount : violationCount) > 0 && (
           <Card style={styles.violationCard}>
-            <Text style={styles.violationLabel}>Blocked app attempts</Text>
-            <Text style={styles.violationCount}>
-              {isSoloStaked ? soloViolationCount : violationCount}
-            </Text>
+            <View style={styles.violationRow}>
+              <Text style={styles.violationLabel}>Blocked app attempts</Text>
+              <Text style={styles.violationCount}>
+                {isSoloStaked ? soloViolationCount : violationCount}
+              </Text>
+            </View>
+            {violationBreakdown.length > 0 && (
+              <Text style={styles.violationBreakdown}>
+                {violationBreakdown}
+              </Text>
+            )}
           </Card>
         )}
 
