@@ -60,8 +60,16 @@ export const ScreenTimePermissionPreview: React.FC<Props> = ({
   useEffect(() => {
     if (reducedMotion) return;
     const ease = Easing.inOut(Easing.ease);
-    glow.value = withRepeat(withTiming(1, { duration: 1600, easing: ease }), -1, true);
-    bob.value = withRepeat(withTiming(1, { duration: 1100, easing: ease }), -1, true);
+    glow.value = withRepeat(
+      withTiming(1, { duration: 1600, easing: ease }),
+      -1,
+      true,
+    );
+    bob.value = withRepeat(
+      withTiming(1, { duration: 1100, easing: ease }),
+      -1,
+      true,
+    );
     return () => {
       cancelAnimation(glow);
       cancelAnimation(bob);
