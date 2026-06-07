@@ -46,6 +46,9 @@ jest.mock("../../../config/screentime", () => ({
   startLiveActivity: jest.fn(() => Promise.resolve(false)),
   updateLiveActivity: jest.fn(() => Promise.resolve(false)),
   endLiveActivity: jest.fn(() => Promise.resolve(false)),
+  setSessionContext: jest.fn(() => Promise.resolve()),
+  clearSessionContext: jest.fn(() => Promise.resolve()),
+  getViolationsByCategory: jest.fn(() => ({})),
 }));
 
 jest.mock("../../../config/functions", () => ({

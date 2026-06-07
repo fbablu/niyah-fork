@@ -49,6 +49,7 @@ import {
   ProfileHeader,
   ReputationCard,
   ScreenTimeCard,
+  NeverBlockCard,
   TransactionHistory,
 } from "../../src/components/profile";
 import { logger } from "../../src/utils/logger";
@@ -259,6 +260,7 @@ function ProfileScreenInner() {
         <InviteCTA style={styles.inviteCard} />
 
         <ScreenTimeCard />
+        <NeverBlockCard />
 
         {/* Linked Bank */}
         {user?.linkedBank && (

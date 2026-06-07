@@ -26,6 +26,9 @@ import {
   onShieldViolation,
   startLiveActivity,
   endLiveActivity,
+  setSessionContext,
+  clearSessionContext,
+  getViolationsByCategory,
 } from "../config/screentime";
 import {
   scheduleSessionEndNotification,
@@ -39,6 +42,18 @@ import { logEvent } from "../utils/analytics";
 let _isRecovering = false;
 // Cleanup function for violation listener
 let _unsubViolation: (() => void) | null = null;
+
+/** Flatten the shield's per-category attempt counts ("social" → 3) into
+ *  camelCase analytics props (violationsSocial: 3). Zero counts omitted.
+ *  Counts persist until the NEXT startBlocking, so reading at session end
+ *  (even after stopBlocking) is safe. */
+const violationCategoryProps = (): Record<string, number> => {
+  const props: Record<string, number> = {};
+  for (const [key, n] of Object.entries(getViolationsByCategory())) {
+    if (n > 0) props[`violations${key[0].toUpperCase()}${key.slice(1)}`] = n;
+  }
+  return props;
+};
 
 interface SessionState {
   currentSession: Session | null;
@@ -154,6 +169,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     startBlocking().catch((err) =>
       logger.warn("Screen Time startBlocking failed:", err),
     );
+
+    // Tell the shield this is a STAKED session so it shows forfeit copy with
+    // the amount. Free quick-blocks never set this (they clear it), and the
+    // shield defaults to free copy whenever stake ≤ 0 — default-safe.
+    setSessionContext({
+      names: [],
+      stake: config.stake,
+      type: "solo",
+    }).catch(() => {});
 
     // Start Live Activity (no-op when Lane B disabled or iOS <16.1). Solo
     // sessions ship an empty leaderboard — the widget shows just timer + blob.
@@ -322,6 +346,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       cadence: currentSession.cadence,
       stakeAmount: currentSession.stakeAmount,
       ...(reason ? { surrenderReason: reason } : {}),
+      ...violationCategoryProps(),
     });
   },
 
@@ -397,6 +422,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       cadence: currentSession.cadence,
       stakeAmount: currentSession.stakeAmount,
       payoutAmount: payout,
+      ...violationCategoryProps(),
     });
   },
 
@@ -511,6 +537,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   reset: () => {
     _unsubViolation?.();
     _unsubViolation = null;
+    // Logout hygiene: don't leave a stale staked context that would show
+    // forfeit copy on the next account's free blocks.
+    clearSessionContext().catch(() => {});
     set({
       currentSession: null,
       sessionHistory: [],

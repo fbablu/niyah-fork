@@ -44,7 +44,9 @@ import {
   endLiveActivity,
   stopBlocking,
   getSavedAppBlockSummary,
+  getViolationsByCategory,
 } from "../config/screentime";
+import { logEvent } from "../utils/analytics";
 import {
   scheduleSessionEndNotification,
   cancelSessionEndNotification,
@@ -528,9 +530,12 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       );
     }
 
-    // Sync participant names + stake to shared UserDefaults so the shield
-    // extension can show dynamic messages like "Sarah and Mike are watching."
-    if (fullParticipants.length > 1) {
+    // Sync names + stake to shared UserDefaults so the shield extension can
+    // show dynamic messages. Stake-driven, not participant-count-driven: the
+    // shield must know about EVERY staked session (solo included) so it can
+    // show forfeit copy, and must see stake 0 for free quick-blocks so it
+    // shows free copy — so clear any stale context on the free path.
+    if (stake > 0) {
       const myId = useAuthStore.getState().user?.id;
       const otherNames = fullParticipants
         .filter((p) => p.userId !== myId)
@@ -538,8 +543,10 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       setSessionContext({
         names: otherNames,
         stake,
-        type: "group",
+        type: isSoloSession ? "solo" : "group",
       }).catch(() => {});
+    } else {
+      clearSessionContext().catch(() => {});
     }
   },
 
@@ -623,6 +630,26 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
         authStore.updateUser({
           currentStreak: 0,
           totalSessions: (authStore.user?.totalSessions ?? 0) + 1,
+        });
+      }
+    }
+
+    // Per-category blocked-attempt summary (covers group + free quick-block
+    // ends — solo staked sessions flatten these into their own events).
+    // Read BEFORE stopBlocking-adjacent cleanup; zero-attempt sessions skip.
+    {
+      const counts = getViolationsByCategory();
+      const entries = Object.entries(counts).filter(([, n]) => n > 0);
+      if (entries.length > 0) {
+        logEvent("blocked_attempts_summary", {
+          sessionType:
+            completedSession.participants.length > 1 ? "group" : "quick",
+          ...Object.fromEntries(
+            entries.map(([key, n]) => [
+              `violations${key[0].toUpperCase()}${key.slice(1)}`,
+              n,
+            ]),
+          ),
         });
       }
     }

@@ -3,6 +3,7 @@ import {
   NiyahScreenTime,
   type AuthorizationStatus,
   type AppSelectionToken,
+  type SelectionTemplate,
   type ShieldViolationEvent,
   type BaselineApp,
   type LiveActivityStartPayload,
@@ -51,6 +52,95 @@ export const getSavedAppSelection = (): AppSelectionToken | null => {
 export const clearAppSelection = async (): Promise<void> => {
   if (!isScreenTimeAvailable) return;
   return NiyahScreenTime.clearSelection();
+};
+
+// ---------------------------------------------------------------------------
+// Block-list templates (named selections)
+// ---------------------------------------------------------------------------
+
+/** Snapshot the CURRENT selection as a named template (same-name overwrites).
+ *  Throws with a user-presentable message if nothing is selected. */
+export const saveSelectionTemplate = async (
+  name: string,
+): Promise<SelectionTemplate> => {
+  if (!isScreenTimeAvailable) {
+    throw new Error("Screen Time API is not available on this device");
+  }
+  return NiyahScreenTime.saveSelectionTemplate(name);
+};
+
+/** Saved template summaries (never tokens). Empty off-device. */
+export const listSelectionTemplates = (): SelectionTemplate[] => {
+  if (!isScreenTimeAvailable) return [];
+  try {
+    return NiyahScreenTime.listSelectionTemplates() ?? [];
+  } catch {
+    return [];
+  }
+};
+
+/** Load a template into the active selection (write-through). Null when the
+ *  template is missing or Screen Time is unavailable. */
+export const applySelectionTemplate = async (
+  name: string,
+): Promise<AppSelectionToken | null> => {
+  if (!isScreenTimeAvailable) return null;
+  try {
+    return await NiyahScreenTime.applySelectionTemplate(name);
+  } catch {
+    return null;
+  }
+};
+
+export const deleteSelectionTemplate = async (name: string): Promise<void> => {
+  if (!isScreenTimeAvailable) return;
+  try {
+    await NiyahScreenTime.deleteSelectionTemplate(name);
+  } catch {
+    // best-effort
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Never-block list (apps that stay available during every block)
+// ---------------------------------------------------------------------------
+
+/** Present the (seeded) picker for the never-block list. Rejects on cancel —
+ *  same contract as presentAppPicker. */
+export const presentNeverBlockPicker = async (): Promise<AppSelectionToken> => {
+  if (!isScreenTimeAvailable) {
+    throw new Error("Screen Time API is not available on this device");
+  }
+  return NiyahScreenTime.presentNeverBlockPicker();
+};
+
+export const getNeverBlockSummary = (): AppSelectionToken | null => {
+  if (!isScreenTimeAvailable) return null;
+  try {
+    return NiyahScreenTime.getNeverBlockSummary();
+  } catch {
+    return null;
+  }
+};
+
+export const clearNeverBlockSelection = async (): Promise<void> => {
+  if (!isScreenTimeAvailable) return;
+  try {
+    await NiyahScreenTime.clearNeverBlockSelection();
+  } catch {
+    // best-effort
+  }
+};
+
+/** Sign-out/delete hygiene — wipes selection, templates, never-block list,
+ *  shield context and violation counters so the next account starts clean. */
+export const clearAllSelections = async (): Promise<void> => {
+  if (!isScreenTimeAvailable) return;
+  try {
+    await NiyahScreenTime.clearAllSelections();
+  } catch {
+    // best-effort
+  }
 };
 
 /** A selection counts as non-empty if it names apps OR whole categories. */
@@ -239,6 +329,25 @@ export const setSessionContext = async (context: {
 export const clearSessionContext = async (): Promise<void> => {
   if (!isScreenTimeAvailable) return;
   return NiyahScreenTime.clearSessionContext();
+};
+
+// ---------------------------------------------------------------------------
+// Violation breakdown
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-category blocked-app attempt counts for the current session, classified
+ * by the shield extension ("social" | "video" | "gaming" | "news" | "other").
+ * Per-app names are impossible (Apple privacy model) — this is the ceiling.
+ * Cleared natively on startBlocking; read before stopBlocking for analytics.
+ */
+export const getViolationsByCategory = (): Record<string, number> => {
+  if (!isScreenTimeAvailable) return {};
+  try {
+    return NiyahScreenTime.getViolationsByCategory() ?? {};
+  } catch {
+    return {};
+  }
 };
 
 // ---------------------------------------------------------------------------

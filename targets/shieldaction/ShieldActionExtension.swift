@@ -17,6 +17,8 @@ class ShieldActionExtension: ShieldActionDelegate {
     private static let pendingSurrenderKey   = "niyah_surrender_pending"
     private static let blockingKey           = "niyah_is_blocking"
     private static let violationsKey         = "niyah_shield_violations"
+    private static let violationsByCategoryKey = "niyah_shield_violations_by_category"
+    private static let lastVariantKey        = "niyah_last_shield_variant"
     private static let surrenderPushID       = "niyah-surrender-confirm"
     private static let surrenderCategoryID   = "SURRENDER_CONFIRM"
 
@@ -122,6 +124,18 @@ class ShieldActionExtension: ShieldActionDelegate {
         var violations = sharedDefaults.array(forKey: Self.violationsKey) as? [Double] ?? []
         violations.append(Date().timeIntervalSince1970 * 1000)
         sharedDefaults.set(violations, forKey: Self.violationsKey)
+
+        // Per-category tally. This process can't classify the app itself
+        // (Application(token:).bundleIdentifier is nil outside the shield's
+        // data source), but shieldconfig always renders before a button press
+        // lands here and writes the variant it classified — so "last shown
+        // variant" IS the category of the app the user just tapped through.
+        // Privacy ceiling: categories only; app names are never visible here.
+        let category = sharedDefaults.string(forKey: Self.lastVariantKey) ?? "other"
+        var byCategory =
+            sharedDefaults.dictionary(forKey: Self.violationsByCategoryKey) as? [String: Int] ?? [:]
+        byCategory[category, default: 0] += 1
+        sharedDefaults.set(byCategory, forKey: Self.violationsByCategoryKey)
         sharedDefaults.synchronize()
     }
 

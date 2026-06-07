@@ -108,6 +108,17 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     private let appGroupID = "group.com.niyah.app"
     private let sessionContextKey = "niyah_session_context"
+    private let lastVariantKey = "niyah_last_shield_variant"
+
+    private func variantName(_ variant: ShieldVariant) -> String {
+        switch variant {
+        case .social:         return "social"
+        case .video:          return "video"
+        case .gaming:         return "gaming"
+        case .news:           return "news"
+        case .defaultVariant: return "other"
+        }
+    }
 
     private func makeConfiguration(
         bundleID: String?,
@@ -115,6 +126,15 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
     ) -> ShieldConfiguration {
         let variant = detectVariant(bundleID: bundleID, categoryName: categoryName)
         let subtitleText = buildSubtitle(variant: variant)
+
+        // Handoff for per-category attempt counts: the shield always renders
+        // before a button press reaches ShieldActionExtension (which can't
+        // classify — Application(token:).bundleIdentifier is nil there), and
+        // only one shield shows at a time, so "last shown variant" is the
+        // category of whatever the user taps next.
+        if let defaults = UserDefaults(suiteName: appGroupID) {
+            defaults.set(variantName(variant), forKey: lastVariantKey)
+        }
 
         return ShieldConfiguration(
             backgroundBlurStyle: .systemUltraThinMaterialDark,
@@ -141,20 +161,30 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
     }
 
     private func buildSubtitle(variant: ShieldVariant) -> String {
+        // Default-safe: forfeit language renders ONLY when the session context
+        // explicitly carries a stake. Missing key, malformed JSON, or stake 0
+        // (free quick-blocks, scheduled blocks) all get the free copy — a
+        // stale context can at worst show free copy during a staked session,
+        // never scary forfeit copy on a free block.
         let context = readSessionContext()
         let names = context?["names"] as? [String]
         let stake = context?["stake"] as? Int ?? 0
-        let stakeStr = stake > 0 ? String(format: "$%.2f", Double(stake) / 100.0) : nil
+        let hasStake = stake > 0
+        let stakeStr = hasStake ? String(format: "$%.2f", Double(stake) / 100.0) : nil
 
         let quotes = variantQuotes(
             variant,
             namesList: (names?.isEmpty == false) ? formatNames(names!) : nil,
-            stakeStr: stakeStr
+            stakeStr: stakeStr,
+            hasStake: hasStake
         )
         let index = Int(Date().timeIntervalSince1970 / 60) % quotes.count
         let lead = quotes[index]
 
-        return "\(lead)\n\nUnlocking forfeits your stake and sends you back to your home screen."
+        let suffix = hasStake
+            ? "Unlocking forfeits your \(stakeStr!) stake and sends you back to your home screen."
+            : "ending early just ends the block — but you came here to focus."
+        return "\(lead)\n\n\(suffix)"
     }
 
     private func readSessionContext() -> [String: Any]? {
@@ -166,8 +196,8 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         return parsed
     }
 
-    private func variantQuotes(_ variant: ShieldVariant, namesList: String?, stakeStr: String?) -> [String] {
-        var quotes: [String] = baseQuotes(for: variant)
+    private func variantQuotes(_ variant: ShieldVariant, namesList: String?, stakeStr: String?, hasStake: Bool) -> [String] {
+        var quotes: [String] = baseQuotes(for: variant, hasStake: hasStake)
         if let names = namesList {
             quotes.append(contentsOf: socialQuotes(variant: variant, namesList: names))
         }
@@ -177,7 +207,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         return quotes
     }
 
-    private func baseQuotes(for variant: ShieldVariant) -> [String] {
+    private func baseQuotes(for variant: ShieldVariant, hasStake: Bool) -> [String] {
         switch variant {
         case .social:
             return [
@@ -190,7 +220,9 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
                 "you're not bored, you're avoiding.\nlock back in.",
                 "the algorithm is in its villain era.\ndon't let it cook you.",
                 "touch grass after the timer,\nnot the feed.",
-                "close the app, keep the stake.\nthat's the whole move.",
+                hasStake
+                    ? "close the app, keep the stake.\nthat's the whole move."
+                    : "close the app.\nthat's the whole move.",
             ]
         case .video:
             return [
@@ -232,17 +264,32 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
                 "the discourse will cope without you.\nclose the app.",
             ]
         case .defaultVariant:
+            if hasStake {
+                return [
+                    "real money is on the line.\nyour stake is safe while this stays closed.",
+                    "the urge passes in about 60 seconds.\nwait it out.",
+                    "you set this timer.\npast-you was locked in. trust them.",
+                    "every minute closed is money you keep.",
+                    "you won't remember this urge tomorrow.\nyou'll remember the work.",
+                    "two more minutes. then two more.\nthat's how it's done.",
+                    "respectfully, close the app.",
+                    "the hardest part is the next minute.\nthen it gets easy.",
+                    "lock in now, flex later.",
+                    "close the app. keep the stake. move on.",
+                ]
+            }
+            // Free blocks: same voice, zero money language.
             return [
-                "real money is on the line.\nyour stake is safe while this stays closed.",
+                "no money on the line.\njust your word. keep it.",
                 "the urge passes in about 60 seconds.\nwait it out.",
                 "you set this timer.\npast-you was locked in. trust them.",
-                "every minute closed is money you keep.",
+                "you blocked this for a reason.\nthe reason hasn't changed.",
                 "you won't remember this urge tomorrow.\nyou'll remember the work.",
                 "two more minutes. then two more.\nthat's how it's done.",
                 "respectfully, close the app.",
                 "the hardest part is the next minute.\nthen it gets easy.",
-                "lock in now, flex later.",
-                "close the app. keep the stake. move on.",
+                "free block, real focus.\nlock in.",
+                "close the app. move on.",
             ]
         }
     }
