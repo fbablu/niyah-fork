@@ -1,4 +1,4 @@
-meeting notes from asan walk
+meeting notes from  walk
 
 - making sure app blocking doesn't fully block important notifications
   - apple dnd block all notifications except for [specific contacts]; do the same but with specific apps instead
@@ -54,3 +54,19 @@ meeting notes from asan walk
   - what if i just this up with current phone, buy new phone, and let that older phone passively earn money via schedules? 
   - waht if i just buy an old cheap phone, set this up, and then let it sit idle?
   - how do we minimize or prevent the common idea of "just get another phone" or something to game the system?
+
+
+
+===
+Some additional notes 
+- upon evey new app opening, I always get the Terms & Prvacy screen, the "youre' all set" screen, and the stay in the loop screen, even if i've done it during onboarding before, it's stil coming again and again; can you please resolve this so it really only is visible once during onboarding and when a user wants to change those settings, it'd just be in the profile settings
+- Could we also fix that Get started screen on the onboarding sign in / get started
+- Still no notification from a screen; I see the back to it and the Open Niyah button:
+  - Clicking Back to it -> just goes to back to homescreen
+  - Clicking Open Niyah -> also just goes to homescreen, when it should instead trigger a push notification saying "click here to stop (session|earning, depending on staked or not)" -> after clicking the push notification, it should take the user to the ongoing timer / schedule that is currently running
+    - IN addition, the process for setting up a schedule -> starting a sesssion and stopping it via a easy, quick green toggle switch, rather than something that has some friction, involving a set stake amount + estimated profit or something; and tying it well with the home screen
+  - In addition, with all of these, the profile tab seems to be very outdated. instead of having the blob maker always there on the profile tab, hide it all under a bottom screen popup or something that is only shown when the user clicks a pencil / edit icon on the profile blob; once that opens, the custom blob maker should instead look like this:
+    - [insert figma mockup]
+
+
+- also make sure to do a deep dive on ALL visible screen to make sure things are within the content view and not position WAY to high up or WAY to low; keep it consistent everywhere alongside some general padding so that even modals and stuff that pop up from the bottom and don't follow the same positioning via a regular popup you'd see for a regular header text in a screen; ie they're positioned consistently with the content view and not way off to the top/side or way off the bottom
