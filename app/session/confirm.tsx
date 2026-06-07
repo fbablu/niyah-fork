@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useRef } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
@@ -12,10 +12,12 @@ import { useColors } from "../../src/hooks/useColors";
 import {
   Card,
   Button,
+  SlideToConfirm,
   SessionScreenScaffold,
   withErrorBoundary,
   StatusBanner,
 } from "../../src/components";
+import { BlockTemplateChips } from "../../src/components/session";
 import * as Haptics from "expo-haptics";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
@@ -299,6 +301,10 @@ function ConfirmSessionScreenInner() {
   const [authorized, setAuthorized] = useState(
     () => getAppSelectionStatus().authorized,
   );
+  const [isStarting, setIsStarting] = useState(false);
+  // Synchronous mirror of isStarting — closes the double-tap window that
+  // React-state guards can't (state reads are stale until commit).
+  const startingRef = useRef(false);
   const stAvailable = isScreenTimeAvailable;
   const hasApps =
     !!appSelection && appSelection.appCount + appSelection.categoryCount > 0;
@@ -330,9 +336,17 @@ function ConfirmSessionScreenInner() {
 
   const handleConfirm = async () => {
     if (!user) return;
+    // SYNCHRONOUS re-entry guard: a second confirm while the first awaits the
+    // Screen Time gate would double-charge the stake (createSoloSession is
+    // idempotent per-sessionId only, and each invocation generates a fresh
+    // id). isStarting alone can't close this — it's React state set AFTER the
+    // gate await, and the reduced-motion Button fallback has no one-shot.
+    if (startingRef.current) return;
+    startingRef.current = true;
 
     // Gate: ensure Screen Time auth + a non-empty app selection BEFORE charging
     // the stake. Prompts inline if missing; aborts (no charge) if declined.
+    // The gate's own prompts must stay interactive, so isStarting flips after.
     const gate = await validateAndPromptForAppSelection();
     if (!gate.ok) {
       StatusBanner.show({
@@ -344,10 +358,12 @@ function ConfirmSessionScreenInner() {
       });
       setAuthorized(getAppSelectionStatus().authorized);
       setAppSelection(getSavedAppSelection());
+      startingRef.current = false;
       return;
     }
     if (gate.selection) setAppSelection(gate.selection);
 
+    setIsStarting(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     if (isSolo) {
@@ -358,6 +374,8 @@ function ConfirmSessionScreenInner() {
           error instanceof Error ? error.message : "Could not start session.";
         logger.warn("startSoloSession failed:", error);
         StatusBanner.show({ severity: "error", message });
+        setIsStarting(false);
+        startingRef.current = false;
         return;
       }
       // startSession() in sessionStore already fires startBlocking() internally.
@@ -389,7 +407,21 @@ function ConfirmSessionScreenInner() {
           },
         ];
 
-    startGroupSession(cadence, participants);
+    // startGroupSession throws synchronously when a session is already live
+    // (e.g. a free quick-block is running) — without the catch the slider
+    // would hang in an eternal loading spinner on an unhandled rejection.
+    try {
+      startGroupSession(cadence, participants);
+    } catch (error) {
+      StatusBanner.show({
+        severity: "error",
+        message:
+          error instanceof Error ? error.message : "Could not start session.",
+      });
+      setIsStarting(false);
+      startingRef.current = false;
+      return;
+    }
 
     // The gate above already ensured auth + a non-empty selection (or that
     // Screen Time isn't available here), so startBlocking won't throw on an
@@ -427,11 +459,15 @@ function ConfirmSessionScreenInner() {
       }
       footer={
         <>
-          <Button
-            title={showPartner ? "Start Duo Session" : "Start Solo Session"}
-            onPress={handleConfirm}
+          <SlideToConfirm
+            title={
+              showPartner
+                ? "Slide to start duo session"
+                : "Slide to start solo session"
+            }
+            onConfirm={handleConfirm}
             disabled={!blockingReady}
-            size="large"
+            loading={isStarting}
           />
           <Text style={styles.disclaimer}>
             Your {formatMoney(config.stake)} stake will be deducted immediately
@@ -587,6 +623,10 @@ function ConfirmSessionScreenInner() {
             <Text style={styles.blockedNote}>
               Tap to change · apps block the moment the session starts
             </Text>
+            <BlockTemplateChips
+              onApplied={(selection) => setAppSelection(selection)}
+              canSaveCurrent={hasApps}
+            />
           </>
         ) : (
           <>

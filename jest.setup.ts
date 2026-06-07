@@ -171,17 +171,38 @@ jest.mock("react-native-reanimated", () => ({
   },
 }));
 
-// Mock react-native-gesture-handler
+// Mock react-native-gesture-handler.
+// Gesture builders capture their chained callbacks in `handlers` so contract
+// tests can drive the gesture (e.g. pan.handlers.onUpdate({ translationX })).
+const mockMakeCapturingGesture = () => {
+  const g: Record<string, unknown> & { handlers: Record<string, unknown> } = {
+    handlers: {},
+  };
+  for (const m of [
+    "enabled",
+    "activeOffsetX",
+    "hitSlop",
+    "onBegin",
+    "onStart",
+    "onUpdate",
+    "onEnd",
+    "onFinalize",
+  ]) {
+    g[m] = jest.fn((arg: unknown) => {
+      g.handlers[m] = arg;
+      return g;
+    });
+  }
+  return g;
+};
+
 jest.mock("react-native-gesture-handler", () => ({
   GestureHandlerRootView: "GestureHandlerRootView",
   Gesture: {
-    Tap: jest.fn(() => ({ onEnd: jest.fn().mockReturnThis() })),
-    Pan: jest.fn(() => ({
-      onUpdate: jest.fn().mockReturnThis(),
-      onEnd: jest.fn().mockReturnThis(),
-    })),
+    Tap: jest.fn(() => mockMakeCapturingGesture()),
+    Pan: jest.fn(() => mockMakeCapturingGesture()),
   },
-  GestureDetector: "GestureDetector",
+  GestureDetector: ({ children }: { children: unknown }) => children,
   TapGestureHandler: "TapGestureHandler",
   PanGestureHandler: "PanGestureHandler",
   ScrollView: "ScrollView",

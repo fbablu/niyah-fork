@@ -28,7 +28,7 @@ import { useColors } from "../../src/hooks/useColors";
 import { useScreenProtection } from "../../src/hooks/useScreenProtection";
 import * as Haptics from "expo-haptics";
 import {
-  Button,
+  SlideToConfirm,
   NumPad,
   AmountDisplay,
   AnimatedNote,
@@ -122,7 +122,9 @@ const getDepositErrorMessage = (error: unknown): string => {
   }
 
   if (/network request failed/i.test(message)) {
-    return "We couldn't reach the payment service. Check your connection and try again.";
+    // Not necessarily the user's connection — a stale SSL pin set kills these
+    // calls too (build 21 outage), and only a new app version fixes that.
+    return "We couldn't reach the payment service. Please try again in a moment — if it keeps happening, update to the latest version of Niyah.";
   }
 
   if (
@@ -207,8 +209,13 @@ function DepositScreenInner() {
     null,
   );
   const [isLoading, setIsLoading] = useState(false);
-  // Store paymentIntentId for retry if verify fails after payment succeeds
-  const [pendingVerifyId, setPendingVerifyId] = useState<string | null>(null);
+  // Store paymentIntentId for retry if verify fails after payment succeeds.
+  // The ref is the source of truth inside async closures — the state value is
+  // captured at render time, so reading it in handleStripeDeposit's catch saw
+  // null on first attempt and the "Retry" path was unreachable (the user got
+  // a generic "Deposit Failed" right after a successful charge).
+  const pendingVerifyIdRef = useRef<string | null>(null);
+  const [, setPendingVerifyId] = useState<string | null>(null);
   const [pendingVerifyAmount, setPendingVerifyAmount] = useState<number>(0);
   // Set to the credited amount (cents) to show the celebratory success overlay.
   const [successAmount, setSuccessAmount] = useState<number | null>(null);
@@ -346,6 +353,7 @@ function DepositScreenInner() {
       }
 
       // Save for potential retry if verify fails after payment succeeds
+      pendingVerifyIdRef.current = paymentIntentId;
       setPendingVerifyId(paymentIntentId);
       setPendingVerifyAmount(finalAmount);
 
@@ -414,6 +422,7 @@ function DepositScreenInner() {
       }
 
       const result = await verifyAndCreditDeposit(paymentIntentId);
+      pendingVerifyIdRef.current = null;
       setPendingVerifyId(null);
 
       if ("processing" in result) {
@@ -433,7 +442,7 @@ function DepositScreenInner() {
     } catch (err) {
       logger.error("Deposit error:", err);
       // If payment sheet succeeded but verify failed, save for retry
-      if (pendingVerifyId) {
+      if (pendingVerifyIdRef.current) {
         logEvent("deposit_failed", {
           reason: "verify_failed",
           amountCents: finalAmount,
@@ -447,8 +456,14 @@ function DepositScreenInner() {
           ],
         );
       } else {
+        // "network_failed" separates connectivity/pin outages from logic
+        // errors. logEvent writes via the native Firestore SDK (unpinned),
+        // so these events still flow even when the pinned fetch is dead.
+        const failureMessage = getFunctionErrorMessage(err, "");
         logEvent("deposit_failed", {
-          reason: "error",
+          reason: /network request failed/i.test(failureMessage)
+            ? "network_failed"
+            : "error",
           amountCents: finalAmount,
         });
         Alert.alert("Deposit Failed", getDepositErrorMessage(err));
@@ -467,10 +482,12 @@ function DepositScreenInner() {
   };
 
   const handleRetryVerify = async () => {
-    if (!pendingVerifyId) return;
+    const verifyId = pendingVerifyIdRef.current;
+    if (!verifyId) return;
     setIsLoading(true);
     try {
-      const result = await verifyAndCreditDeposit(pendingVerifyId);
+      const result = await verifyAndCreditDeposit(verifyId);
+      pendingVerifyIdRef.current = null;
       setPendingVerifyId(null);
 
       if ("processing" in result) {
@@ -569,26 +586,25 @@ function DepositScreenInner() {
               <Text style={styles.loadingText}>Processing payment...</Text>
             </View>
           ) : (
-            <Button
+            <SlideToConfirm
               title={
                 depositsPaused
                   ? "Deposits paused"
                   : paymentsUnavailable
                     ? "Payments unavailable"
                     : isValidAmount
-                      ? `Add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
+                      ? `Slide to add ${formatMoney(selectedQuickAmount ?? amountInCents)}`
                       : isOverMax
                         ? `Max ${maxDepositLabel} per deposit`
                         : "Enter an amount"
               }
-              onPress={handleDeposit}
+              onConfirm={handleDeposit}
               disabled={
                 !isValidAmount ||
                 isLoading ||
                 paymentsUnavailable ||
                 depositsPaused
               }
-              size="large"
             />
           )}
           {(DEMO_MODE || paymentsUnavailable || depositsPaused) && (
