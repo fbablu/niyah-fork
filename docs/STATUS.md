@@ -4,15 +4,24 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-06-06 night** — build-21 field test surfaced a **prod outage**: the SSL
+> Last updated: **2026-06-07** — the full build-21 feedback pass is now **COMMITTED** (8 slices,
+> `d39f7b9`→`c8f37e1`): the SSL all-four-GTS-roots **pin fix** (the prod-outage fix), SlideToConfirm
+> on money CTAs, shield free-vs-staked copy + session context, per-category blocked-attempt counts,
+> block-list templates + never-block, Focus tab removed, single-ring timer, solo-picker carousel,
+> friends de-nest, schedule conflict fixes + block progress, legal bottom sheet + acceptance retry,
+> dark-pinned onboarding + solid tree, blob variance. buildNumber → **22**. Client CI **828 pass**.
+> **iOS-only as of 2026-06-07:** the Firebase Android app config, `google-services.json`,
+> `withGoogleServicesJson` plugin, `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`, and Android docs are
+> removed (code done) — **2 console steps still pending** to actually kill the orphaned Android API
+> key (Firebase → Remove app; GCP → delete the auto-created Android key) — see [security.md](./security.md).
+> Only **uncommitted** work = the iOS-only scrub + the honest security-record correction (11 files,
+> ready to commit). **Next: commit → build 22 → device Release pin check → internal TestFlight →
+> smoke → public QR.** See §Remaining-to-submit.
+> Prior: **2026-06-06 night** — build-21 field test surfaced a **prod outage**: the SSL
 > pin set (WE2 intermediate) no longer matched Google's served chain on `cloudfunctions.net`,
 > killing EVERY Cloud Function call (deposits, delete-account, legal acceptance → the
 > Terms-re-prompt). Fixed (all four GTS roots pinned) + the full build-21 UX feedback pass
-> implemented (uncommitted, ~2,000 lines / 49 files): SlideToConfirm on money CTAs, shield
-> free-vs-staked copy + session context, per-category blocked-attempt counts, block-list
-> templates + never-block, Focus tab removed, timer single-ring, solo-picker carousel, friends
-> list de-nest, schedule conflict fixes + block progress, legal bottom sheet + acceptance retry,
-> dark-pinned onboarding + solid tree, blob variance. buildNumber → **22**. CI: 826 tests green.
+> implemented (then uncommitted, ~2,000 lines / 49 files; committed 2026-06-07 — see above).
 > See §Remaining-to-submit.
 > Prior: 2026-06-06 PM — slices committed (head `edc4139`+), account cleanup DONE,
 > functions+rules deployed to prod, PII migration run, APNs keys uploaded, funnel events added,
@@ -23,10 +32,11 @@
 > pre-deploy pre-flight green, smoke pending.
 >
 > **2026-06-06 deltas (supersede the "Right now" branch bullet below):**
-> - **Branch reality check:** `wallet-ledger` is now **64 commits ahead of `main`** (TestFlight
->   build-19/20 line, schedule templates, etc.) **plus ~39 uncommitted paths** in the working tree.
->   The "0 divergence" statement below is stale (was true 2026-06-01). Merge to `main` deliberately
->   — `main` is the live-payments branch.
+> - **Branch reality check (2026-06-07):** `wallet-ledger` is **83 commits ahead of `main`**
+>   (TestFlight build 19→22 line, schedule templates, build-22 feedback pass, iOS-only scrub) and
+>   **19 commits ahead of `origin/wallet-ledger`** (unpushed) plus **11 uncommitted paths** (the
+>   iOS-only scrub + security-record correction). The "0 divergence" statement below is stale (was
+>   true 2026-06-01). Merge to `main` deliberately — `main` is the live-payments branch.
 > - **Overnight polish loop (2026-06-05, UNCOMMITTED):** skeletons everywhere, UI-thread Reanimated
 >   migrations (Timer ring, dashboard), local retention reminders (streak-at-risk + scheduled-block,
 >   notifee + per-day dedup), granular Zustand selectors on all 4 tabs, procedural "unique" blobs.
