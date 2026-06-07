@@ -57,7 +57,7 @@ describe("sslPinning", () => {
     Platform.OS = "ios" as typeof Platform.OS;
 
     // Mock require to throw (simulate missing native module)
-    jest.mock("react-native-ssl-public-key-pinning", () => {
+    jest.doMock("react-native-ssl-public-key-pinning", () => {
       throw new Error("Module not found");
     });
 
@@ -70,6 +70,64 @@ describe("sslPinning", () => {
     await expect(mod!.initializeSslPinning()).resolves.toBeUndefined();
 
     // Restore
+    jest.dontMock("react-native-ssl-public-key-pinning");
+    (globalThis as any).__DEV__ = prevDev;
+    Platform.OS = originalOS;
+  });
+
+  // ─── Pin configuration contract ──────────────────────────────────────────
+
+  it("pins the four GTS roots to the Cloud Functions host", async () => {
+    // The WE2 intermediate rotation (build 21) took prod down — this test
+    // pins the contract: roots only, both chain families covered, and a
+    // future expiry so the safety valve stays armed.
+    const prevDev = (globalThis as any).__DEV__;
+    (globalThis as any).__DEV__ = false;
+    Platform.OS = "ios" as typeof Platform.OS;
+
+    const initMock = jest.fn().mockResolvedValue(undefined);
+    jest.doMock("react-native-ssl-public-key-pinning", () => ({
+      initializeSslPinning: initMock,
+    }));
+
+    let mod: typeof import("../../../config/sslPinning");
+    jest.isolateModules(() => {
+      mod = require("../../../config/sslPinning");
+    });
+    await mod!.initializeSslPinning();
+
+    expect(initMock).toHaveBeenCalledTimes(1);
+    const config = initMock.mock.calls[0][0] as Record<
+      string,
+      { publicKeyHashes: string[]; expirationDate: string }
+    >;
+    const hosts = Object.keys(config);
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]).toMatch(/\.cloudfunctions\.net$/);
+
+    const { publicKeyHashes, expirationDate } = config[hosts[0]];
+    // Exactly 4 distinct, well-formed SHA-256 SPKI pins (32 bytes base64).
+    expect(publicKeyHashes).toHaveLength(4);
+    expect(new Set(publicKeyHashes).size).toBe(4);
+    for (const pin of publicKeyHashes) {
+      expect(pin).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+    }
+    // GTS Root R1 (RSA family — current prod chain) and R4 (ECDSA family)
+    // must both be present; derived from https://i.pki.goog/{r1,r4}.pem.
+    expect(publicKeyHashes).toContain(
+      "hxqRlPTu1bMS/0DITB1SSu0vd4u/8l8TjPgfaAp63Gc=",
+    );
+    expect(publicKeyHashes).toContain(
+      "mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=",
+    );
+    // The retired WE2 intermediate pin must NOT come back.
+    expect(publicKeyHashes).not.toContain(
+      "vh78KSg1Ry4NaqGDV10w/cTb9VH3BQUZoCWNa93W/EY=",
+    );
+    // Safety-valve expiry parses and is in the future.
+    expect(new Date(expirationDate).getTime()).toBeGreaterThan(Date.now());
+
+    jest.dontMock("react-native-ssl-public-key-pinning");
     (globalThis as any).__DEV__ = prevDev;
     Platform.OS = originalOS;
   });
