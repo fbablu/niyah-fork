@@ -26,13 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # setup-node before pnpm/action-setup — pnpm 11.5.2 needs Node >= 22.13,
-      # else the self-installer fails with "self-installer exits with code 1".
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      # Install pnpm via npm — pnpm/action-setup@v4's self-installer is broken
+      # (exits with code 1: github.com/pnpm/action-setup/issues/135).
+      - run: npm install -g pnpm@11.5.2
 
       - run: pnpm install --frozen-lockfile
 
