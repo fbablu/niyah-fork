@@ -17,12 +17,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
+      # setup-node MUST precede pnpm/action-setup: pnpm 11.5.2 imports
+      # node:sqlite and requires Node >= 22.13, and action-setup's self-installer
+      # runs pnpm on the active Node — on Node 20 it dies with
+      # "self-installer exits with code 1". Node 22 also runs the jest suite fine
+      # (the worker crash is Node 26-specific).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
