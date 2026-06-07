@@ -15,25 +15,25 @@ const TERMS_CONTENT = `Terms of Service
 Last updated: May 27, 2026
 
 1. Agreement
-These Terms of Service ("Terms") are the agreement between you and Niyah, Inc. ("Niyah," "we," "us"). By creating an account or using the Niyah app (the "Service"), you accept these Terms — this has the same legal effect as signing them. If you don't agree, please don't use Niyah.
+These Terms of Service ("Terms") are the agreement between you and Niyah, Inc. ("Niyah," "we," "us"). By creating an account or using the Niyah app (the "Service"), you accept these Terms. This has the same legal effect as signing them. If you don't agree, please don't use Niyah.
 
 2. Who Can Use Niyah
 You must be at least 18 years old, a resident of the United States, and able to enter a binding contract. By accepting these Terms you confirm you meet these requirements and are responsible for keeping your account credentials secure. The Service isn't available where prohibited by law, and it's your responsibility to make sure you're allowed to use it where you are.
 
 3. What Niyah Is
-Niyah is a productivity and commitment-contract service. You stake your own money as a commitment device to support your personal focus goals. The outcome of every session depends entirely on your own actions during the session — not on chance, luck, other people, or any random event.
+Niyah is a productivity and commitment-contract service. You stake your own money as a commitment device to support your personal focus goals. The outcome of every session depends entirely on your own actions during the session, not on chance, luck, other people, or any random event.
 
 4. Not Gambling
 Niyah is not a gambling, gaming, lottery, or betting service. Stakes are commitment devices, and outcomes are determined solely by your own effort. Stakes are never wagered against, pooled with, or paid to other users.
 
 5. How Focus Sessions Work
-You choose a session cadence (for example, daily, weekly, or monthly) and stake an amount on your focus goal. Complete the session and your stake is returned to you. Surrender early and your stake is forfeited. In group sessions, each participant stakes individually and is accountable only for their own goal — stakes are never pooled, shared, or redistributed. What you do affects only your own stake.
+You choose a session cadence (for example, daily, weekly, or monthly) and stake an amount on your focus goal. Complete the session and your stake is returned to you. Surrender early and your stake is forfeited. In group sessions, each participant stakes individually and is accountable only for their own goal. Stakes are never pooled, shared, or redistributed. What you do affects only your own stake.
 
 6. Your Wallet, Deposits & Stakes
 Your in-app wallet reflects your balance with Niyah. You deposit by card through our payment provider, Stripe. Money you deposit is yours; staking simply commits it to a focus session as described above. We don't lend money or pay interest on balances.
 
 7. Completion Rewards & Promotions
-From time to time we may, at our discretion, offer completion rewards (amounts on top of your returned stake) or promotional credits (such as a deposit-matching bonus). These are funded by Niyah. Rewards, promotional credits, and any balance beyond what you've deposited may require eligibility conditions — like a minimum amount of account activity, a minimum account age, and identity verification — before you can withdraw them. Promotions may be limited per person, changed or ended at any time, and revoked in cases of abuse or fraud. Nothing here guarantees any reward or promotion.
+From time to time we may, at our discretion, offer completion rewards (amounts on top of your returned stake) or promotional credits (such as a deposit-matching bonus). These are funded by Niyah. Rewards, promotional credits, and any balance beyond what you've deposited may require eligibility conditions before you can withdraw them, such as a minimum amount of account activity, a minimum account age, and identity verification. Promotions may be limited per person, changed or ended at any time, and revoked in cases of abuse or fraud. Nothing here guarantees any reward or promotion.
 
 8. Withdrawals
 You can withdraw your withdrawable balance to a bank account you link through Stripe. Because we're paying out real money, identity verification (KYC) is required first. Withdrawals are subject to minimum and maximum amounts, daily limits, and processing times, and may be delayed, held, or refused if we reasonably suspect fraud or to comply with law. Withdrawals are not available to residents of certain U.S. states (currently Florida and Hawaii); this list may change. Bank-linking and payouts are provided by Stripe and Plaid under their own terms.
@@ -57,7 +57,7 @@ THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTIES OF ANY KI
 We may add, change, or remove features, and we may update these Terms. When we make material changes to these Terms, you will be prompted to review and accept the new version before continuing to use the app. Continuing to use Niyah after changes take effect means you accept them.
 
 15. Apple App Store
-These Terms are between you and Niyah only — not Apple. Apple has no responsibility for the app or its content and is not obligated to provide any maintenance or support for it. Apple makes no warranties regarding the app and, to the maximum extent permitted by law, is not responsible for any claims relating to the app, including product-liability, legal/regulatory, or consumer-protection claims. You agree to use the app in compliance with the Apple Media Services Terms and Usage Rules. Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.
+These Terms are between you and Niyah only, not Apple. Apple has no responsibility for the app or its content and is not obligated to provide any maintenance or support for it. Apple makes no warranties regarding the app and, to the maximum extent permitted by law, is not responsible for any claims relating to the app, including product-liability, legal/regulatory, or consumer-protection claims. You agree to use the app in compliance with the Apple Media Services Terms and Usage Rules. Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.
 
 16. Governing Law & Disputes
 These Terms are governed by the laws of the State of Delaware, without regard to its conflict-of-laws rules. You and Niyah agree to first try to resolve any dispute informally by contacting us. Any dispute not resolved informally will be subject to the exclusive jurisdiction of the state and federal courts located in the State of Delaware. We may still seek injunctive relief in any appropriate jurisdiction.
@@ -76,38 +76,38 @@ Last updated: May 27, 2026
 Niyah is a focus app with real financial stakes: you deposit your own money, stake it on a focus session, and get it back when you finish. Because money is involved, we take your data seriously and keep it to the minimum we need. This policy explains what we collect, why, and who helps us run the service. By using Niyah, you agree to this policy.
 
 2. What We Collect
-- Account info — your name, email, and phone number, so you can sign in and we can reach you.
-- Profile — your display name and photo, shown on your devices and to friends you invite.
-- Session activity — the focus sessions you create, your stakes, completions and surrenders, and streaks.
-- Friends & partners — people you add or invite for group sessions, including contacts you choose to match.
-- Payment identifiers — IDs from Stripe and Plaid (such as your Stripe customer and connected-account IDs) needed to process deposits, stakes, and withdrawals. Full card and bank numbers live with those providers, not with us.
-- Identity-verification status — whether you've passed the identity check (KYC) required to withdraw, handled by Stripe.
-- Legal records — that you accepted these terms, which version, and your affirmation that you're 18 or older.
-- Device & diagnostics — app version, device type, and crash/error reports, so we can keep things working.
+- Account info: your name, email, and phone number, so you can sign in and we can reach you.
+- Profile: your display name and photo, shown on your devices and to friends you invite.
+- Session activity: the focus sessions you create, your stakes, completions and surrenders, and streaks.
+- Friends & partners: people you add or invite for group sessions, including contacts you choose to match.
+- Payment identifiers: IDs from Stripe and Plaid (such as your Stripe customer and connected-account IDs) needed to process deposits, stakes, and withdrawals. Full card and bank numbers live with those providers, not with us.
+- Identity-verification status: whether you've passed the identity check (KYC) required to withdraw, handled by Stripe.
+- Legal records: that you accepted these terms, which version, and your affirmation that you're 18 or older.
+- Device & diagnostics: app version, device type, and crash/error reports, so we can keep things working.
 
 3. Screen Time Stays on Your Device
 To help you limit distracting apps, Niyah uses Apple's Family Controls / Screen Time framework. That app-usage information is processed entirely on your device and is never sent to or collected by Niyah's servers.
 
 4. How We Use Your Data
-We use your information only to run and improve Niyah — to sign you in, run your focus sessions, manage your wallet and payments, connect you with friends, verify identity for withdrawals, prevent fraud, meet legal obligations, and provide support.
+We use your information only to run and improve Niyah: to sign you in, run your focus sessions, manage your wallet and payments, connect you with friends, verify identity for withdrawals, prevent fraud, meet legal obligations, and provide support.
 
 5. Money & Identity
-We don't custody your money or move it between users. Deposits, refunds, and payouts run through Stripe; Plaid securely links your bank account for withdrawals. To pay out money, the law requires us to verify your identity — Stripe handles that check. These partners process your information under their own privacy policies.
+We don't custody your money or move it between users. Deposits, refunds, and payouts run through Stripe; Plaid securely links your bank account for withdrawals. To pay out money, the law requires us to verify your identity; Stripe handles that check. These partners process your information under their own privacy policies.
 
 6. Ads & Selling Data
 Niyah has no advertising, no ad-network code, and no data brokers. We do not sell or rent your personal information to anyone.
 
 7. Who We Share With
 We share information only with the providers that help us run the service:
-- Google Firebase (Google Cloud) — sign-in, database, and infrastructure.
-- Stripe — payments, identity verification, and bank payouts.
-- Plaid — secure bank-account linking for withdrawals.
-- Apple Push Notification service — notifications you turn on.
-- Google reCAPTCHA Enterprise and Apple App Attest / DeviceCheck — confirming requests come from a genuine app install (abuse prevention).
+- Google Firebase (Google Cloud): sign-in, database, and infrastructure.
+- Stripe: payments, identity verification, and bank payouts.
+- Plaid: secure bank-account linking for withdrawals.
+- Apple Push Notification service: notifications you turn on.
+- Google reCAPTCHA Enterprise and Apple App Attest / DeviceCheck: confirming requests come from a genuine app install (abuse prevention).
 We may also disclose information when required by law, to investigate or stop fraud or abuse, or to protect Niyah and its users. If Niyah is ever involved in a merger, acquisition, or sale of assets, user information may be part of that transfer.
 
 8. How We Protect Your Information
-We use industry-standard safeguards, including encryption in transit and at rest and strict access controls. No system is perfectly secure, so we can't promise absolute security — but we treat your data carefully.
+We use industry-standard safeguards, including encryption in transit and at rest and strict access controls. No system is perfectly secure, so we can't promise absolute security, but we treat your data carefully.
 
 9. Your Rights
 You can view and update your information in the app, and you can delete your account and associated data at any time from Profile settings. You can also email us at support@niyah.live to access, correct, or delete your data. After deletion we remove or de-identify your data, except limited records we must keep for legal, tax, or fraud-prevention reasons.

@@ -1,0 +1,17 @@
+# Generated / transient artifacts — never committed.
+# This is an OFFLINE research artifact; nothing here ships with the app.
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv_smoke/
+venv/
+env/
+
+# Generated data + outputs
+data/
+figures/*.png
+
+# Keep the figures/ dir itself so train.py/evaluate.py can write into it.
+!figures/.gitkeep

@@ -9,6 +9,7 @@ import { useSessionStore } from "./sessionStore";
 import { usePartnerStore } from "./partnerStore";
 import { useGroupSessionStore } from "./groupSessionStore";
 import { useSocialStore } from "./socialStore";
+import { useScheduleStore } from "./scheduleStore";
 
 export function resetAllUserStores(): void {
   useWalletStore.getState().reset();
@@ -16,4 +17,7 @@ export function resetAllUserStores(): void {
   usePartnerStore.getState().reset();
   useGroupSessionStore.getState().reset();
   useSocialStore.getState().reset();
+  // Disarms every DeviceActivity schedule + clears persisted templates so the
+  // next account on this device doesn't inherit scheduled blocks.
+  useScheduleStore.getState().reset();
 }

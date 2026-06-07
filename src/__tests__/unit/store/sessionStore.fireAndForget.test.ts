@@ -10,6 +10,14 @@
  * - recoverActiveSession (expired session auto-complete path)
  */
 
+// Pin non-DEMO so this suite deterministically exercises the server-authoritative
+// path (createSoloSession / cloudForfeit), independent of any ambient
+// EXPO_PUBLIC_DEMO_MODE in the shell or .env. Mirrors sessionStore.firestore.test.ts.
+jest.mock("../../../constants/config", () => ({
+  ...jest.requireActual("../../../constants/config"),
+  DEMO_MODE: false,
+}));
+
 jest.mock("../../../config/firebase", () => ({
   writeSession: jest.fn(() => Promise.resolve()),
   updateSession: jest.fn(() => Promise.resolve()),
@@ -38,6 +46,9 @@ jest.mock("../../../config/screentime", () => ({
   startLiveActivity: jest.fn(() => Promise.resolve(false)),
   updateLiveActivity: jest.fn(() => Promise.resolve(false)),
   endLiveActivity: jest.fn(() => Promise.resolve(false)),
+  setSessionContext: jest.fn(() => Promise.resolve()),
+  clearSessionContext: jest.fn(() => Promise.resolve()),
+  getViolationsByCategory: jest.fn(() => ({})),
 }));
 
 jest.mock("../../../config/functions", () => ({
@@ -45,6 +56,18 @@ jest.mock("../../../config/functions", () => ({
     Promise.resolve({ newBalance: 0, payout: 0 }),
   ),
   handleSessionForfeit: jest.fn(() => Promise.resolve({ success: true })),
+  // Non-DEMO startSession calls this CF; without it startSession throws.
+  createSoloSession: jest
+    .fn()
+    .mockImplementation(async (_cadence: string, sessionId: string) => ({
+      success: true,
+      sessionId,
+      startedAtMs: Date.now(),
+      endsAtMs: Date.now() + 60_000,
+      stakeAmount: 0,
+      newBalance: 0,
+      idempotent: false,
+    })),
 }));
 
 import { act } from "react";
@@ -62,6 +85,7 @@ import {
   updateSession,
   getActiveSession,
 } from "../../../config/firebase";
+import { createSoloSession } from "../../../config/functions";
 
 // Helper: flush microtasks so fire-and-forget promises settle
 const flushPromises = (): Promise<void> =>
@@ -133,8 +157,8 @@ describe("sessionStore — fire-and-forget paths", () => {
       .mocked(startBlocking)
       .mockRejectedValueOnce(new Error("ScreenTime unavailable"));
 
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     // Session should be active despite startBlocking failure
@@ -155,8 +179,8 @@ describe("sessionStore — fire-and-forget paths", () => {
       return jest.fn(); // unsubscribe
     });
 
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     expect(capturedCallback).not.toBeNull();
@@ -182,8 +206,8 @@ describe("sessionStore — fire-and-forget paths", () => {
       .mocked(stopBlocking)
       .mockRejectedValueOnce(new Error("ScreenTime error"));
 
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     act(() => {
@@ -207,8 +231,8 @@ describe("sessionStore — fire-and-forget paths", () => {
       .mocked(updateSession)
       .mockRejectedValueOnce(new Error("Firestore offline"));
 
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     act(() => {
@@ -230,8 +254,8 @@ describe("sessionStore — fire-and-forget paths", () => {
       .mocked(stopBlocking)
       .mockRejectedValueOnce(new Error("ScreenTime error"));
 
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     act(() => {
@@ -254,8 +278,8 @@ describe("sessionStore — fire-and-forget paths", () => {
       .mocked(updateSession)
       .mockRejectedValueOnce(new Error("Firestore offline"));
 
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     act(() => {
@@ -270,24 +294,22 @@ describe("sessionStore — fire-and-forget paths", () => {
     await flushPromises();
   });
 
-  // ─── writeSession is called with correct data ─────────────────────────────
+  // ─── session persistence on start (non-DEMO = CF, not client write) ───────
 
-  it("calls writeSession with session data on startSession", async () => {
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+  it("persists the session via the createSoloSession CF on startSession", async () => {
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     await flushPromises();
 
-    expect(writeSession).toHaveBeenCalledTimes(1);
-    const [sessionId, data] = jest.mocked(writeSession).mock.calls[0];
-    expect(sessionId).toBeDefined();
-    expect(data).toMatchObject({
-      userId: "test-user",
-      cadence: "daily",
-      stakeAmount: CADENCES.daily.stake,
-      status: "active",
-    });
+    // Non-DEMO: the createSoloSession CF writes the canonical doc + debits the
+    // wallet server-side. The client must NOT write the session doc (the rule
+    // denies client creates), so writeSession stays untouched.
+    expect(createSoloSession).toHaveBeenCalledTimes(1);
+    const [cadence] = jest.mocked(createSoloSession).mock.calls[0];
+    expect(cadence).toBe("daily");
+    expect(writeSession).not.toHaveBeenCalled();
   });
 });
 
@@ -452,8 +474,8 @@ describe("sessionStore — recoverActiveSession", () => {
 
   it("does nothing when a session is already in memory", async () => {
     // Start a session first
-    act(() => {
-      useSessionStore.getState().startSession("daily");
+    await act(async () => {
+      await useSessionStore.getState().startSession("daily");
     });
 
     const existingSession = useSessionStore.getState().currentSession;

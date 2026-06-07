@@ -14,8 +14,12 @@ import { useColors } from "../../src/hooks/useColors";
 import { Button, AuthScreenScaffold } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
-import { PENDING_REFERRAL_KEY } from "../../src/constants/config";
+import {
+  PENDING_REFERRAL_KEY,
+  PENDING_JOIN_KEY,
+} from "../../src/constants/config";
 import { logger } from "../../src/utils/logger";
+import { logEvent } from "../../src/utils/analytics";
 
 export default function ProfileSetupScreen() {
   const Colors = useColors();
@@ -80,12 +84,20 @@ export default function ProfileSetupScreen() {
       if (referrerUid) {
         await applyReferralBonus(referrerUid);
         await SecureStore.deleteItemAsync(PENDING_REFERRAL_KEY);
+        // Post-auth pairing for invite_opened: the new-user leg of the
+        // invite funnel (their pre-auth open was rules-denied).
+        logEvent("invite_redeemed", { referrerUid });
       }
+
+      // A brand-new user has no pending group invite to act on (cold join by
+      // link needs the open-join CF, not built yet) — drop any /join deep link
+      // so they aren't routed to an empty invites screen after onboarding.
+      await SecureStore.deleteItemAsync(PENDING_JOIN_KEY).catch(() => {});
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Route to intake (goal questions) before Screen Time setup
-      router.replace("/(auth)/intake" as never);
+      // Route to the Blob Maker (dice-roll avatar), then intake (goal questions)
+      router.replace("/(auth)/blob-maker" as never);
     } catch (e: unknown) {
       const err = e as { message?: string };
       logger.error("Profile setup error:", e);

@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { View, Text, StyleSheet, AppState, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import {
@@ -17,7 +17,17 @@ import {
   getScreenTimeAuthStatus,
   presentAppPicker,
   getSavedAppSelection,
+  onAuthorizationChange,
 } from "../../src/config/screentime";
+import { logEvent } from "../../src/utils/analytics";
+
+// HARD GATE (Opal-style): Screen Time is core to Niyah, so onboarding requires
+// it before reaching the app — there is no "Skip" here, and app/index.tsx
+// re-routes back to this screen on launch until authorization is granted.
+// Apple won't let us FORCE the grant, so a denial isn't a dead end: we surface
+// an "Open Settings" recovery path and re-check authorization whenever the app
+// returns to the foreground (or the native auth-change event fires).
+// Devices without Screen Time (sim / <iOS16) pass straight through.
 
 export default function ScreenTimeSetupScreen() {
   const Colors = useColors();
@@ -28,14 +38,43 @@ export default function ScreenTimeSetupScreen() {
   const [isAuthorized, setIsAuthorized] = useState(
     isScreenTimeAvailable && getScreenTimeAuthStatus() === "approved",
   );
+  const [authDenied, setAuthDenied] = useState(
+    isScreenTimeAvailable && getScreenTimeAuthStatus() === "denied",
+  );
   const [hasSelection, setHasSelection] = useState(
     isScreenTimeAvailable && !!getSavedAppSelection(),
   );
 
+  const goNext = useCallback(() => {
+    router.replace("/(auth)/notifications-setup" as never);
+  }, [router]);
+
+  // Re-check authorization when the user returns from Settings (or the native
+  // auth-change event fires) so a recovered grant clears the denied state.
+  const recheckAuth = useCallback(() => {
+    if (!isScreenTimeAvailable) return;
+    if (getScreenTimeAuthStatus() === "approved") {
+      setIsAuthorized(true);
+      setAuthDenied(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isScreenTimeAvailable) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") recheckAuth();
+    });
+    const unsubAuth = onAuthorizationChange(() => recheckAuth());
+    return () => {
+      sub.remove();
+      unsubAuth();
+    };
+  }, [recheckAuth]);
+
   const handleConnect = async () => {
     if (!isScreenTimeAvailable) {
-      // Not available on this device — skip
-      router.replace("/(tabs)");
+      // No Screen Time on this device — nothing to gate on, move on.
+      goNext();
       return;
     }
 
@@ -44,54 +83,63 @@ export default function ScreenTimeSetupScreen() {
       const result = await requestScreenTimeAuth();
       if (result === "approved") {
         setIsAuthorized(true);
+        setAuthDenied(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        // Don't auto-advance — let the user pick which apps to block.
-        setIsRequesting(false);
+        logEvent("screentime_granted");
       } else {
-        // User denied — let them skip
-        setIsRequesting(false);
+        // Denied — iOS won't re-prompt, so route the user to Settings.
+        setAuthDenied(true);
+        logEvent("screentime_denied", { reason: "denied" });
       }
     } catch {
+      setAuthDenied(true);
+      logEvent("screentime_denied", { reason: "error" });
+    } finally {
       setIsRequesting(false);
     }
   };
 
   const handlePickApps = async () => {
     if (!isScreenTimeAvailable) {
-      router.replace("/(tabs)");
+      goNext();
       return;
     }
     setIsRequesting(true);
     try {
-      await presentAppPicker();
-      // Re-check after picker dismisses (user may have cancelled).
-      const selection = getSavedAppSelection();
-      if (selection) {
+      // Use the picker's RESOLVED selection, not a read-after-write — the
+      // re-read can miss on a fresh native-module instance and falsely report
+      // no apps. An empty Done now throws (treated as cancel) and is caught.
+      const selection = await presentAppPicker();
+      if (selection && selection.appCount + selection.categoryCount > 0) {
         setHasSelection(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setTimeout(() => router.replace("/(tabs)"), 600);
+        setTimeout(goNext, 600);
       }
     } catch {
-      // User cancelled or picker failed — let them try again or skip.
+      // User cancelled or picker failed — let them try again.
     } finally {
       setIsRequesting(false);
     }
   };
 
-  const handleSkip = () => {
-    router.replace("/(tabs)");
+  const openSettings = () => {
+    Linking.openSettings().catch(() => {});
   };
 
   const title = hasSelection
     ? "You're all set"
-    : isAuthorized
-      ? 'Tap "All Apps & Categories"'
-      : "Connect Niyah to\nScreen Time";
+    : authDenied
+      ? "Screen Time is off"
+      : isAuthorized
+        ? 'Tap "All Apps & Categories"'
+        : "Connect Niyah to\nScreen Time";
   const subtitle = hasSelection
     ? "Niyah will block your selected apps during focus sessions."
-    : isAuthorized
-      ? "Select everything. You can exclude specific apps later — picking All gives you the most control."
-      : "To block distracting apps, Niyah needs Screen Time access. Apple keeps this private to your device.";
+    : authDenied
+      ? "Niyah can't block apps without Screen Time access. Turn it on in Settings, then come back — we'll pick up automatically."
+      : isAuthorized
+        ? "Select everything. You can exclude specific apps later — picking All gives you the most control."
+        : "To block distracting apps, Niyah needs Screen Time access. Apple keeps this private to your device.";
 
   return (
     <AuthScreenScaffold showBack={false} title={title} subtitle={subtitle}>
@@ -112,16 +160,45 @@ export default function ScreenTimeSetupScreen() {
             style={[
               styles.iconCircle,
               hasSelection && styles.iconCircleSuccess,
+              authDenied && styles.iconCircleDenied,
             ]}
           >
             <Text style={styles.iconText}>
-              {hasSelection ? "\u2713" : isAuthorized ? "\u2691" : "\u23F1"}
+              {hasSelection
+                ? "✓"
+                : authDenied
+                  ? "⚠️"
+                  : isAuthorized
+                    ? "⚑"
+                    : "⏱"}
             </Text>
           </View>
         </View>
 
+        {/* Denied recovery instructions */}
+        {authDenied && (
+          <View style={styles.explanationCard}>
+            <Text style={styles.explanationTitle}>How to turn it on</Text>
+            <View style={styles.explanationItem}>
+              <Text style={styles.bulletText}>
+                Open Settings → Screen Time → and allow Niyah, or
+              </Text>
+            </View>
+            <View style={styles.explanationItem}>
+              <Text style={styles.bulletText}>
+                Settings → Niyah → toggle Screen Time access on.
+              </Text>
+            </View>
+            <View style={styles.explanationItem}>
+              <Text style={styles.bulletText}>
+                Return to Niyah and we'll continue automatically.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Permission explanation */}
-        {!isAuthorized && (
+        {!isAuthorized && !authDenied && (
           <View style={styles.explanationCard}>
             <Text style={styles.explanationTitle}>What this allows</Text>
             <View style={styles.explanationItem}>
@@ -171,46 +248,36 @@ export default function ScreenTimeSetupScreen() {
         </Text>
       </View>
 
-      {/* Buttons */}
+      {/* Buttons — no "skip"; this is a required step (hard gate). */}
       <View style={styles.buttonSection}>
-        {!isAuthorized ? (
+        {authDenied ? (
           <>
+            <Button title="Open Settings" onPress={openSettings} size="large" />
             <Button
-              title={isRequesting ? "Connecting..." : "Connect Screen Time"}
-              onPress={handleConnect}
-              disabled={isRequesting}
-              loading={isRequesting}
-              size="large"
-            />
-            <Button
-              title="Skip for Now"
-              onPress={handleSkip}
+              title="I've enabled it"
+              onPress={recheckAuth}
               variant="outline"
               size="large"
             />
           </>
-        ) : !hasSelection ? (
-          <>
-            <Button
-              title={isRequesting ? "Opening picker..." : "Choose Apps"}
-              onPress={handlePickApps}
-              disabled={isRequesting}
-              loading={isRequesting}
-              size="large"
-            />
-            <Button
-              title="Skip for Now"
-              onPress={handleSkip}
-              variant="outline"
-              size="large"
-            />
-          </>
-        ) : (
+        ) : !isAuthorized ? (
           <Button
-            title="Continue"
-            onPress={() => router.replace("/(tabs)")}
+            title={isRequesting ? "Connecting..." : "Connect Screen Time"}
+            onPress={handleConnect}
+            disabled={isRequesting}
+            loading={isRequesting}
             size="large"
           />
+        ) : !hasSelection ? (
+          <Button
+            title={isRequesting ? "Opening picker..." : "Choose Apps"}
+            onPress={handlePickApps}
+            disabled={isRequesting}
+            loading={isRequesting}
+            size="large"
+          />
+        ) : (
+          <Button title="Continue" onPress={goNext} size="large" />
         )}
       </View>
     </AuthScreenScaffold>
@@ -293,6 +360,9 @@ const makeStyles = (Colors: ThemeColors) =>
     iconCircleSuccess: {
       backgroundColor: Colors.gainLight,
       borderColor: Colors.gain,
+    },
+    iconCircleDenied: {
+      borderColor: Colors.loss,
     },
     iconText: {
       fontSize: 36,

@@ -2,11 +2,63 @@
  * Unit Tests for sessionStore.ts
  *
  * Testing Strategy:
- * - WHITE BOX: Tests session state machine transitions
+ * - WHITE BOX: Tests the session state machine transitions
  * - Integration with walletStore and authStore
  * - Time-based calculations
  * - Session lifecycle testing
+ *
+ * This suite pins the DEMO_MODE local state machine, where the client is the
+ * source of truth (stake deducted / payout credited / status written locally).
+ * The non-DEMO server-authoritative path (CF is the sole writer; client does
+ * NOT mutate money/status) is covered by sessionStore.firestore.test.ts.
  */
+
+// MUST be declared before imports — babel-jest hoists jest.mock() calls.
+jest.mock("../../../constants/config", () => ({
+  ...jest.requireActual("../../../constants/config"),
+  DEMO_MODE: true,
+  // requireActual computes USE_SHORT_TIMERS from the real (false) DEMO_MODE, so
+  // force it too — the store picks demoDuration off this flag, not DEMO_MODE.
+  USE_SHORT_TIMERS: true,
+}));
+
+jest.mock("../../../config/firebase", () => ({
+  writeSession: jest.fn(() => Promise.resolve()),
+  updateSession: jest.fn(() => Promise.resolve()),
+  getActiveSession: jest.fn(() => Promise.resolve(null)),
+  updateUserDoc: jest.fn(() => Promise.resolve()),
+  // Auth-related — required by the transitive authStore import.
+  onAuthStateChanged: jest.fn(() => jest.fn()),
+  signOut: jest.fn(),
+  signInWithGoogle: jest.fn(),
+  signInWithApple: jest.fn(),
+  sendMagicLink: jest.fn(),
+  signInWithEmailLink: jest.fn(),
+  isEmailSignInLink: jest.fn(),
+  saveUserProfile: jest.fn(),
+  fetchUserProfile: jest.fn(),
+  awardReferralToUser: jest.fn(),
+  getWalletDoc: jest.fn(() => Promise.resolve(null)),
+  subscribeToWallet: jest.fn(() => jest.fn()),
+}));
+
+jest.mock("../../../config/functions", () => ({
+  handleSessionComplete: jest.fn(() =>
+    Promise.resolve({ newBalance: 5000, payout: 500 }),
+  ),
+  handleSessionForfeit: jest.fn(() => Promise.resolve({ success: true })),
+  createSoloSession: jest
+    .fn()
+    .mockImplementation(async (_cadence: string, sessionId: string) => ({
+      success: true,
+      sessionId,
+      startedAtMs: Date.now(),
+      endsAtMs: Date.now() + 60_000,
+      stakeAmount: 0,
+      newBalance: 0,
+      idempotent: false,
+    })),
+}));
 
 import { act } from "react";
 import { useSessionStore } from "../../../store/sessionStore";

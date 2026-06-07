@@ -31,16 +31,7 @@ import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useWalletStore } from "../../src/store/walletStore";
 import { formatMoney } from "../../src/utils/format";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
-import {
-  getFirestore,
-  collection,
-  query,
-  orderBy,
-  limit as qLimit,
-  getDocs,
-} from "@react-native-firebase/firestore";
-import type { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
-import { logger } from "../../src/utils/logger";
+import { validateAndPromptForAppSelection } from "../../src/config/screentime";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -357,44 +348,12 @@ function ProposeSessionScreenInner() {
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
   const [proposed, _setProposed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [discoverList, setDiscoverList] = useState<
-    { id: string; name: string; tag: string }[]
-  >([]);
 
-  // Discover fallback: when partners + following are empty (fresh installs),
-  // pull a small list of recent Niyah users so the proposer isn't blocked.
-  // TODO post-demo: replace with proper username search or contacts match.
-  useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      try {
-        const db = getFirestore();
-        const q = query(
-          collection(db, "users"),
-          orderBy("createdAt", "desc"),
-          qLimit(25),
-        );
-        const snap = await getDocs(q);
-        const out: { id: string; name: string; tag: string }[] = [];
-        snap.forEach(
-          (docSnap: FirebaseFirestoreTypes.QueryDocumentSnapshot) => {
-            const d = docSnap.data() as { name?: string; firstName?: string };
-            if (docSnap.id === user.id) return;
-            out.push({
-              id: docSnap.id,
-              name: d.name ?? d.firstName ?? "Niyah user",
-              tag: "On Niyah",
-            });
-          },
-        );
-        setDiscoverList(out);
-      } catch (err) {
-        logger.warn("discover users failed", err);
-      }
-    })();
-  }, [user?.id]);
-
-  // Build inviteable people list: partners + following + discover (deduped)
+  // Build inviteable people list: partners + following only (deduped).
+  // The old "discover" fallback queried the 25 most recently created users
+  // and showed them to anyone — strangers, test accounts, frozen accounts.
+  // Removed after the build-21 test (privacy smell + junk rows); the empty
+  // state below points fresh users at Find Friends from Contacts instead.
   const people = useMemo(() => {
     const seen = new Set<string>();
     const list: { id: string; name: string; tag: string }[] = [];
@@ -411,12 +370,6 @@ function ProposeSessionScreenInner() {
         list.push({ id: uid, name: profile?.name ?? uid, tag: "Following" });
       }
     }
-    for (const u of discoverList) {
-      if (!seen.has(u.id)) {
-        seen.add(u.id);
-        list.push(u);
-      }
-    }
     // Disambiguate duplicate names with uid suffix so proposer can tell them apart
     const nameCounts = list.reduce<Record<string, number>>((acc, p) => {
       acc[p.name] = (acc[p.name] ?? 0) + 1;
@@ -427,7 +380,7 @@ function ProposeSessionScreenInner() {
         ? { ...p, name: `${p.name} · ${p.id.slice(0, 4)}` }
         : p,
     );
-  }, [partners, following, profiles, user?.id, discoverList]);
+  }, [partners, following, profiles, user?.id]);
 
   const effectiveStake =
     stake ?? (customStake ? parseInt(customStake) * 100 : null);
@@ -457,6 +410,24 @@ function ProposeSessionScreenInner() {
 
   const handlePropose = async () => {
     if (!canPropose) return;
+
+    // Each member blocks their OWN apps on their OWN device (FamilyControls
+    // tokens can't cross devices). Ensure the proposer has authorized + picked a
+    // selection so their block summary is shared with the group and they're
+    // actually shielded — prompts inline, aborts if declined.
+    const gate = await validateAndPromptForAppSelection();
+    if (!gate.ok) {
+      Alert.alert(
+        gate.reason === "needs-auth"
+          ? "Screen Time Needed"
+          : "Pick Apps to Block",
+        gate.reason === "needs-auth"
+          ? "Niyah needs Screen Time access to block apps during the session."
+          : "Choose at least one app or category to block before proposing.",
+      );
+      return;
+    }
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setLoading(true);
     try {
@@ -639,7 +610,8 @@ function ProposeSessionScreenInner() {
       <Card>
         {people.length === 0 ? (
           <Text style={styles.emptyText}>
-            No one on Niyah yet. Invite a friend from the Friends tab.
+            No friends on Niyah yet. Use "Find Friends from Contacts" on the
+            Friends tab, or share your invite link.
           </Text>
         ) : (
           people.map((person, i) => {

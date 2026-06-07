@@ -8,6 +8,16 @@
  * - State consistency validation
  */
 
+// Integration tests exercise the DEMO_MODE local flow (client is source of
+// truth: stake deducted / payout credited / status written locally). The
+// non-DEMO server-authoritative path is covered by the *.firestore unit suites.
+// MUST precede imports — babel-jest hoists jest.mock().
+jest.mock("../../constants/config", () => ({
+  ...jest.requireActual("../../constants/config"),
+  DEMO_MODE: true,
+  USE_SHORT_TIMERS: true,
+}));
+
 import { act } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { useSessionStore } from "../../store/sessionStore";

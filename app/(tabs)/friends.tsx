@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  ScrollView,
   TextInput,
   Pressable,
   ActivityIndicator,
@@ -13,6 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import * as Contacts from "expo-contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -23,13 +24,25 @@ import {
   type ThemeColors,
 } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
-import { withErrorBoundary } from "../../src/components";
+import { Skeleton, withErrorBoundary } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
+import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { findContactsOnNiyah } from "../../src/config/functions";
-import { PublicProfile, Partner } from "../../src/types";
+import {
+  PublicProfile,
+  Partner,
+  type GroupLeaderboardEntry,
+} from "../../src/types";
 import { logger } from "../../src/utils/logger";
+
+// Cap how many invite rows we mount at once. The rows live inside the
+// FlatList header (non-virtualized), so rendering every device contact
+// stutters on open. Collapsed shows the first few alphabetically; "Show more"
+// expands to the cap; search narrows the full list.
+const INVITE_VISIBLE_LIMIT = 30;
+const INVITE_COLLAPSED_COUNT = 5;
 
 // ─── Styles (makeStyles) ──────────────────────────────────────────────────────
 
@@ -117,6 +130,27 @@ const makeStyles = (Colors: ThemeColors) =>
       borderWidth: 1,
       borderColor: Colors.border,
       gap: Spacing.md,
+    },
+    standingRowMe: {
+      borderColor: Colors.primary,
+      backgroundColor: Colors.primaryMuted,
+    },
+    standingRank: {
+      fontSize: Typography.titleSmall,
+      ...Font.bold,
+      color: Colors.textSecondary,
+      minWidth: 24,
+      textAlign: "center",
+    },
+    standingMeta: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: 2,
+    },
+    standingRate: {
+      fontSize: Typography.titleSmall,
+      ...Font.bold,
+      color: Colors.primaryLight,
     },
     avatar: {
       width: 44,
@@ -252,9 +286,18 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.text,
       marginBottom: Spacing.sm,
     },
-    inviteScrollBox: {
-      maxHeight: 240,
-      borderRadius: Radius.lg,
+    inviteShowMore: {
+      fontSize: Typography.bodySmall,
+      ...Font.semibold,
+      color: Colors.primaryLight,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+    },
+    inviteTruncatedHint: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      marginTop: Spacing.xs,
+      paddingHorizontal: Spacing.md,
     },
     inviteRow: {
       flexDirection: "row",
@@ -302,45 +345,34 @@ const makeStyles = (Colors: ThemeColors) =>
 // ─── Segment control ──────────────────────────────────────────────────────────
 
 const SegmentControl: React.FC<{
-  selected: "following" | "partners";
-  onChange: (tab: "following" | "partners") => void;
+  selected: FriendsTab;
+  onChange: (tab: FriendsTab) => void;
 }> = ({ selected, onChange }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const segments: { key: FriendsTab; label: string }[] = [
+    { key: "following", label: "Following" },
+    { key: "partners", label: "Partners" },
+    { key: "standings", label: "Standings" },
+  ];
   return (
     <View style={styles.segmentRow}>
-      <Pressable
-        style={[
-          styles.segment,
-          selected === "following" && styles.segmentActive,
-        ]}
-        onPress={() => onChange("following")}
-      >
-        <Text
-          style={[
-            styles.segmentLabel,
-            selected === "following" && styles.segmentLabelActive,
-          ]}
+      {segments.map(({ key, label }) => (
+        <Pressable
+          key={key}
+          style={[styles.segment, selected === key && styles.segmentActive]}
+          onPress={() => onChange(key)}
         >
-          Following
-        </Text>
-      </Pressable>
-      <Pressable
-        style={[
-          styles.segment,
-          selected === "partners" && styles.segmentActive,
-        ]}
-        onPress={() => onChange("partners")}
-      >
-        <Text
-          style={[
-            styles.segmentLabel,
-            selected === "partners" && styles.segmentLabelActive,
-          ]}
-        >
-          Partners
-        </Text>
-      </Pressable>
+          <Text
+            style={[
+              styles.segmentLabel,
+              selected === key && styles.segmentLabelActive,
+            ]}
+          >
+            {label}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   );
 };
@@ -472,11 +504,58 @@ const PartnerRow: React.FC<{
   );
 };
 
+// ─── Standings row (computed group leaderboard) ───────────────────────────────
+
+const StandingRowBase: React.FC<{
+  rank: number;
+  entry: GroupLeaderboardEntry;
+}> = ({ rank, entry }) => {
+  const Colors = useColors();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const ratePct = Math.round(entry.completionRate * 100);
+  const displayName = entry.name || "Member";
+  return (
+    <View style={[styles.row, entry.isMe && styles.standingRowMe]}>
+      <Text style={styles.standingRank}>{rank}</Text>
+      <View style={styles.avatar}>
+        <Text style={styles.avatarInitial}>
+          {displayName.charAt(0).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.rowInfo}>
+        <View style={styles.nameRow}>
+          <Text style={styles.rowName}>{displayName}</Text>
+          {entry.isMe ? <Text style={styles.tagBadge}>You</Text> : null}
+        </View>
+        <Text style={styles.standingMeta}>
+          {entry.completed}/{entry.sessions} completed
+          {entry.violations > 0 ? ` · ${entry.violations} slips` : ""}
+        </Text>
+      </View>
+      <Text style={styles.standingRate}>{ratePct}%</Text>
+    </View>
+  );
+};
+
+// Memoized: StandingRow takes only primitive/stable props (rank + entry), so a
+// re-render that doesn't change a row's data skips it. (FollowingRow/PartnerRow
+// also want memo, but need their inline-arrow handlers stabilized first — see
+// docs/overnight-2026-06-05/plan.md "deferred: friends row memoization".)
+const StandingRow = React.memo(StandingRowBase);
+StandingRow.displayName = "StandingRow";
+
 // ─── Discriminated union for FlatList items ──────────────────────────────────
 
 type FollowingItem = { type: "following"; uid: string; profile: PublicProfile };
 type PartnerItem = { type: "partner"; partner: Partner };
-type ListItem = FollowingItem | PartnerItem;
+type StandingItem = {
+  type: "standing";
+  rank: number;
+  entry: GroupLeaderboardEntry;
+};
+type ListItem = FollowingItem | PartnerItem | StandingItem;
+
+type FriendsTab = "following" | "partners" | "standings";
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
@@ -485,10 +564,10 @@ function FriendsScreenInner() {
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const router = useRouter();
   const { tab: requestedTab } = useLocalSearchParams<{
-    tab?: "following" | "partners";
+    tab?: FriendsTab;
   }>();
   const { user } = useAuthStore();
-  const { partners } = usePartnerStore();
+  const partners = usePartnerStore((s) => s.partners);
   const {
     following,
     profiles,
@@ -505,9 +584,22 @@ function FriendsScreenInner() {
     isContactSyncStale,
   } = useSocialStore();
 
-  const [tab, setTab] = useState<"following" | "partners">(
-    requestedTab === "partners" ? "partners" : "following",
+  const { leaderboard, leaderboardLoading, fetchGroupLeaderboard } =
+    useGroupSessionStore();
+
+  const [tab, setTab] = useState<FriendsTab>(
+    requestedTab === "partners" || requestedTab === "standings"
+      ? requestedTab
+      : "following",
   );
+
+  // Fetch the computed standings the first time the user opens that tab (and
+  // refresh on re-entry — it's a cheap on-request aggregate, not a subscription).
+  useEffect(() => {
+    if (tab === "standings") {
+      fetchGroupLeaderboard();
+    }
+  }, [tab, fetchGroupLeaderboard]);
   const [loadingUids, setLoadingUids] = useState<Record<string, boolean>>({});
   const [isImporting, setIsImporting] = useState(false);
   const hasImported = lastContactSyncAt !== null;
@@ -517,6 +609,7 @@ function FriendsScreenInner() {
     { name: string; phone?: string; email?: string }[]
   >([]);
   const [inviteSearch, setInviteSearch] = useState("");
+  const [inviteExpanded, setInviteExpanded] = useState(false);
 
   // Persist invite contacts to AsyncStorage
   const CONTACTS_STORAGE_KEY = "@niyah/invite_contacts";
@@ -774,14 +867,21 @@ function FriendsScreenInner() {
         })
         .filter((item): item is FollowingItem => item !== null);
     }
+    if (tab === "standings") {
+      return (leaderboard ?? []).map(
+        (entry, i): StandingItem => ({ type: "standing", rank: i + 1, entry }),
+      );
+    }
     return partners.map(
       (partner): PartnerItem => ({ type: "partner", partner }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, following, profiles, partners]);
+  }, [tab, following, profiles, partners, leaderboard]);
 
   const keyExtractor = useCallback((item: ListItem) => {
-    return item.type === "following" ? item.uid : item.partner.id;
+    if (item.type === "following") return item.uid;
+    if (item.type === "standing") return `standing-${item.entry.userId}`;
+    return item.partner.id;
   }, []);
 
   const renderItem = useCallback(
@@ -797,6 +897,9 @@ function FriendsScreenInner() {
             unfollowLoading={!!loadingUids[item.uid]}
           />
         );
+      }
+      if (item.type === "standing") {
+        return <StandingRow rank={item.rank} entry={item.entry} />;
       }
       const { partner } = item;
       return (
@@ -822,14 +925,39 @@ function FriendsScreenInner() {
   const handleInviteContact = useCallback(
     (contact: { name: string; phone?: string }) => {
       if (!contact.phone) return;
+      // niyah.live/i is the invite landing: opens the app via deep link if
+      // installed, else shows the install CTA. ?ref=<uid> credits the inviter
+      // (consumed in app/_layout.tsx). Falls back to /i with no ref if somehow
+      // unauthenticated, which still lands on the install page.
+      const inviteUrl = `https://niyah.live/i${myUid ? `?ref=${myUid}` : ""}`;
       const body = encodeURIComponent(
-        `Hey ${contact.name.split(" ")[0]}! Join me on Niyah — we stake real money on focus sessions and earn it back by staying focused.\n\nhttps://niyah.live`,
+        `Hey ${contact.name.split(" ")[0]}! Join me on Niyah — we stake real money on focus sessions and earn it back by staying focused.\n\n${inviteUrl}`,
       );
       // iOS sms: URL scheme opens iMessage with pre-filled body
       Linking.openURL(`sms:${contact.phone}&body=${body}`);
     },
-    [],
+    [myUid],
   );
+
+  // Filter + cap the invite list once per (contacts, query, expanded) change
+  // instead of re-running the filter inside JSX on every render. Only the
+  // capped slice is mounted. Plain rows (no nested ScrollView — the old
+  // maxHeight box clipped row 6 mid-card and fought the outer list's scroll);
+  // collapsed shows a handful, "Show more" expands to the cap, searching
+  // always shows up to the cap.
+  const inviteList = useMemo(() => {
+    const q = inviteSearch.trim().toLowerCase();
+    const matched = q
+      ? nonMatchedContacts.filter((c) => c.name.toLowerCase().includes(q))
+      : nonMatchedContacts;
+    const limit =
+      q || inviteExpanded ? INVITE_VISIBLE_LIMIT : INVITE_COLLAPSED_COUNT;
+    return {
+      visible: matched.slice(0, limit),
+      total: matched.length,
+      collapsed: !q && !inviteExpanded,
+    };
+  }, [nonMatchedContacts, inviteSearch, inviteExpanded]);
 
   const handleFollowMatch = useCallback(
     async (targetUid: string) => {
@@ -852,8 +980,13 @@ function FriendsScreenInner() {
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Text style={styles.title}>Friends</Text>
-          <Pressable onPress={() => router.push("/invite")}>
-            <Text style={styles.inviteLink}>Invite →</Text>
+          <Pressable
+            onPress={() => router.push("/invite")}
+            hitSlop={10}
+            accessibilityLabel="Invite friends"
+            accessibilityRole="button"
+          >
+            <Ionicons name="person-add" size={22} color={Colors.primaryLight} />
           </Pressable>
         </View>
 
@@ -949,39 +1082,61 @@ function FriendsScreenInner() {
               autoCorrect={false}
               clearButtonMode="while-editing"
             />
-            <ScrollView
-              style={styles.inviteScrollBox}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator
-            >
-              {nonMatchedContacts
-                .filter((c) =>
-                  inviteSearch
-                    ? c.name.toLowerCase().includes(inviteSearch.toLowerCase())
-                    : true,
-                )
-                .map((contact, index) => (
-                  <View
-                    key={`invite-${contact.phone || contact.email || index}`}
-                    style={[styles.inviteRow, { marginBottom: Spacing.xs }]}
-                  >
-                    <View style={styles.inviteAvatar}>
-                      <Text style={styles.inviteAvatarText}>
-                        {contact.name.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text style={styles.inviteContactName} numberOfLines={1}>
-                      {contact.name}
-                    </Text>
-                    <Pressable
-                      style={styles.inviteBtn}
-                      onPress={() => handleInviteContact(contact)}
-                    >
-                      <Text style={styles.inviteBtnText}>Invite</Text>
-                    </Pressable>
-                  </View>
-                ))}
-            </ScrollView>
+            {inviteList.visible.map((contact, index) => (
+              <View
+                key={`invite-${contact.phone || contact.email || index}`}
+                style={[styles.inviteRow, { marginBottom: Spacing.xs }]}
+              >
+                <View style={styles.inviteAvatar}>
+                  <Text style={styles.inviteAvatarText}>
+                    {contact.name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.inviteContactName} numberOfLines={1}>
+                  {contact.name}
+                </Text>
+                <Pressable
+                  style={styles.inviteBtn}
+                  onPress={() => handleInviteContact(contact)}
+                >
+                  <Text style={styles.inviteBtnText}>Invite</Text>
+                </Pressable>
+              </View>
+            ))}
+            {inviteList.collapsed &&
+              inviteList.total > inviteList.visible.length && (
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setInviteExpanded(true);
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={styles.inviteShowMore}>
+                    Show more ({inviteList.total - inviteList.visible.length})
+                  </Text>
+                </Pressable>
+              )}
+            {inviteList.collapsed &&
+              inviteList.total > inviteList.visible.length && (
+                <Text style={styles.inviteTruncatedHint}>
+                  Showing {inviteList.visible.length} of {inviteList.total} —
+                  search to find anyone.
+                </Text>
+              )}
+            {!inviteList.collapsed &&
+              inviteExpanded &&
+              !inviteSearch.trim() && (
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setInviteExpanded(false);
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={styles.inviteShowMore}>Show less</Text>
+                </Pressable>
+              )}
           </View>
         )}
 
@@ -996,6 +1151,8 @@ function FriendsScreenInner() {
       Colors,
       contactMatches,
       nonMatchedContacts,
+      inviteList,
+      inviteExpanded,
       isImporting,
       hasImported,
       loadingUids,
@@ -1007,18 +1164,41 @@ function FriendsScreenInner() {
     ],
   );
 
-  const listEmpty = useMemo(
-    () => (
+  const listEmpty = useMemo(() => {
+    if (tab === "standings" && leaderboardLoading) {
+      return (
+        <View style={{ gap: Spacing.sm }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <View key={`standing-skeleton-${i}`} style={styles.row}>
+              <Skeleton width={24} height={18} radius={5} />
+              <Skeleton width={44} height={44} radius={22} />
+              <View style={styles.rowInfo}>
+                <Skeleton width="55%" height={15} radius={6} />
+                <Skeleton
+                  width="40%"
+                  height={11}
+                  radius={5}
+                  style={{ marginTop: 6 }}
+                />
+              </View>
+              <Skeleton width={36} height={16} radius={6} />
+            </View>
+          ))}
+        </View>
+      );
+    }
+    return (
       <View style={styles.emptyState}>
         <Text style={styles.emptyText}>
           {tab === "following"
             ? "Follow your partners to stay connected"
-            : "No partners yet. Invite friends to do sessions together."}
+            : tab === "standings"
+              ? "Complete a group session to see standings. Ranked by completion rate — not money."
+              : "No partners yet. Invite friends to do sessions together."}
         </Text>
       </View>
-    ),
-    [styles, tab],
-  );
+    );
+  }, [styles, tab, leaderboardLoading]);
 
   if (isLoading) {
     return (

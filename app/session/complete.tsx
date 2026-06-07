@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
-import { View, Text, StyleSheet, Animated } from "react-native";
+import { View, Text, StyleSheet, Animated, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   Typography,
@@ -13,6 +13,7 @@ import {
   Card,
   Button,
   Confetti,
+  BlobAvatar,
   SessionScreenScaffold,
   withErrorBoundary,
 } from "../../src/components";
@@ -21,7 +22,25 @@ import { useAuthStore } from "../../src/store/authStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useSessionStore } from "../../src/store/sessionStore";
 import { formatMoney } from "../../src/utils/format";
-import type { GroupSessionDoc } from "../../src/types";
+import { logger } from "../../src/utils/logger";
+import { updateSession } from "../../src/config/firebase";
+import { AI_DATA_CAPTURE_ENABLED } from "../../src/constants/config";
+import type { GroupSessionDoc, SurrenderReason } from "../../src/types";
+import {
+  generateBlobAvatarPreset,
+  type BlobAvatarEyesPreset,
+} from "../../src/constants/blobAvatar";
+import { scheduleRetentionReminder } from "../../src/config/notifications";
+
+// AI Phase-0 capture (analytics only; no money meaning) — see docs/ai-integration.md.
+const REASON_OPTIONS: { value: SurrenderReason; label: string }[] = [
+  { value: "distracted", label: "Distracted" },
+  { value: "interrupted", label: "Interrupted" },
+  { value: "too_long", label: "Too long" },
+  { value: "lost_motivation", label: "Lost motivation" },
+  { value: "emergency", label: "Emergency" },
+  { value: "other", label: "Other" },
+];
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -31,21 +50,6 @@ const makeStyles = (Colors: ThemeColors) =>
       alignItems: "center",
       marginTop: 0,
       marginBottom: Spacing.md,
-    },
-    checkCircle: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: Colors.gainLight,
-      borderWidth: 2,
-      borderColor: Colors.gain,
-      alignItems: "center",
-      justifyContent: "center",
-      marginBottom: Spacing.sm,
-    },
-    checkmark: {
-      fontSize: 30,
-      color: Colors.gain,
     },
     title: {
       fontSize: Typography.headlineSmall,
@@ -217,6 +221,37 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.textSecondary,
       lineHeight: 18,
     },
+    reasonCard: {
+      backgroundColor: Colors.backgroundCard,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      marginBottom: Spacing.sm,
+      paddingVertical: Spacing.sm,
+    },
+    reasonTitle: {
+      fontSize: Typography.bodyMedium,
+      ...Font.semibold,
+      color: Colors.text,
+      marginBottom: Spacing.sm,
+    },
+    reasonChipRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.xs,
+    },
+    reasonChip: {
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      backgroundColor: Colors.backgroundTertiary,
+    },
+    reasonChipText: {
+      fontSize: Typography.bodySmall,
+      color: Colors.textSecondary,
+      ...Font.medium,
+    },
   });
 
 // ─── FirestoreResultsCard ─────────────────────────────────────────────────────
@@ -308,6 +343,7 @@ function CompleteScreenInner() {
   const lastForgivenCents = useSessionStore((s) => s.lastForgivenCents);
   const isSolo = params.type === "solo";
   const lastSolo = soloHistory[0];
+  const [reasonSaved, setReasonSaved] = useState<SurrenderReason | null>(null);
 
   // Legacy local history (demo/legacy sessions)
   const lastSession = groupSessionHistory[0];
@@ -340,7 +376,6 @@ function CompleteScreenInner() {
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Animated.parallel([
       Animated.spring(scaleAnim, {
         toValue: 1,
@@ -361,13 +396,46 @@ function CompleteScreenInner() {
     if (didComplete && !confettiStartedRef.current) {
       confettiStartedRef.current = true;
       setShowConfetti(true);
+      // Success feedback fires only on a confirmed completion (never a surrender),
+      // and waits for the async Firestore confirmation that flips didComplete.
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Extra celebratory pulse when crossing a streak milestone.
+      const s = user?.currentStreak ?? 0;
+      if (s === 3 || s === 5 || s === 10 || s >= 30) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      }
+      // Retention: remind them ~22h out so a live streak doesn't lapse. notifee
+      // replaces by id; the per-day guard caps it to one/day. Read-only over the
+      // streak — notification-only, no money/session writes.
+      if (s >= 1) {
+        scheduleRetentionReminder({
+          reason: "streak_at_risk",
+          fireAt: new Date(Date.now() + 22 * 60 * 60 * 1000),
+          title: `Keep your ${s}-day streak alive`,
+          body: "A quick focus session today keeps it going.",
+        }).catch(() => {});
+      }
       const timer = setTimeout(() => setShowConfetti(false), 4000);
       return () => clearTimeout(timer);
     }
-  }, [didComplete]);
+  }, [didComplete, user?.currentStreak]);
 
   // Wallet balance now auto-syncs via onSnapshot listener in walletStore.
   // No manual hydrate needed on session completion.
+
+  // AI Phase-0: capture the solo surrender reason post-hoc (analytics only; no
+  // money meaning). All surrender paths funnel to this screen, so it's the
+  // universal, zero-money-path-risk capture point. Fire-and-forget to the
+  // sessions doc (rule-allowlisted keys).
+  const handlePickReason = (reason: SurrenderReason) => {
+    Haptics.selectionAsync();
+    setReasonSaved(reason);
+    if (lastSolo?.id) {
+      updateSession(lastSolo.id, { surrenderReason: reason }).catch((err) =>
+        logger.warn("Failed to persist surrender reason:", err),
+      );
+    }
+  };
 
   const handleDone = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -376,12 +444,24 @@ function CompleteScreenInner() {
 
   const getStreakMessage = () => {
     const streak = user?.currentStreak || 0;
-    if (streak === 1) return "Great start! Keep growing your plant.";
-    if (streak >= 10) return "Incredible! Your money plant is thriving!";
-    if (streak >= 5) return "Amazing streak! You're becoming an Oak!";
-    if (streak >= 3) return `${streak}-day streak! Your plant is growing!`;
+    if (streak === 1) return "Great start! Keep the streak alive.";
+    if (streak >= 10) return "Incredible! Your focus streak is on fire.";
+    if (streak >= 5) return "Amazing streak! You're becoming an Oak.";
+    if (streak >= 3) return `${streak}-day streak! Momentum is building.`;
     return `${streak}-day streak! Keep it going!`;
   };
+
+  const currentStreak = user?.currentStreak || 0;
+  const blobConfig =
+    user?.blobAvatar ?? generateBlobAvatarPreset(user?.id || "guest");
+  // Personalize the payoff: the user's own blob reacts to the outcome + streak.
+  const celebrationEyes: BlobAvatarEyesPreset = !didComplete
+    ? "sleepy"
+    : currentStreak >= 30
+      ? "surprised"
+      : currentStreak >= 7
+        ? "wink"
+        : "happy";
 
   return (
     <>
@@ -399,8 +479,13 @@ function CompleteScreenInner() {
             { transform: [{ scale: scaleAnim }], opacity: opacityAnim },
           ]}
         >
-          <View style={styles.checkCircle}>
-            <Text style={styles.checkmark}>✓</Text>
+          <View style={{ marginBottom: Spacing.sm }}>
+            <BlobAvatar
+              size={84}
+              config={{ ...blobConfig, eyesPreset: celebrationEyes }}
+              seed={user?.id}
+              animated
+            />
           </View>
           <Text style={styles.title}>Session Complete</Text>
           <Text style={styles.subtitle}>
@@ -465,6 +550,28 @@ function CompleteScreenInner() {
                 <Text style={styles.receiptBody}>
                   {`${formatMoney(lastSolo.stakeAmount)} forfeited to Niyah. You staked this money so your future self couldn't weasel out — that's what keeps the commitment real.`}
                 </Text>
+              </Card>
+            ) : null}
+            {AI_DATA_CAPTURE_ENABLED && !didComplete && lastSolo.id ? (
+              <Card style={styles.reasonCard}>
+                <Text style={styles.reasonTitle}>
+                  {(reasonSaved ?? lastSolo.surrenderReason)
+                    ? "Thanks — that helps us tune your stake."
+                    : "What made you stop? (optional)"}
+                </Text>
+                {!(reasonSaved ?? lastSolo.surrenderReason) && (
+                  <View style={styles.reasonChipRow}>
+                    {REASON_OPTIONS.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        onPress={() => handlePickReason(opt.value)}
+                        style={styles.reasonChip}
+                      >
+                        <Text style={styles.reasonChipText}>{opt.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </Card>
             ) : null}
           </>

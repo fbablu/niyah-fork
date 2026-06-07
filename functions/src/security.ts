@@ -82,6 +82,125 @@ export function calculateGroupSessionPayouts(
   return payouts;
 }
 
+/**
+ * Sanitize a client-supplied app-block summary (display-only — NO money, NO
+ * opaque tokens). Coerces counts to clamped non-negative integers and trims the
+ * label. Returns undefined for an empty/garbage selection so we never persist a
+ * "0 apps" summary that would imply the member is blocking something (the
+ * waiting-room start-gate reads these counts).
+ */
+export function parseAppBlockSummary(
+  raw: unknown,
+): { appCount: number; categoryCount: number; label: string } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const clampInt = (v: unknown, max: number): number =>
+    typeof v === "number" && Number.isInteger(v) && v >= 0
+      ? Math.min(v, max)
+      : 0;
+  const appCount = clampInt(r.appCount, 1000);
+  const categoryCount = clampInt(r.categoryCount, 100);
+  if (appCount === 0 && categoryCount === 0) return undefined;
+  const label =
+    typeof r.label === "string" && r.label.trim()
+      ? r.label.trim().slice(0, 100)
+      : `${appCount} apps, ${categoryCount} categories`;
+  return { appCount, categoryCount, label };
+}
+
+// ─── group leaderboard (de-pool: rank by completion rate, NEVER earnings) ────
+
+export interface LeaderboardSessionInput {
+  participants: Record<
+    string,
+    {
+      name?: string;
+      completed?: boolean;
+      surrendered?: boolean;
+      violationCount?: number;
+    }
+  >;
+}
+
+export interface LeaderboardEntry {
+  userId: string;
+  name: string;
+  /** Completed (the user themselves) across the shared completed sessions. */
+  completed: number;
+  surrendered: number;
+  violations: number;
+  /** Shared completed sessions this member appeared in. */
+  sessions: number;
+  /** completed / sessions, 0..1. */
+  completionRate: number;
+  isMe: boolean;
+}
+
+/**
+ * Pure group-leaderboard aggregation. Given the caller's COMPLETED group
+ * sessions, tallies each participant's completions / surrenders / violations
+ * across those shared sessions and ranks them.
+ *
+ * De-pool: ranking is by COMPLETION RATE (then fewest violations, then raw
+ * completions) — NEVER by money/earnings. Nobody wins another member's stake,
+ * so an earnings ranking would be both wrong and imply a pool.
+ */
+export function buildGroupLeaderboard(
+  sessions: LeaderboardSessionInput[],
+  uid: string,
+): LeaderboardEntry[] {
+  const agg = new Map<
+    string,
+    {
+      userId: string;
+      name: string;
+      completed: number;
+      surrendered: number;
+      violations: number;
+      sessions: number;
+    }
+  >();
+
+  for (const session of sessions) {
+    const participants = session.participants ?? {};
+    for (const [pid, p] of Object.entries(participants)) {
+      const rec =
+        agg.get(pid) ??
+        {
+          userId: pid,
+          name: "",
+          completed: 0,
+          surrendered: 0,
+          violations: 0,
+          sessions: 0,
+        };
+      rec.sessions += 1;
+      if (p?.completed === true) rec.completed += 1;
+      if (p?.surrendered === true) rec.surrendered += 1;
+      if (typeof p?.violationCount === "number" && p.violationCount > 0) {
+        rec.violations += p.violationCount;
+      }
+      // Keep the first non-empty name we see for this member.
+      if (!rec.name && typeof p?.name === "string") rec.name = p.name;
+      agg.set(pid, rec);
+    }
+  }
+
+  return [...agg.values()]
+    .map((r) => ({
+      ...r,
+      isMe: r.userId === uid,
+      completionRate: r.sessions > 0 ? r.completed / r.sessions : 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.completionRate - a.completionRate ||
+        a.violations - b.violations ||
+        b.completed - a.completed ||
+        a.userId.localeCompare(b.userId),
+    );
+}
+
 export function buildStoredPayouts(
   participantIds: string[],
   rawPayouts: Record<string, unknown>,

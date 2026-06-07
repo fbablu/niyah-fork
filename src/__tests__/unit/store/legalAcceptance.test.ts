@@ -117,3 +117,67 @@ describe("legal acceptance version comparison", () => {
     expect(CURRENT_LEGAL_VERSION.length).toBeGreaterThan(0);
   });
 });
+
+// ─── Acceptance retry marker (non-DEMO path) ─────────────────────────────────
+//
+// The acceptLegalTerms CF is the only writer of the acceptance fields. When
+// that call fails (offline, the build-21 SSL-pin outage), the user must NOT
+// be re-prompted on every sign-in: acceptLegal leaves a retry marker and
+// retryPendingLegalAcceptance replays it on the next launch.
+describe("acceptLegal retry marker (non-DEMO)", () => {
+  afterEach(() => {
+    jest.dontMock("../../../constants/config");
+    jest.dontMock("../../../config/functions");
+    jest.clearAllMocks();
+  });
+
+  it("writes the marker on CF failure, replays + clears it on retry", async () => {
+    jest.doMock("../../../constants/config", () => ({
+      ...jest.requireActual("../../../constants/config"),
+      DEMO_MODE: false,
+    }));
+    const acceptLegalTerms = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("Network request failed"));
+    jest.doMock("../../../config/functions", () => ({ acceptLegalTerms }));
+
+    let store: typeof import("../../../store/authStore");
+    jest.isolateModules(() => {
+      store = require("../../../store/authStore");
+    });
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+
+    store!.useAuthStore.setState({
+      user: { ...baseUser },
+      isAuthenticated: true,
+      hasAcceptedCurrentLegal: false,
+    } as never);
+
+    // CF fails → user is NOT trapped behind the gate, marker is written.
+    await store!.useAuthStore.getState().acceptLegal();
+    expect(store!.useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      "@niyah/pending_legal_acceptance:test-uid",
+      CURRENT_LEGAL_VERSION,
+    );
+
+    // Next launch: marker present + doc lacks the version → CF replayed,
+    // marker cleared, gate stays open.
+    acceptLegalTerms.mockResolvedValueOnce({ success: true });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      CURRENT_LEGAL_VERSION,
+    );
+    store!.useAuthStore.setState({
+      user: { ...baseUser },
+      hasAcceptedCurrentLegal: false,
+    } as never);
+    await store!.useAuthStore.getState().retryPendingLegalAcceptance();
+
+    expect(acceptLegalTerms).toHaveBeenCalledTimes(2);
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith(
+      "@niyah/pending_legal_acceptance:test-uid",
+    );
+    expect(store!.useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
+  });
+});

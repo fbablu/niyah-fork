@@ -13,7 +13,8 @@ Items are ordered by deploy criticality. ✅ = ready to do now. ⏸ = wait until
 ## ✅ Phase 0: Deploy the branch (CLI)
 
 ```bash
-# From repo root, on `security` branch:
+# From repo root (de-pooled money path is already merged into `main`; the
+# `wallet-ledger` branch only carries landing-pg copy). Deploy from `main`:
 firebase deploy --only firestore:rules
 firebase deploy --only functions
 
@@ -82,12 +83,13 @@ gcloud billing accounts add-iam-policy-binding "${BILLING_ACCOUNT_ID}" \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/billing.projectManager"
 
-# Arm the kill switch. By default the CF logs only; flipping this enables
-# the actual `detachBilling` call once cost > 2× budget.
-firebase functions:config:set billing.kill_switch_enabled=true   # legacy v1 syntax
-# OR for v2 (preferred): set env at deploy time
-echo "BILLING_KILL_SWITCH_ENABLED=true" >> functions/.env.production
-firebase deploy --only functions:disableBillingOnBudgetExceeded
+# Arm the kill switch. By default the CF logs only; arming enables the actual
+# `detachBilling` call once cost > 2× budget. Armed state resolves at RUNTIME
+# (resolveBillingKillSwitchArmed: Firestore config/serverFlags →
+# BILLING_KILL_SWITCH_ENABLED env → false). The durable, no-redeploy source is
+# the Firestore doc — set it there so a lost env file can't silently disarm:
+#   Firebase Console → Firestore → config/serverFlags → billingKillSwitchEnabled = true
+# (No redeploy needed; the resolver caches for ~60s.)
 ```
 
 ### Firestore backups (web UI)
@@ -115,7 +117,7 @@ Firebase Console → App Check → **Apps tab**:
 
 - [ ] Confirm the iOS app is registered with **App Attest** as the provider (not the debug provider).
 - [ ] Once the **Metrics tab** shows ≥99% verified production traffic for Cloud Functions / Firestore / Auth, click **Enforce** on each.
-- [ ] Set the server-side env flag to match: `APP_CHECK_ENFORCED=true` in `functions/.env.production`, then redeploy.
+- [ ] Set the server-side env flag to match: `APP_CHECK_ENFORCED=true`, then redeploy. **Note:** Firebase's functions dotenv only loads `functions/.env`, `functions/.env.<projectId>` (`.env.niyah-b972d`), and `functions/.env.<alias>` (`.env.default`) — **not** `functions/.env.production`, and no predeploy script copies it in. Put the flag in `functions/.env.niyah-b972d` (or `.env`) so the deploy actually picks it up; `.env.production` alone is a dead pin (`firebase.json` also sets `disallowLegacyRuntimeConfig`, so the old `functions:config:set` path is off too).
 
 ### IAM least-privilege (web UI)
 
@@ -132,7 +134,7 @@ GCP Console → **IAM & Admin → IAM**:
 
 - [ ] Profile → Two-step authentication → required for every team member.
 - [ ] Developers → Webhooks → confirm endpoint URL is `https://us-central1-<projectId>.cloudfunctions.net/stripeWebhook`.
-- [ ] Developers → Webhooks → **Listening to** → subscribe only to: `payment_intent.succeeded`, `payment_intent.payment_failed`, `account.updated`. Unsubscribe from everything else.
+- [ ] Developers → Webhooks → **Listening to** → subscribe only to: `payment_intent.succeeded`, `payment_intent.payment_failed`, `account.updated`. Unsubscribe from everything else. (The CF's `switch` only acts on `payment_intent.succeeded` + `account.updated`; `payment_intent.payment_failed` is currently received-and-ignored — keep it subscribed for future handling / dashboard visibility.)
 - [ ] Radar → Rules → enable default rules. Consider blocking transactions from countries you don't serve.
 - [ ] Connect → Settings → review payout schedule + branding + supported countries.
 
@@ -156,9 +158,9 @@ curl -s https://stripe.com/files/ips/ips_webhooks.json | jq -r '.WEBHOOKS[]'
 
 ### Web UI
 
-- [ ] Team Settings → Webhooks → **Webhook URL**: `https://us-central1-<projectId>.cloudfunctions.net/plaidWebhook`.
-- [ ] Team Settings → Webhooks → **Verification key** → reveal and copy.
-- [ ] Subscribe to: `ITEM` events (specifically `ERROR`, `PENDING_EXPIRATION`, `USER_PERMISSION_REVOKED`, `LOGIN_REPAIRED`). You can leave others on; the CF ignores non-ITEM events.
+- [ ] **Webhook URL is NOT set in the dashboard** — the CF passes it per-Item via the `webhook:` param on `/link/token/create` (`PLAID_WEBHOOK_URL` in `index.ts`, default `https://us-central1-<projectId>.cloudfunctions.net/plaidWebhook` derived from `GCLOUD_PROJECT`). Only override `PLAID_WEBHOOK_URL` if you front the CF with a custom domain.
+- [ ] Team Settings → Webhooks → **Verification key** → reveal and copy (optional; the CF fetches keys by `kid` at runtime).
+- [ ] No dashboard subscription step needed — the CF reverse-looks up the Item and clears tokens on these `ITEM` codes: `ITEM_LOGIN_REQUIRED`, `USER_PERMISSION_REVOKED`, `PENDING_EXPIRATION`, `ERROR` (item-fatal). It ignores everything else.
 
 ### CLI
 
@@ -292,4 +294,4 @@ curl -X POST "https://us-central1-${PROJECT_ID}.cloudfunctions.net/plaidWebhook"
 
 - **Plaid webhook verification key persistence**: the CF fetches the JWK on-demand via `plaid.webhookVerificationKeyGet({key_id})` and caches in-memory for an hour. No need to pre-store the key in Secret Manager.
 
-- **`functions/pnpm-lock.yaml`** (accidentally created during a previous audit): still in the working tree. Decide whether to delete (functions stays on npm) or commit and migrate functions to pnpm. Not security-impacting either way.
+- **`functions/pnpm-lock.yaml`**: resolved — deleted, functions stays on npm (Node 22). No stray lockfile in the working tree.

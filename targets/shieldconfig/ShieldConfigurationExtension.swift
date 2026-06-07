@@ -29,16 +29,16 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     private func iconName(for variant: ShieldVariant) -> String {
         switch variant {
-        case .social:         return "person.2.fill"
-        case .video:          return "play.rectangle.fill"
+        case .social:         return "hand.raised.fill"
+        case .video:          return "stop.circle.fill"
         case .gaming:         return "gamecontroller.fill"
         case .news:           return "newspaper.fill"
-        case .defaultVariant: return "hourglass.circle.fill"
+        case .defaultVariant: return "lock.fill"
         }
     }
 
     private func icon(for variant: ShieldVariant) -> UIImage? {
-        let config = UIImage.SymbolConfiguration(pointSize: 72, weight: .semibold)
+        let config = UIImage.SymbolConfiguration(pointSize: 80, weight: .bold)
         return UIImage(systemName: iconName(for: variant), withConfiguration: config)?
             .withTintColor(accentGreen, renderingMode: .alwaysOriginal)
     }
@@ -108,6 +108,17 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     private let appGroupID = "group.com.niyah.app"
     private let sessionContextKey = "niyah_session_context"
+    private let lastVariantKey = "niyah_last_shield_variant"
+
+    private func variantName(_ variant: ShieldVariant) -> String {
+        switch variant {
+        case .social:         return "social"
+        case .video:          return "video"
+        case .gaming:         return "gaming"
+        case .news:           return "news"
+        case .defaultVariant: return "other"
+        }
+    }
 
     private func makeConfiguration(
         bundleID: String?,
@@ -116,12 +127,21 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         let variant = detectVariant(bundleID: bundleID, categoryName: categoryName)
         let subtitleText = buildSubtitle(variant: variant)
 
+        // Handoff for per-category attempt counts: the shield always renders
+        // before a button press reaches ShieldActionExtension (which can't
+        // classify — Application(token:).bundleIdentifier is nil there), and
+        // only one shield shows at a time, so "last shown variant" is the
+        // category of whatever the user taps next.
+        if let defaults = UserDefaults(suiteName: appGroupID) {
+            defaults.set(variantName(variant), forKey: lastVariantKey)
+        }
+
         return ShieldConfiguration(
             backgroundBlurStyle: .systemUltraThinMaterialDark,
             backgroundColor: backgroundColor(for: variant),
             icon: icon(for: variant),
             title: ShieldConfiguration.Label(
-                text: "Stay Focused",
+                text: "Lock in.",
                 color: textPrimary
             ),
             subtitle: ShieldConfiguration.Label(
@@ -129,32 +149,42 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
                 color: textSecondary
             ),
             primaryButtonLabel: ShieldConfiguration.Label(
-                text: "Back to Focus",
+                text: "Back to it",
                 color: .white
             ),
             primaryButtonBackgroundColor: primaryGreen,
             secondaryButtonLabel: ShieldConfiguration.Label(
-                text: "Open Niyah →",
+                text: "Open Niyah",
                 color: dangerRed
             )
         )
     }
 
     private func buildSubtitle(variant: ShieldVariant) -> String {
+        // Default-safe: forfeit language renders ONLY when the session context
+        // explicitly carries a stake. Missing key, malformed JSON, or stake 0
+        // (free quick-blocks, scheduled blocks) all get the free copy — a
+        // stale context can at worst show free copy during a staked session,
+        // never scary forfeit copy on a free block.
         let context = readSessionContext()
         let names = context?["names"] as? [String]
         let stake = context?["stake"] as? Int ?? 0
-        let stakeStr = stake > 0 ? String(format: "$%.2f", Double(stake) / 100.0) : nil
+        let hasStake = stake > 0
+        let stakeStr = hasStake ? String(format: "$%.2f", Double(stake) / 100.0) : nil
 
         let quotes = variantQuotes(
             variant,
             namesList: (names?.isEmpty == false) ? formatNames(names!) : nil,
-            stakeStr: stakeStr
+            stakeStr: stakeStr,
+            hasStake: hasStake
         )
         let index = Int(Date().timeIntervalSince1970 / 60) % quotes.count
         let lead = quotes[index]
 
-        return "\(lead)\n\nUnlocking will forfeit your stake and return you to your home screen."
+        let suffix = hasStake
+            ? "Unlocking forfeits your \(stakeStr!) stake and sends you back to your home screen."
+            : "ending early just ends the block — but you came here to focus."
+        return "\(lead)\n\n\(suffix)"
     }
 
     private func readSessionContext() -> [String: Any]? {
@@ -166,8 +196,8 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         return parsed
     }
 
-    private func variantQuotes(_ variant: ShieldVariant, namesList: String?, stakeStr: String?) -> [String] {
-        var quotes: [String] = baseQuotes(for: variant)
+    private func variantQuotes(_ variant: ShieldVariant, namesList: String?, stakeStr: String?, hasStake: Bool) -> [String] {
+        var quotes: [String] = baseQuotes(for: variant, hasStake: hasStake)
         if let names = namesList {
             quotes.append(contentsOf: socialQuotes(variant: variant, namesList: names))
         }
@@ -177,72 +207,89 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         return quotes
     }
 
-    private func baseQuotes(for variant: ShieldVariant) -> [String] {
+    private func baseQuotes(for variant: ShieldVariant, hasStake: Bool) -> [String] {
         switch variant {
         case .social:
             return [
-                "The scroll will still be here in an hour.\nYour future self won't be.",
-                "Instagram is not your friend right now.\nYour focus session is.",
-                "You opened this app on autopilot.\nThat's exactly what the algorithm wants.",
-                "Every time you resist the scroll, the urge gets weaker.\nThis is one of those times.",
-                "Whatever's happening in the feed will still be there.\nWhat you're working on won't.",
-                "The dopamine hit lasts 30 seconds.\nThe regret lasts an hour.",
-                "Your future self will thank you for closing this app right now.",
-                "Nothing on this feed will help you reach the thing you actually want.",
-                "You're not bored. You're avoiding.\nGet back to the work.",
-                "Closing this app is the cheapest way to feel proud of yourself today.",
+                "the scroll will survive without you.\nlock in.",
+                "you opened this on autopilot.\nrespectfully, close it.",
+                "this app is not the main character today.\nyou are.",
+                "the feed is feeding.\ndon't be the meal.",
+                "30 seconds of dopamine,\nan hour of 'why did i do that'.",
+                "your future self is begging you to close this.",
+                "you're not bored, you're avoiding.\nlock back in.",
+                "the algorithm is in its villain era.\ndon't let it cook you.",
+                "touch grass after the timer,\nnot the feed.",
+                hasStake
+                    ? "close the app, keep the stake.\nthat's the whole move."
+                    : "close the app.\nthat's the whole move.",
             ]
         case .video:
             return [
-                "Just one video turns into an hour.\nClose it now and beat the pattern.",
-                "YouTube doesn't care about your goals.\nYou do. Get back to them.",
-                "Five-minute video, twenty-minute regret.\nYou know the math.",
-                "Whatever's on Netflix will still be on Netflix tonight.",
-                "The recommended row was made to keep you here.\nLeave anyway.",
-                "Your eyes already feel heavy. That's the algorithm winning.",
-                "Watching is not progress.\nClose the app and do the thing.",
-                "The next video doesn't need you.\nThe person you want to become does.",
-                "Streaming is fine. After the session.",
-                "Twenty minutes of focus beats two hours of half-watched videos.",
+                "one video becomes five. you know this.\nclose it.",
+                "the recommended row was built to trap you.\nleave anyway.",
+                "autoplay is not a personality.\nlock in.",
+                "netflix will still be netflix tonight.",
+                "watching is not progress.\ngo do the thing.",
+                "the next episode doesn't need you.\nyour goals do.",
+                "your eyes are heavy because the app is cooking you,\nnot because you're resting.",
+                "20 min of focus beats 2 hours of half-watched videos.",
+                "streaming is fine. after the session.",
+                "you came to lock in,\nnot to get cooked by youtube.",
             ]
         case .gaming:
             return [
-                "One match becomes five.\nDon't even start.",
-                "Your rank will recover tomorrow.\nThe lost hour won't.",
-                "Closing the game right now is the move with the best EV.",
-                "Your teammates will live without you for an hour.",
-                "The grind is the game's design, not your goal.",
-                "The boss will still be there.\nThe deadline might not be.",
-                "Loot boxes are not life points.",
-                "If this match isn't worth your stake, why is it worth your focus?",
-                "The dopamine here is borrowed against tomorrow.\nDon't borrow more.",
-                "Twenty minutes of work today, two hours of game tonight.\nDeal?",
+                "one match becomes five.\ndon't even queue.",
+                "your rank recovers tomorrow.\nthis hour doesn't.",
+                "the lobby will survive without you.\nlock in.",
+                "the grind is the game's goal, not yours.",
+                "the boss will still be there.\nyour deadline might not.",
+                "loot boxes are not life points.",
+                "respectfully, the battle pass can wait.",
+                "20 min of work now, game tonight.\ndeal?",
+                "you're not gaming, you're avoiding.\nlock back in.",
+                "touch the controller after the timer,\nnot before.",
             ]
         case .news:
             return [
-                "Doomscrolling is not staying informed.",
-                "The news will be there.\nThe headlines change but the urgency is fake.",
-                "Twitter rewards outrage. Don't trade your focus for someone else's anger.",
-                "Reddit is a slot machine in disguise.",
-                "Your attention is the product.\nReclaim it.",
-                "Nothing you read in the next ten minutes will change your day.",
-                "The takes will still be hot tonight.",
-                "Skimming feels productive. It isn't.",
-                "Refreshing is the new fidgeting.\nDo something with your hands instead.",
-                "Closing this beats one more refresh by a mile.",
+                "doomscrolling is not 'staying informed'.",
+                "the takes will still be hot tonight.",
+                "rage bait rewards the app, not you.\ndon't feed it your focus.",
+                "reddit is an infinite hallway.\nclose the door.",
+                "your attention is the product.\ntake it back.",
+                "nothing you read in 10 minutes changes your day.",
+                "skimming feels productive.\nit isn't.",
+                "refreshing is the new fidgeting.\ndo something with your hands.",
+                "you're informed enough.\ngo lock in.",
+                "the discourse will cope without you.\nclose the app.",
             ]
         case .defaultVariant:
+            if hasStake {
+                return [
+                    "real money is on the line.\nyour stake is safe while this stays closed.",
+                    "the urge passes in about 60 seconds.\nwait it out.",
+                    "you set this timer.\npast-you was locked in. trust them.",
+                    "every minute closed is money you keep.",
+                    "you won't remember this urge tomorrow.\nyou'll remember the work.",
+                    "two more minutes. then two more.\nthat's how it's done.",
+                    "respectfully, close the app.",
+                    "the hardest part is the next minute.\nthen it gets easy.",
+                    "lock in now, flex later.",
+                    "close the app. keep the stake. move on.",
+                ]
+            }
+            // Free blocks: same voice, zero money language.
             return [
-                "Real money is on the line.\nYour stake is safe as long as this app stays closed.",
-                "The urge to open this app will pass.\nWait it out.",
-                "You set the timer.\nPast-you knew what they were doing. Trust them.",
-                "The cost of unlocking is real.\nThe payoff for closing is also real.",
-                "Every minute you stay focused is money you keep.",
-                "You won't remember this urge tomorrow.\nYou'll remember the work.",
-                "Two more minutes. Then two more after that.",
-                "The hardest part is the next 60 seconds.\nThen it gets easier.",
-                "If past-you was wrong to stake this, prove them right.",
-                "Close the app. Earn the stake. Move on.",
+                "no money on the line.\njust your word. keep it.",
+                "the urge passes in about 60 seconds.\nwait it out.",
+                "you set this timer.\npast-you was locked in. trust them.",
+                "you blocked this for a reason.\nthe reason hasn't changed.",
+                "you won't remember this urge tomorrow.\nyou'll remember the work.",
+                "two more minutes. then two more.\nthat's how it's done.",
+                "respectfully, close the app.",
+                "the hardest part is the next minute.\nthen it gets easy.",
+                "free block, real focus.\nlock in.",
+                "close the app. move on.",
             ]
         }
     }
@@ -251,29 +298,29 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         switch variant {
         case .social:
             return [
-                "\(namesList) are also resisting the scroll right now.\nDon't be the one who caves.",
-                "\(namesList) put real money on this with you.\nClose the app.",
-                "The whole group's focus stays clean if you close this now.",
+                "\(namesList) are off the scroll right now.\ndon't be the one who caves.",
+                "\(namesList) put real money on this with you.\nclose the app.",
+                "the whole group's focus stays clean if you close this now.",
             ]
         case .video:
             return [
-                "\(namesList) just chose work over a video.\nYour turn.",
-                "\(namesList) are watching the leaderboard, not Netflix.",
+                "\(namesList) just chose work over a video.\nyour turn.",
+                "\(namesList) are watching the leaderboard, not netflix.",
             ]
         case .gaming:
             return [
-                "\(namesList) are not in the lobby. They're focused.\nFollow them.",
+                "\(namesList) are not in the lobby.\nthey're locked in. follow them.",
                 "\(namesList) will know if you queued up.",
             ]
         case .news:
             return [
-                "\(namesList) aren't doomscrolling. Be like them.",
+                "\(namesList) aren't doomscrolling.\nbe like them.",
             ]
         case .defaultVariant:
             return [
-                "\(namesList) are counting on you.\nStay strong.",
-                "\(namesList) will know if you open this app.\nDon't be the one who quits.",
-                "Your friends are focusing right now.\n\(namesList) stayed off their phones — can you?",
+                "\(namesList) are counting on you.\nstay locked in.",
+                "\(namesList) will know if you open this.\ndon't be the one who folds.",
+                "your friends are heads down right now.\n\(namesList) stayed off their phones. can you?",
             ]
         }
     }
@@ -282,26 +329,26 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         switch variant {
         case .social:
             return [
-                "\(stakeStr) for a scroll session?\nThe scroll is not that good.",
-                "You staked \(stakeStr) so you wouldn't open this app.\nDon't outsmart past-you.",
+                "\(stakeStr) for a scroll session?\nthe scroll is not that good.",
+                "you staked \(stakeStr) so you wouldn't open this.\ndon't outsmart past-you.",
             ]
         case .video:
             return [
-                "\(stakeStr) is more than a month of YouTube Premium.\nKeep it.",
-                "\(stakeStr) to watch the same recommendations again?",
+                "\(stakeStr) is more than a month of premium.\nkeep it.",
+                "\(stakeStr) to watch the same recs again?",
             ]
         case .gaming:
             return [
-                "\(stakeStr) is more than this season's battle pass.\nDon't trade focus for it.",
+                "\(stakeStr) is more than this season's battle pass.\ndon't trade focus for it.",
             ]
         case .news:
             return [
-                "\(stakeStr) for one more outraged take?\nNot a great trade.",
+                "\(stakeStr) for one more outraged take?\nnot the move.",
             ]
         case .defaultVariant:
             return [
-                "\(stakeStr) says you can't stay off this app.\nProve it wrong.",
-                "You staked \(stakeStr).\nIt's still yours unless you tap forfeit.",
+                "\(stakeStr) says you can't stay off this app.\nprove it wrong.",
+                "you staked \(stakeStr).\nstill yours unless you tap forfeit.",
             ]
         }
     }

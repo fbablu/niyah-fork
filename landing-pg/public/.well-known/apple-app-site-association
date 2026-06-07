@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["4R55F73KCP.com.niyah.app"],
+        "components": [
+          { "/": "/join", "comment": "Group focus-session invite" },
+          { "/": "/join/*", "comment": "Group invite (legacy path form)" },
+          { "/": "/i", "comment": "Friend referral" },
+          { "/": "/i/*", "comment": "Friend referral (path form)" }
+        ]
+      }
+    ]
+  }
+}

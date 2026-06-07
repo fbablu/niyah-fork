@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   authUsersShareVerifiedContact,
+  buildGroupLeaderboard,
   buildStoredPayouts,
   calculateGroupSessionPayouts,
   calculateReferralReputation,
@@ -11,6 +12,8 @@ import {
   decideReferralClaim,
   evaluateAppCheckToken,
   isValidFirebaseUid,
+  parseAppBlockSummary,
+  type LeaderboardSessionInput,
   type MinimalAuthRecord,
 } from "./security";
 
@@ -392,4 +395,139 @@ test("evaluateAppCheckToken → resolves when verifier resolves", async () => {
     seen = t;
   });
   assert.equal(seen, "real-token");
+});
+
+// ─── buildGroupLeaderboard (de-pool: completion-rate ranking) ────────────────
+
+const lbSession = (
+  participants: LeaderboardSessionInput["participants"],
+): LeaderboardSessionInput => ({ participants });
+
+test("leaderboard: empty history yields no standings", () => {
+  assert.deepEqual(buildGroupLeaderboard([], "me"), []);
+});
+
+test("leaderboard: aggregates completions/surrenders/violations across shared sessions", () => {
+  const sessions: LeaderboardSessionInput[] = [
+    lbSession({
+      me: { name: "Me", completed: true },
+      bob: { name: "Bob", completed: true },
+    }),
+    lbSession({
+      me: { name: "Me", surrendered: true, violationCount: 2 },
+      bob: { name: "Bob", completed: true },
+    }),
+  ];
+  const board = buildGroupLeaderboard(sessions, "me");
+  const me = board.find((e) => e.userId === "me")!;
+  const bob = board.find((e) => e.userId === "bob")!;
+  assert.equal(me.sessions, 2);
+  assert.equal(me.completed, 1);
+  assert.equal(me.surrendered, 1);
+  assert.equal(me.violations, 2);
+  assert.equal(me.completionRate, 0.5);
+  assert.equal(me.isMe, true);
+  assert.equal(bob.completed, 2);
+  assert.equal(bob.completionRate, 1);
+  assert.equal(bob.isMe, false);
+});
+
+test("leaderboard: ranks by completion rate, then fewest violations (de-pool — never money)", () => {
+  // Three members, all 1 session. cara + dan both 100% complete; cara has fewer
+  // violations so ranks above dan. ed is 0% complete -> last.
+  const sessions: LeaderboardSessionInput[] = [
+    lbSession({
+      cara: { name: "Cara", completed: true, violationCount: 0 },
+      dan: { name: "Dan", completed: true, violationCount: 3 },
+      ed: { name: "Ed", surrendered: true },
+    }),
+  ];
+  const board = buildGroupLeaderboard(sessions, "cara");
+  assert.deepEqual(
+    board.map((e) => e.userId),
+    ["cara", "dan", "ed"],
+  );
+  assert.equal(board[0].completionRate, 1);
+  assert.equal(board[2].completionRate, 0);
+});
+
+test("leaderboard: tie on rate + violations breaks deterministically by userId", () => {
+  const sessions: LeaderboardSessionInput[] = [
+    lbSession({
+      zed: { name: "Zed", completed: true },
+      amy: { name: "Amy", completed: true },
+    }),
+  ];
+  const board = buildGroupLeaderboard(sessions, "amy");
+  assert.deepEqual(
+    board.map((e) => e.userId),
+    ["amy", "zed"],
+  );
+});
+
+test("leaderboard: a member missing a name still appears (name defaults to empty)", () => {
+  const board = buildGroupLeaderboard(
+    [lbSession({ me: { completed: true }, ghost: { completed: false } })],
+    "me",
+  );
+  const ghost = board.find((e) => e.userId === "ghost")!;
+  assert.equal(ghost.name, "");
+  assert.equal(ghost.completionRate, 0);
+});
+
+// ─── parseAppBlockSummary (client-input sanitizer; feeds the start-gate) ──────
+
+test("parseAppBlockSummary: null / non-object / empty → undefined", () => {
+  assert.equal(parseAppBlockSummary(null), undefined);
+  assert.equal(parseAppBlockSummary(undefined), undefined);
+  assert.equal(parseAppBlockSummary("nope"), undefined);
+  assert.equal(parseAppBlockSummary({}), undefined);
+});
+
+test("parseAppBlockSummary: both counts zero → undefined (never a misleading '0 apps')", () => {
+  assert.equal(parseAppBlockSummary({ appCount: 0, categoryCount: 0 }), undefined);
+});
+
+test("parseAppBlockSummary: clamps oversized counts and generates a default label", () => {
+  const r = parseAppBlockSummary({ appCount: 999999, categoryCount: 500, label: "" });
+  assert.deepEqual(r, {
+    appCount: 1000,
+    categoryCount: 100,
+    label: "1000 apps, 100 categories",
+  });
+});
+
+test("parseAppBlockSummary: rejects negative / float counts (treated as 0)", () => {
+  // appCount negative → 0; categoryCount float → 0; both 0 → undefined.
+  assert.equal(parseAppBlockSummary({ appCount: -999, categoryCount: 0 }), undefined);
+  assert.equal(parseAppBlockSummary({ appCount: 5.5, categoryCount: 0 }), undefined);
+  // A valid category survives even when appCount is garbage.
+  const r = parseAppBlockSummary({ appCount: -3, categoryCount: 2 });
+  assert.deepEqual(r, { appCount: 0, categoryCount: 2, label: "0 apps, 2 categories" });
+});
+
+test("parseAppBlockSummary: keeps a provided label, trimmed + capped at 100 chars", () => {
+  assert.equal(
+    parseAppBlockSummary({ appCount: 5, categoryCount: 0, label: "  Social media  " })?.label,
+    "Social media",
+  );
+  const long = "x".repeat(250);
+  assert.equal(
+    parseAppBlockSummary({ appCount: 5, categoryCount: 0, label: long })?.label.length,
+    100,
+  );
+});
+
+test("parseAppBlockSummary: whitespace-only label falls back to the count summary", () => {
+  assert.equal(
+    parseAppBlockSummary({ appCount: 3, categoryCount: 1, label: "   " })?.label,
+    "3 apps, 1 categories",
+  );
+});
+
+test("parseAppBlockSummary: valid input passes through intact", () => {
+  assert.deepEqual(
+    parseAppBlockSummary({ appCount: 5, categoryCount: 2, label: "My Apps" }),
+    { appCount: 5, categoryCount: 2, label: "My Apps" },
+  );
 });

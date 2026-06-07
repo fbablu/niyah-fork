@@ -157,3 +157,202 @@ export function readComposition(
 export function sumComposition(c: StakeComposition): number {
   return c.deposited + c.earned + c.bonus;
 }
+
+// ─── daily withdrawal cap ────────────────────────────────────────────────────
+
+/**
+ * UTC calendar-day key, e.g. "2026-06-02". The daily withdrawal cap resets at
+ * 00:00 UTC — same convention as DAILY_STAKE_CAP. A calendar-day counter (vs a
+ * rolling 24h window) is what lets the cap be enforced atomically with a single
+ * counter field on the wallet doc.
+ */
+export function utcDayKey(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+export interface DailyWithdrawalState {
+  /** Cents already withdrawn today (0 if the stored counter is from a prior day). */
+  priorToday: number;
+  /** Running total once this withdrawal commits (what we write back). */
+  newTotal: number;
+  /** True if priorToday + amount exceeds the cap — caller must refuse. */
+  exceedsCap: boolean;
+  /** UTC day this counter is tagged with. */
+  dayKey: string;
+}
+
+/**
+ * Pure daily-withdrawal-cap accounting. `storedDate`/`storedTotal` are the
+ * `dailyWithdrawalDate`/`dailyWithdrawalTotal` fields on wallets/{uid}.
+ *
+ * A stored counter from a previous UTC day (or missing) is treated as 0 — the
+ * cap resets at UTC midnight. That same reset also harmlessly absorbs a stale or
+ * negative leftover from a rare cross-midnight decrement (see
+ * restoreWithdrawalReservation), so the counter can never wrongly block a new
+ * day's withdrawals. Within a day, the in-transaction increment and the restore
+ * decrement are each paired 1:1 with the wallet's balance mutation, so the
+ * counter can never drift from the actual committed withdrawals.
+ */
+export function computeDailyWithdrawalState(
+  storedDate: unknown,
+  storedTotal: unknown,
+  amount: number,
+  capCents: number,
+  nowMs: number,
+): DailyWithdrawalState {
+  const dayKey = utcDayKey(nowMs);
+  const priorToday =
+    storedDate === dayKey && typeof storedTotal === "number" && storedTotal > 0
+      ? storedTotal
+      : 0;
+  const newTotal = priorToday + amount;
+  return { priorToday, newTotal, exceedsCap: newTotal > capCents, dayKey };
+}
+
+// ─── daily stake cap ─────────────────────────────────────────────────────────
+
+export interface DailyStakeState {
+  /** Cents already staked today (0 if the stored counter is from a prior day). */
+  priorToday: number;
+  /** Running total once this stake commits (what we write back). */
+  newTotal: number;
+  /** True if priorToday + amount exceeds the cap — caller must refuse. */
+  exceedsCap: boolean;
+  /** UTC day this counter is tagged with. */
+  dayKey: string;
+}
+
+/**
+ * Pure daily-STAKE-cap accounting. `storedDate`/`storedTotal` are the
+ * `dailyStakeDate`/`dailyStakeTotal` fields on wallets/{uid}. Twin of
+ * computeDailyWithdrawalState — same atomic-counter shape, applied to staking.
+ *
+ * Counting via a single per-wallet counter (read + written inside the same
+ * transaction as the debit) replaces the old query-of-two-collections approach,
+ * which (a) double-counted solo/scheduled stakes — they write BOTH a stake txn
+ * AND a sessions/{id} doc — and (b) was racy — a collection query inside a txn
+ * can't see a concurrent, not-yet-committed sibling stake. The counter is
+ * increment-only and cumulative for the UTC day (refunds do NOT decrement it,
+ * matching the prior "cumulative staked today" semantics); a stored counter
+ * from a prior day (or missing) resets to 0.
+ */
+export function computeDailyStakeState(
+  storedDate: unknown,
+  storedTotal: unknown,
+  amount: number,
+  capCents: number,
+  nowMs: number,
+): DailyStakeState {
+  const dayKey = utcDayKey(nowMs);
+  const priorToday =
+    storedDate === dayKey && typeof storedTotal === "number" && storedTotal > 0
+      ? storedTotal
+      : 0;
+  const newTotal = priorToday + amount;
+  return { priorToday, newTotal, exceedsCap: newTotal > capCents, dayKey };
+}
+
+// ─── Wallet freeze recovery ─────────────────────────────────────────────────
+
+export interface UnfreezeDecision {
+  /** Whether the freeze flag should be cleared. */
+  unfreeze: boolean;
+  /** storedBalance - Σtransactions (0 = drift resolved). */
+  delta: number;
+}
+
+/**
+ * Decide whether an admin unfreeze request should clear a wallet's freeze.
+ * A wallet auto-freezes when stored balance != Σtransactions (any drift).
+ * Default policy: only clear the freeze once the drift is gone (delta === 0).
+ * `force` lets an operator override AFTER reviewing the walletAudits doc and
+ * crediting/refunding by hand. Pure so the policy is unit-pinned and matches
+ * reconcileWalletBalances' drift definition exactly.
+ */
+export function shouldUnfreezeWallet(
+  storedBalance: number,
+  summedFromTransactions: number,
+  force: boolean,
+): UnfreezeDecision {
+  const delta = storedBalance - summedFromTransactions;
+  return { unfreeze: delta === 0 || force, delta };
+}
+
+// ─── Scheduled staked session helpers ────────────────────────────────────────
+//
+// Auto-staking on a recurring schedule moves money while the user is away, so
+// every amount is server-clamped — the client (the device that fires the
+// scheduled trigger) is never trusted for a stake size or a reward multiplier.
+
+/** Lowest / highest a scheduled block may auto-stake (cents). */
+export const SCHEDULED_STAKE_MIN_CENTS = 200; // $2
+export const SCHEDULED_STAKE_MAX_CENTS = 2500; // $25
+/** Hard ceiling on house-funded completion surplus per scheduled session. */
+export const SCHEDULED_SURPLUS_CAP_CENTS = 5000; // $50
+
+/**
+ * Clamp a (client-supplied) scheduled stake to the safe range. Rounds to whole
+ * cents. Pure so the bound is unit-pinned and can never be bypassed by a
+ * tampered client frame.
+ */
+export function clampScheduledStake(
+  requestedCents: number,
+  minCents: number = SCHEDULED_STAKE_MIN_CENTS,
+  maxCents: number = SCHEDULED_STAKE_MAX_CENTS,
+): number {
+  if (!Number.isFinite(requestedCents)) return minCents;
+  return Math.max(minCents, Math.min(maxCents, Math.round(requestedCents)));
+}
+
+/**
+ * Clamp the house-funded completion reward multiplier to [1.0, 1.1]. 1.0 =
+ * stake returned, no surplus (the dormant default). Anything outside the band
+ * is clamped so a misconfiguration or tampered field can never mint a runaway
+ * payout — the >1× portion is house money routed to the gated `earned` bucket.
+ */
+export function clampRewardMultiplier(
+  multiplier: number,
+  minMult: number = 1.0,
+  maxMult: number = 1.1,
+): number {
+  if (!Number.isFinite(multiplier)) return minMult;
+  return Math.max(minMult, Math.min(maxMult, multiplier));
+}
+
+/**
+ * House-funded surplus (cents) to grant on a scheduled-session completion,
+ * ABOVE the returned principal. Two independent caps, whichever is smaller:
+ *   1. the multiplier: round(principal × (mult − 1))
+ *   2. the surplus cap: min($50, net deposits) — a user with no real-money
+ *      deposits (promo-only) earns nothing, and nobody earns more than $50 of
+ *      house money from a single scheduled completion.
+ * Pure. (The cumulative-across-sessions cap belongs to the dormant-flip
+ * backfill + engagement gate, per STATUS.md — not enforced here.)
+ */
+export function cappedRewardSurplus(
+  principalCents: number,
+  multiplier: number,
+  netDepositsCents: number,
+  surplusCapCents: number = SCHEDULED_SURPLUS_CAP_CENTS,
+): number {
+  const byMultiplier = Math.max(
+    0,
+    Math.round(principalCents * (multiplier - 1.0)),
+  );
+  const byDeposits = Math.max(0, Math.min(surplusCapCents, netDepositsCents));
+  return Math.min(byMultiplier, byDeposits);
+}
+
+/**
+ * Deterministic session doc id for an auto-staked scheduled block, keyed by
+ * (uid, templateId, UTC calendar day). Makes the auto-stake idempotent: a retry
+ * or a double-fire on the same day reads the existing session and never
+ * double-debits. One scheduled stake per template per UTC day.
+ */
+export function scheduledSessionDocId(
+  uid: string,
+  templateId: string,
+  nowMs: number,
+): string {
+  return `scheduled_${uid}_${templateId}_${utcDayKey(nowMs)}`;
+}

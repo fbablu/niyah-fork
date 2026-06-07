@@ -1,3 +1,5 @@
+import type { BlobAvatarConfig } from "../constants/blobAvatar";
+
 export type CadenceType =
   | "test"
   | "focus"
@@ -36,11 +38,7 @@ export interface User {
   // Reputation/Social Credit
   reputation: UserReputation;
   profileImage?: string;
-  blobAvatar?: {
-    colorPreset: "sunset" | "ocean" | "forest" | "berry" | "lemon" | "coral";
-    shapePreset: "peach" | "wave" | "petal";
-    eyesPreset: "classic" | "happy" | "wink" | "sleepy" | "surprised";
-  };
+  blobAvatar?: BlobAvatarConfig;
   phoneNumber?: string;
   authProvider?: "email" | "google" | "apple" | "phone";
   // Firebase-backed profile
@@ -109,6 +107,18 @@ export interface Partner {
   tag?: string; // Optional label e.g. "Your Referrer"
 }
 
+/**
+ * Structured reason a user gives when surrendering (AI Phase-0 data capture —
+ * see docs/ai-integration.md). Pure analytics; carries NO money meaning.
+ */
+export type SurrenderReason =
+  | "distracted"
+  | "interrupted"
+  | "too_long"
+  | "lost_motivation"
+  | "emergency"
+  | "other";
+
 // Solo session (Phase 2 — stickK model for now; will use SOLO_COMPLETION_MULTIPLIER later)
 export interface Session {
   id: string;
@@ -120,6 +130,11 @@ export interface Session {
   status: SessionStatus;
   completedAt?: Date;
   actualPayout?: number; // in cents
+  // ── AI Phase-0 capture (analytics only; no money meaning) ──
+  startedAtLocalHour?: number; // 0–23, user-local hour at start
+  dayOfWeek?: number; // 0 (Sun) – 6 (Sat), user-local at start
+  surrenderReason?: SurrenderReason;
+  surrenderNote?: string; // optional free text (capped)
 }
 
 export interface Transaction {
@@ -205,6 +220,19 @@ export type GroupSessionStatus =
   | "completed" // all participants reported, payouts distributed
   | "cancelled"; // proposer cancelled or auto-timeout
 
+/**
+ * Human-readable summary of a member's app-block selection, for the waiting-room
+ * "what everyone's blocking" display + the start-gate. Derived from the native
+ * AppSelectionToken — NO opaque FamilyControls tokens (they're device-local and
+ * cannot be merged or enforced across members; see the group-blocking plan doc).
+ */
+export interface AppBlockSummary {
+  appCount: number;
+  categoryCount: number;
+  /** e.g. "5 apps, 2 categories" — straight from the native selection label. */
+  label: string;
+}
+
 export interface GroupSessionParticipant {
   name: string;
   profileImage?: string;
@@ -215,6 +243,14 @@ export interface GroupSessionParticipant {
   surrendered?: boolean;
   surrenderedAt?: Date;
   violationCount?: number;
+  /**
+   * This member's own block selection summary. Each member blocks their OWN apps
+   * on their OWN device; we share only this summary so the group can see that
+   * everyone has something blocked (and gate the start until they do).
+   */
+  appBlockSummary?: AppBlockSummary;
+  /** De-pool: every member stakes their own money. 'solo' is the only mode. */
+  stakeMode?: "solo";
 }
 
 // The Firestore document shape for group sessions
@@ -238,6 +274,21 @@ export interface GroupSessionDoc {
   autoTimeoutAt?: Date; // 30 min after all accept; null while pending
 }
 
+/**
+ * One row of the computed group leaderboard (see getGroupLeaderboard CF).
+ * De-pool: ranked by completion rate, NEVER earnings.
+ */
+export interface GroupLeaderboardEntry {
+  userId: string;
+  name: string;
+  completed: number;
+  surrendered: number;
+  violations: number;
+  sessions: number;
+  completionRate: number; // 0..1
+  isMe: boolean;
+}
+
 export type GroupInviteStatus = "pending" | "accepted" | "declined" | "expired";
 
 export interface GroupInvite {
@@ -253,4 +304,30 @@ export interface GroupInvite {
   status: GroupInviteStatus;
   createdAt: Date;
   respondedAt?: Date;
+}
+
+/** 0 = Sunday … 6 = Saturday (matches JS Date.getDay()). */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+/**
+ * A recurring, Opal-style scheduled focus block. OS-enforced auto-start via
+ * DeviceActivitySchedule (see scheduleStore).
+ *
+ * Phase-1 caveats (tracked in docs/schedule-templates-plan-2026-06-03.md):
+ * - `days` is stored, but the native wrapper currently applies a DAILY window;
+ *   weekday-specific enforcement needs a native extension (rebuild).
+ * - `stakeCents > 0` (per-template auto-stake) is INERT in Phase 1 — auto-debiting
+ *   money on a schedule needs a server CF + /vibe-security + deploy (Phase 2).
+ */
+export interface ScheduledTemplate {
+  id: string;
+  name: string;
+  days: Weekday[]; // weekdays the block runs
+  startHour: number; // 0–23 (local)
+  startMinute: number; // 0–59
+  endHour: number; // 0–23 (local)
+  endMinute: number; // 0–59
+  stakeCents: number; // 0 = free block. >0 = auto-stake (Phase 2, inert now).
+  enabled: boolean;
+  createdAt: number; // epoch ms (number keeps AsyncStorage persistence simple)
 }

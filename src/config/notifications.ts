@@ -12,6 +12,7 @@
 import {
   getMessaging,
   requestPermission,
+  hasPermission,
   AuthorizationStatus,
   getToken,
   getAPNSToken,
@@ -35,6 +36,7 @@ import notifee, {
   type TimestampTrigger,
 } from "@notifee/react-native";
 import { logger } from "../utils/logger";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const NOTIFEE_CHANNEL_ID = "niyah-default";
 let notifeeChannelCreated = false;
@@ -86,6 +88,20 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 
   return enabled;
+}
+
+/**
+ * Current notification permission status WITHOUT prompting — never shows the
+ * OS dialog. Used by initializeNotifications() on sign-in so we only wire up
+ * push for users who have *already* granted it; the first-time OS prompt is
+ * triggered explicitly from the onboarding priming screen (enableNotifications).
+ */
+export async function hasNotificationPermission(): Promise<boolean> {
+  const authStatus = await hasPermission(getMessagingInstance());
+  return (
+    authStatus === AuthorizationStatus.AUTHORIZED ||
+    authStatus === AuthorizationStatus.PROVISIONAL
+  );
 }
 
 // ─── Token Management ───────────────────────────────────────────────────────
@@ -183,6 +199,7 @@ function handleNotificationNavigation(
     // active screen instead of forcing a navigation. Tapping the banner
     // still routes there in case the app was backgrounded.
     case "member_app_opened":
+    case "session_surrender":
     case "leaderboard_shift":
     case "session_progress_25":
     case "session_progress_50":
@@ -196,6 +213,17 @@ function handleNotificationNavigation(
       router.push(
         "/session/active?confirmSurrender=true" as RelativePathString,
       );
+      break;
+    // Local retention reminders (scheduled client-side via scheduleRetentionReminder).
+    case "streak_at_risk":
+    case "reengagement":
+      router.push("/session/select?type=solo" as RelativePathString);
+      break;
+    case "scheduled_block_reminder":
+      router.push("/(tabs)/schedule" as RelativePathString);
+      break;
+    case "low_balance":
+      router.push("/session/deposit" as RelativePathString);
       break;
     default:
       break;
@@ -292,34 +320,60 @@ export function setupNotificationOpenHandler(): () => void {
 let initPromise: Promise<() => void> | null = null;
 let activeCleanup: (() => void) | null = null;
 
+/** Wire up token refresh + token registration + foreground/open/initial
+ * handlers. Caller guarantees permission is already granted. */
+async function setupListenersAndToken(): Promise<() => void> {
+  const unsubTokenRefresh = onTokenRefresh();
+  await registerFCMToken();
+  const unsubForeground = setupForegroundHandler();
+  const unsubOpen = setupNotificationOpenHandler();
+
+  await checkInitialNotification();
+
+  activeCleanup = () => {
+    unsubTokenRefresh();
+    unsubForeground();
+    unsubOpen();
+  };
+  return activeCleanup;
+}
+
 /**
- * Initialize all notification handling. Safe to call repeatedly — subsequent
- * calls return the in-flight or already-resolved init. Prevents listener
- * stacking when multiple auth paths race to initialize.
+ * Initialize notification handling WITHOUT ever showing the OS permission
+ * dialog. Called on sign-in: if permission is already granted it wires up the
+ * listeners + token; otherwise it no-ops and clears the cache so a later
+ * enableNotifications() (fired from the onboarding priming screen) can prompt
+ * and init. The old contextless sign-in prompt was killing opt-in — an iOS
+ * dismissal is permanent. Safe to call repeatedly (returns the in-flight or
+ * resolved init; prevents listener stacking across racing auth paths).
  */
 export async function initializeNotifications(): Promise<() => void> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    const hasPermission = await requestNotificationPermission();
-    if (!hasPermission) return () => {};
-
-    const unsubTokenRefresh = onTokenRefresh();
-    await registerFCMToken();
-    const unsubForeground = setupForegroundHandler();
-    const unsubOpen = setupNotificationOpenHandler();
-
-    await checkInitialNotification();
-
-    activeCleanup = () => {
-      unsubTokenRefresh();
-      unsubForeground();
-      unsubOpen();
-    };
-    return activeCleanup;
+    const granted = await hasNotificationPermission();
+    if (!granted) {
+      initPromise = null; // let a later enableNotifications() retry
+      return () => {};
+    }
+    return setupListenersAndToken();
   })();
 
   return initPromise;
+}
+
+/**
+ * Explicitly request notification permission (shows the OS dialog when the
+ * status is not-yet-determined) and, if granted, wire up listeners + token.
+ * Triggered from the onboarding priming screen so the prompt appears in
+ * context. Returns whether notifications are now enabled.
+ */
+export async function enableNotifications(): Promise<boolean> {
+  const granted = await requestNotificationPermission();
+  if (!granted) return false;
+  resetNotifications(); // clear any cached no-op init from sign-in
+  await initializeNotifications();
+  return true;
 }
 
 /** Tear down active listeners and clear the init guard so re-login re-inits. */
@@ -376,5 +430,123 @@ export async function cancelSessionEndNotification(): Promise<void> {
     await notifee.cancelTriggerNotification(SESSION_END_NOTIFICATION_ID);
   } catch (err) {
     logger.warn("cancelSessionEndNotification failed:", err);
+  }
+}
+
+// ─── Retention reminders (local, client-only) ───────────────────────────────
+// Local nudges scheduled with notifee's timestamp trigger (no server, no push
+// token). A per-day dedup guard caps these to one per reason per UTC day so they
+// can never pile up into notification fatigue. Functional notifications (e.g.
+// session-end above) are exempt — only the reasons below route through the guard.
+// All inputs are READ-ONLY over wallet/session/auth state; this schedules nothing
+// on the server and moves no money.
+
+export type RetentionReason =
+  | "streak_at_risk"
+  | "reengagement"
+  | "scheduled_block_reminder"
+  | "low_balance";
+
+const RETENTION_REMINDER_PREFIX = "niyah-retention-";
+const RETENTION_DEDUP_KEY = "@niyah/retention_reminder_log";
+
+const utcDayKey = (ms: number): string =>
+  new Date(ms).toISOString().slice(0, 10);
+
+// A `key` (e.g. a template id) lets one reason carry MANY independent reminders
+// (separate notifee ids + separate per-day dedup slots) — needed for per-template
+// scheduled-block reminders. Omit it for singleton reasons (streak/re-engagement).
+const retentionNotifeeId = (reason: RetentionReason, key?: string): string =>
+  `${RETENTION_REMINDER_PREFIX}${reason}${key ? `-${key}` : ""}`;
+const retentionDedupKey = (reason: RetentionReason, key?: string): string =>
+  key ? `${reason}:${key}` : reason;
+
+async function retentionScheduledToday(
+  dedup: string,
+  fireAtMs: number,
+): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(RETENTION_DEDUP_KEY);
+    const log = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    return log[dedup] === utcDayKey(fireAtMs);
+  } catch {
+    return false; // fail open — one possible duplicate beats never firing
+  }
+}
+
+async function recordRetentionScheduled(
+  dedup: string,
+  fireAtMs: number,
+): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(RETENTION_DEDUP_KEY);
+    const log = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    log[dedup] = utcDayKey(fireAtMs);
+    await AsyncStorage.setItem(RETENTION_DEDUP_KEY, JSON.stringify(log));
+  } catch (err) {
+    logger.warn("recordRetentionScheduled failed:", err);
+  }
+}
+
+/**
+ * Schedule a local retention reminder. The notifee id is stable per reason, so
+ * re-scheduling REPLACES (never stacks). Subject to the per-day dedup guard: at
+ * most one reminder per reason per UTC day. `data.type` deep-links on tap (see
+ * handleNotificationNavigation). No-ops (returns false) when the fire time is in
+ * the past or a reminder for this reason was already scheduled today.
+ */
+export async function scheduleRetentionReminder(opts: {
+  reason: RetentionReason;
+  fireAt: Date;
+  title: string;
+  body: string;
+  /** Distinguishes multiple reminders of the same reason (e.g. a template id). */
+  key?: string;
+  data?: Record<string, string>;
+}): Promise<boolean> {
+  const fireAtMs = opts.fireAt.getTime();
+  if (!Number.isFinite(fireAtMs) || fireAtMs <= Date.now() + 1000) return false;
+  const dedup = retentionDedupKey(opts.reason, opts.key);
+  if (await retentionScheduledToday(dedup, fireAtMs)) return false;
+
+  await ensureNotifeeChannel();
+  const trigger: TimestampTrigger = {
+    type: TriggerType.TIMESTAMP,
+    timestamp: fireAtMs,
+  };
+  try {
+    await notifee.createTriggerNotification(
+      {
+        id: retentionNotifeeId(opts.reason, opts.key),
+        title: opts.title,
+        body: opts.body,
+        data: { type: opts.reason, ...(opts.data ?? {}) },
+        android: {
+          channelId: NOTIFEE_CHANNEL_ID,
+          pressAction: { id: "default" },
+          smallIcon: "ic_notification",
+        },
+        ios: { sound: "default" },
+      },
+      trigger,
+    );
+    await recordRetentionScheduled(dedup, fireAtMs);
+    return true;
+  } catch (err) {
+    logger.warn(`scheduleRetentionReminder(${opts.reason}) failed:`, err);
+    return false;
+  }
+}
+
+/** Cancel a scheduled retention reminder by reason (+ optional key) when it no
+ *  longer applies (e.g. a scheduled block was disabled/deleted). */
+export async function cancelRetentionReminder(
+  reason: RetentionReason,
+  key?: string,
+): Promise<void> {
+  try {
+    await notifee.cancelTriggerNotification(retentionNotifeeId(reason, key));
+  } catch (err) {
+    logger.warn(`cancelRetentionReminder(${reason}) failed:`, err);
   }
 }

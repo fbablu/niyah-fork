@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Offline ML research artifact (NumPyro) — synthetic data, never bundled into
+# the app or the EAS upload. See ml/README.md.
+ml/
+
 # Firebase
 firebase-debug.log
 

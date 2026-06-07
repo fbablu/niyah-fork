@@ -32,6 +32,7 @@ jest.mock("react-native-svg", () => ({
   default: mockComponent("Svg"),
   Svg: mockComponent("Svg"),
   Circle: mockComponent("Circle"),
+  Ellipse: mockComponent("Ellipse"),
   Rect: mockComponent("Rect"),
   Path: mockComponent("Path"),
   G: mockComponent("G"),
@@ -142,7 +143,11 @@ jest.mock("react-native-reanimated", () => ({
     ScrollView: "Animated.ScrollView",
   },
   useSharedValue: jest.fn(<T>(initial: T) => ({ value: initial })),
+  useDerivedValue: jest.fn(<T>(fn: () => T) => ({ value: fn() })),
   useAnimatedStyle: jest.fn(() => ({})),
+  useAnimatedProps: jest.fn(() => ({})),
+  useReducedMotion: jest.fn(() => false),
+  cancelAnimation: jest.fn(),
   withTiming: jest.fn(<T>(value: T) => value),
   withSpring: jest.fn(<T>(value: T) => value),
   withDelay: jest.fn(<T>(_: number, animation: T) => animation),
@@ -152,9 +157,13 @@ jest.mock("react-native-reanimated", () => ({
     linear: jest.fn(),
     ease: jest.fn(),
     bezier: jest.fn(),
+    in: jest.fn(<T>(e: T) => e),
+    out: jest.fn(<T>(e: T) => e),
+    inOut: jest.fn(<T>(e: T) => e),
   },
   runOnJS: jest.fn(<T extends (...args: any[]) => any>(fn: T) => fn),
-  interpolate: jest.fn(),
+  interpolate: jest.fn(() => 0),
+  interpolateColor: jest.fn(() => "#000"),
   Extrapolation: {
     CLAMP: "clamp",
     EXTEND: "extend",
@@ -162,17 +171,38 @@ jest.mock("react-native-reanimated", () => ({
   },
 }));
 
-// Mock react-native-gesture-handler
+// Mock react-native-gesture-handler.
+// Gesture builders capture their chained callbacks in `handlers` so contract
+// tests can drive the gesture (e.g. pan.handlers.onUpdate({ translationX })).
+const mockMakeCapturingGesture = () => {
+  const g: Record<string, unknown> & { handlers: Record<string, unknown> } = {
+    handlers: {},
+  };
+  for (const m of [
+    "enabled",
+    "activeOffsetX",
+    "hitSlop",
+    "onBegin",
+    "onStart",
+    "onUpdate",
+    "onEnd",
+    "onFinalize",
+  ]) {
+    g[m] = jest.fn((arg: unknown) => {
+      g.handlers[m] = arg;
+      return g;
+    });
+  }
+  return g;
+};
+
 jest.mock("react-native-gesture-handler", () => ({
   GestureHandlerRootView: "GestureHandlerRootView",
   Gesture: {
-    Tap: jest.fn(() => ({ onEnd: jest.fn().mockReturnThis() })),
-    Pan: jest.fn(() => ({
-      onUpdate: jest.fn().mockReturnThis(),
-      onEnd: jest.fn().mockReturnThis(),
-    })),
+    Tap: jest.fn(() => mockMakeCapturingGesture()),
+    Pan: jest.fn(() => mockMakeCapturingGesture()),
   },
-  GestureDetector: "GestureDetector",
+  GestureDetector: ({ children }: { children: unknown }) => children,
   TapGestureHandler: "TapGestureHandler",
   PanGestureHandler: "PanGestureHandler",
   ScrollView: "ScrollView",
@@ -357,6 +387,7 @@ jest.mock("@react-native-firebase/messaging", () => {
   };
   const mockMessaging: any = jest.fn(() => ({
     requestPermission: jest.fn(() => Promise.resolve(1)),
+    hasPermission: jest.fn(() => Promise.resolve(1)),
     getToken: jest.fn(() => Promise.resolve("mock-fcm-token")),
     getAPNSToken: jest.fn(() => Promise.resolve("mock-apns-token")),
     registerDeviceForRemoteMessages: jest.fn(() => Promise.resolve()),
@@ -378,6 +409,7 @@ jest.mock("@react-native-firebase/messaging", () => {
     requestPermission: jest.fn((instance: any, permissions?: unknown) =>
       instance.requestPermission(permissions),
     ),
+    hasPermission: jest.fn((instance: any) => instance.hasPermission()),
     getToken: jest.fn((instance: any, options?: unknown) =>
       instance.getToken(options),
     ),

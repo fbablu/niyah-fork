@@ -32,12 +32,15 @@ Hardened rules in `firebase/firestore.rules`. Key collections (default-deny for 
 - `wallets` — owner **read**; client may **`create` a zero-balance wallet only**
   (`balance == 0 && pendingBalance == 0`); all balance mutations are **admin-SDK only**. So
   "edit the client to add money" is an operator/insider threat, not a user threat.
-- `sessions` — owner read; client `update` restricted to `['status','completedAt','updatedAt']`;
-  financial fields immutable.
+- `sessions` — owner read; client `update` restricted to
+  `['status','completedAt','updatedAt','violationCount']`; financial fields (stakeAmount,
+  potentialPayout, endsAt, cadence) immutable; create is server-only (`createSoloSession`).
 - `userFollows` — `allow write: if false`; follow/unfollow go through `followUserFn`/`unfollowUserFn` CFs.
-- Server-managed / admin-only: `transactions`, `groupSessions`, `groupInvites`, `revenue`,
-  `rateLimits`, `walletAudits`, `userMerges`, `migrations`, `deletions`, `config/featureFlags`,
-  `analytics_events`, `metrics`.
+- Server-managed **writes** (admin-SDK only; reads vary): fully sealed (no client read or
+  write) — `revenue`, `rateLimits`, `walletAudits`, `userMerges`, `migrations`, `deletions`,
+  `config/serverFlags`; owner/participant-read, write-denied — `transactions`, `groupSessions`,
+  `groupInvites`; **public-read**, write-denied — `config/featureFlags`, `metrics`;
+  `analytics_events` is shape-locked client-`create` only (no read).
 
 **Deploy**: `firebase deploy --only firestore:rules`
 
@@ -111,7 +114,7 @@ is still env-only (safe-on-loss default `500`); migrate it the same way if conso
 
 ### Firebase Config Files
 
-`GoogleService-Info.plist` and `google-services.json` are **gitignored**. They contain API keys that, while designed to be public (embedded in every compiled app binary), were removed from the repo for defense-in-depth.
+`GoogleService-Info.plist` (iOS) is **gitignored**. It contains API keys that, while designed to be public (embedded in every compiled app binary), were removed from the repo for defense-in-depth. (The Android `google-services.json` is gone — iOS-only since 2026-06-07.)
 
 - **Local dev**: files live in `firebase/`, injected by config plugins at build time
 - **EAS cloud builds**: uploaded as file secrets (see [Development](./development.md#environment-variables))
@@ -119,15 +122,37 @@ is still env-only (safe-on-loss default `500`); migrate it the same way if conso
 
 ## API Key Management
 
-### Rotated Keys
+### Firebase client keys — actual status (corrected 2026-06-07)
 
-All keys were rotated after removing config files from the repo:
+> Prior versions of this doc claimed "all keys were rotated." That was **wrong**:
+> a `/vibe-security` audit verified the Firebase client keys in old public history
+> commits (`592a324`, `406e285`) are **byte-identical to the current live keys**
+> builds 19–22 ship with. They were never rotated. This is bounded (client keys
+> ship in every binary and the repo is public by design — data access is gated by
+> rules + Auth + App Check, never key secrecy), but it must be recorded honestly.
 
-- iOS API key (restricted to bundle ID `com.niyah.app`)
-- Android API key (no fingerprint restriction yet -- add SHA-256 when first Android build is done)
-- Browser API key (no restrictions)
-- Stripe publishable key (updated in `.env`)
-- Stripe secret key (updated in Firebase Secret Manager)
+**Niyah is iOS-only (2026-06-07).** The Firebase **Android** app + its API key
+(`AIzaSyCi-…EQ0`) were the worst exposure — live + unrestricted in public history.
+The codebase side is **done** (Android app config, `google-services.json`,
+`withGoogleServicesJson` plugin, and the Android client ID are all removed). Two
+**console steps remain** to actually kill the key: (1) Firebase Console →
+**Remove this app** (niyah-android), (2) GCP → APIs & Services → Credentials →
+**delete** the orphaned "Android key (auto created by Firebase)". Until step 2 the
+public-history key still works — removing the Firebase app alone does NOT delete the
+GCP key. No rotation needed once deleted.
+
+| Key | Restriction state | Action |
+| --- | --- | --- |
+| iOS API key | bundle-ID restriction **claimed but unverified** (a bare REST call should be re-tested) | confirm `com.niyah.app` app restriction is actually set |
+| Android API key | **code removed; key delete PENDING** (2 console steps above) | delete in GCP Credentials → then inert |
+| Browser API key | no restriction | add HTTP-referrer restriction (web is auth continuation only) |
+| Stripe publishable / secret | n/a (publishable is non-secret; secret in Secret Manager) | — |
+
+Residual abuse vector is now only the iOS key (ships in every binary, bundle-ID
+restricted) — Identity Toolkit REST abuse (SMS-OTP pumping, enumeration) is further
+gated by **email-enumeration protection** + a **lower phone-SMS daily quota** (both
+in [security-deploy-checklist.md](./security-deploy-checklist.md) Phase 2) and, durably,
+the App Check flip once metrics clear ≥99%.
 
 ### Keys That Should NOT Be Rotated
 
@@ -135,9 +160,14 @@ All keys were rotated after removing config files from the repo:
 
 ### Remaining Security Work
 
+- **Delete the Android client key** — code/config removal done (iOS-only); finish the 2 console
+  steps above (remove Firebase Android app + delete the GCP key). Then there's no Android key to
+  manage anymore.
+- **Verify the iOS key bundle-ID restriction is actually applied** (doc previously asserted it
+  without proof).
+- **Enable email-enumeration protection + lower phone-SMS daily quota** — pull these forward from
+  the deploy checklist; they gate the Identity Toolkit abuse path.
 - **App Check enforce flip** — implementation is done; only the `APP_CHECK_ENFORCED=true` flip
   remains, gated on ≥99% verified token coverage in the Console Metrics tab (see above).
-- **Android API key restriction** — add SHA-256 fingerprint when first Android build is done via EAS.
-- **Delete old rotated keys** — remove deprecated keys in GCP Console after confirming stability.
 - **Universal-link AASA** — host `apple-app-site-association` on `niyah.live` (see [security-deploy-checklist.md](./security-deploy-checklist.md) "What's NOT done").
 - ~~Node.js runtime upgrade~~ — Done. Cloud Functions on Node.js 22.

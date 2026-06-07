@@ -22,10 +22,13 @@ import {
   getScreenTimeAuthStatus,
   presentAppPicker,
   getSavedAppSelection,
+  validateAndPromptForAppSelection,
   startBlocking,
 } from "../../src/config/screentime";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { useAuthStore } from "../../src/store/authStore";
+import { BlockTemplateChips } from "../../src/components/session";
+import { USE_SHORT_TIMERS } from "../../src/constants/config";
 
 // ─── Duration options ─────────────────────────────────────────────────────────
 
@@ -35,12 +38,18 @@ interface DurationOption {
 }
 
 const DURATION_OPTIONS: DurationOption[] = [
-  { label: "30 sec (demo)", durationMs: 30 * 1000 },
+  // The 30-sec demo chip is appended only when USE_SHORT_TIMERS (dev/demo
+  // builds) — prod users never see "(demo)" cruft.
   { label: "25 min", durationMs: 25 * 60 * 1000 },
   { label: "1 hour", durationMs: 60 * 60 * 1000 },
   { label: "2 hours", durationMs: 2 * 60 * 60 * 1000 },
   { label: "4 hours", durationMs: 4 * 60 * 60 * 1000 },
 ];
+
+const DEMO_DURATION: DurationOption = {
+  label: "30 sec (demo)",
+  durationMs: 30 * 1000,
+};
 
 // Calculate "until tonight" (10 PM today, or 2 hours if already past 10 PM)
 function getUntilTonightMs(): number {
@@ -184,12 +193,18 @@ function QuickBlockScreenInner() {
 
   const isAuthorized =
     isScreenTimeAvailable && getScreenTimeAuthStatus() === "approved";
-  const hasApps = !!appSelection && appSelection.appCount > 0;
+  // A selection counts as non-empty if it names apps OR whole categories —
+  // "block all of X" is a category-only selection (appCount 0, categoryCount N).
+  const hasApps =
+    !!appSelection && appSelection.appCount + appSelection.categoryCount > 0;
 
   const allDurations: (DurationOption & { key: string })[] = useMemo(() => {
     const tonight = getUntilTonightMs();
+    const options = USE_SHORT_TIMERS
+      ? [DEMO_DURATION, ...DURATION_OPTIONS]
+      : DURATION_OPTIONS;
     return [
-      ...DURATION_OPTIONS.map((d, i) => ({ ...d, key: `opt-${i}` })),
+      ...options.map((d, i) => ({ ...d, key: `opt-${i}` })),
       { label: "Until tonight", durationMs: tonight, key: "tonight" },
     ];
   }, []);
@@ -207,6 +222,9 @@ function QuickBlockScreenInner() {
     try {
       const result = await requestScreenTimeAuth();
       if (result === "approved") {
+        // Force a re-render so isAuthorized/hasApps re-evaluate and the
+        // Setup gate clears once Screen Time access is granted.
+        setAppSelection(getSavedAppSelection());
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch {
@@ -228,32 +246,21 @@ function QuickBlockScreenInner() {
   const handleStartBlocking = useCallback(async () => {
     if (!user) return;
 
-    // Step 1: Ensure Screen Time is authorized
-    if (isScreenTimeAvailable && getScreenTimeAuthStatus() !== "approved") {
-      try {
-        const result = await requestScreenTimeAuth();
-        if (result !== "approved") {
-          Alert.alert(
-            "Authorization Required",
-            "Niyah needs Screen Time access to block distracting apps.",
-          );
-          return;
-        }
-      } catch {
-        return;
-      }
+    // Ensure Screen Time is authorized AND a non-empty selection (apps OR whole
+    // categories) exists, prompting for each if missing. Blocks start when the
+    // selection is truly empty — never starts a session that shields nothing.
+    const gate = await validateAndPromptForAppSelection();
+    if (!gate.ok) {
+      setAppSelection(getSavedAppSelection());
+      Alert.alert(
+        gate.reason === "needs-auth" ? "Authorization Required" : "Select Apps",
+        gate.reason === "needs-auth"
+          ? "Niyah needs Screen Time access to block distracting apps."
+          : "Pick at least one app or category to block.",
+      );
+      return;
     }
-
-    // Step 2: Ensure apps are selected
-    if (isScreenTimeAvailable && !getSavedAppSelection()) {
-      try {
-        const selection = await presentAppPicker();
-        setAppSelection(selection);
-      } catch {
-        // User cancelled
-        return;
-      }
-    }
+    if (gate.selection) setAppSelection(gate.selection);
 
     setIsLoading(true);
 
@@ -291,6 +298,7 @@ function QuickBlockScreenInner() {
   }, [user, selectedDuration, startGroupSession, router]);
 
   const formatDuration = (ms: number): string => {
+    if (ms < 60 * 1000) return `${Math.round(ms / 1000)} sec`;
     const hours = Math.floor(ms / (60 * 60 * 1000));
     const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
     if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
@@ -310,7 +318,10 @@ function QuickBlockScreenInner() {
           <Button
             title={isLoading ? "Starting..." : "Start Blocking"}
             onPress={handleStartBlocking}
-            disabled={isLoading}
+            disabled={
+              isLoading ||
+              (isScreenTimeAvailable && (!isAuthorized || !hasApps))
+            }
             size="large"
           />
           <Text style={styles.disclaimer}>No money involved. Just focus.</Text>
@@ -381,6 +392,13 @@ function QuickBlockScreenInner() {
           </Card>
         </Pressable>
       )}
+
+      {/* Saved block-list templates — apply with one tap, save the current
+          selection under a name. */}
+      <BlockTemplateChips
+        onApplied={(selection) => setAppSelection(selection)}
+        canSaveCurrent={hasApps}
+      />
 
       {/* Duration Selection */}
       <Text style={styles.sectionLabel}>How long?</Text>

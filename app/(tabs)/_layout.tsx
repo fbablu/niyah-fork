@@ -11,6 +11,12 @@ export default function TabsLayout() {
   // theme.  Mounting it once with the correct barTintColor avoids the race
   // where it is first created with the default "dark" color and then asked
   // to update — an update that the SwiftUI/UITabBar layer may miss.
+  //
+  // KNOWN LIMITATION: toggling theme at runtime updates JS surfaces instantly
+  // but the native bar applies its new UITabBarAppearance lazily, so the
+  // liquid-glass bar lags the rest of the app by a beat (build-21 finding).
+  // Same-frame sync would require patching react-native-bottom-tabs' native
+  // pane — accepted for now.
   if (!_hasHydrated) return null;
 
   return (
@@ -34,10 +40,10 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="session"
+        name="schedule"
         options={{
-          title: "Focus",
-          tabBarIcon: () => ({ sfSymbol: "timer" }),
+          title: "Schedule",
+          tabBarIcon: () => ({ sfSymbol: "calendar" }),
         }}
       />
       <Tabs.Screen

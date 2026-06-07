@@ -36,13 +36,26 @@ beforeEach(() => {
   setItemMock.mockReset();
   deleteItemMock.mockReset();
 
-  getItemMock.mockImplementation(async (k: string) =>
-    memory.has(k) ? memory.get(k)! : null,
-  );
+  // Mirror expo-secure-store's real key constraint so an illegal key (the old
+  // "@niyah/otp_throttle:" prefix or a "+" from an E.164 number) fails the test
+  // the way it fails on-device, instead of silently "working" against the mock.
+  const assertValidKey = (k: string) => {
+    if (!/^[A-Za-z0-9._-]+$/.test(k)) {
+      throw new Error(
+        'Invalid key provided to SecureStore. Keys must not be empty and contain only alphanumeric characters, ".", "-", and "_".',
+      );
+    }
+  };
+  getItemMock.mockImplementation(async (k: string) => {
+    assertValidKey(k);
+    return memory.has(k) ? memory.get(k)! : null;
+  });
   setItemMock.mockImplementation(async (k: string, v: string) => {
+    assertValidKey(k);
     memory.set(k, v);
   });
   deleteItemMock.mockImplementation(async (k: string) => {
+    assertValidKey(k);
     memory.delete(k);
   });
 

@@ -124,6 +124,16 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.medium,
       color: Colors.text,
     },
+    participantBlocks: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textSecondary,
+      marginTop: Spacing.xs,
+    },
+    participantBlocksMissing: {
+      fontSize: Typography.labelSmall,
+      color: Colors.loss,
+      marginTop: Spacing.xs,
+    },
     badge: {
       paddingHorizontal: Spacing.sm,
       paddingVertical: Spacing.xs,
@@ -209,6 +219,11 @@ const makeStyles = (Colors: ThemeColors) =>
       borderTopWidth: 1,
       borderTopColor: Colors.border,
       backgroundColor: Colors.background,
+    },
+    startHint: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textMuted,
+      textAlign: "center",
     },
     cancelRow: {
       flexDirection: "row",
@@ -373,6 +388,19 @@ function WaitingRoomScreenInner() {
 
   const allOnline = totalCount > 0 && onlineCount === totalCount;
 
+  // Block-selection gate: every member blocks their OWN apps (tokens can't
+  // cross devices), so we require each to have shared a non-empty block summary
+  // before the session can start — otherwise a member could "focus" with
+  // nothing actually shielded.
+  const hasBlockSelection = (p: (typeof participants)[number][1]): boolean =>
+    !!p.appBlockSummary &&
+    p.appBlockSummary.appCount + p.appBlockSummary.categoryCount > 0;
+  const blockReadyCount = participants.filter(([, p]) =>
+    hasBlockSelection(p),
+  ).length;
+  const everyoneHasBlockSelection =
+    totalCount > 0 && blockReadyCount === totalCount;
+
   const isProposer = activeSession?.proposerId === userId;
 
   const handleStart = useCallback(async () => {
@@ -424,7 +452,10 @@ function WaitingRoomScreenInner() {
     if (!sessionId) return;
     try {
       await Share.share({
-        message: `Join my Niyah focus session! https://niyah.live/join/${sessionId}`,
+        // Query form (?s=) so the static niyah.live/join page can read it
+        // client-side; Universal Link opens the app directly for installed
+        // friends and routes everyone else to install.
+        message: `Join my Niyah focus session! https://niyah.live/join?s=${sessionId}`,
       });
     } catch {
       // User cancelled share sheet
@@ -525,6 +556,18 @@ function WaitingRoomScreenInner() {
                     : ""}
                 </Text>
                 {getStatusBadge(participantId, participant)}
+                <Text
+                  style={
+                    hasBlockSelection(participant)
+                      ? styles.participantBlocks
+                      : styles.participantBlocksMissing
+                  }
+                  numberOfLines={1}
+                >
+                  {hasBlockSelection(participant)
+                    ? `Blocking ${participant.appBlockSummary?.label}`
+                    : "No apps selected yet"}
+                </Text>
               </View>
             </View>
           ))}
@@ -560,13 +603,21 @@ function WaitingRoomScreenInner() {
       {/* Footer Actions */}
       <View style={styles.footer}>
         {isProposer && allOnline && (
-          <Button
-            title={isStarting ? "Starting..." : "Start Session"}
-            onPress={handleStart}
-            size="large"
-            loading={isStarting}
-            disabled={isStarting}
-          />
+          <>
+            <Button
+              title={isStarting ? "Starting..." : "Start Session"}
+              onPress={handleStart}
+              size="large"
+              loading={isStarting}
+              disabled={isStarting || !everyoneHasBlockSelection}
+            />
+            {!everyoneHasBlockSelection && (
+              <Text style={styles.startHint}>
+                Waiting for everyone to pick apps to block ({blockReadyCount}/
+                {totalCount} ready).
+              </Text>
+            )}
+          </>
         )}
         <View style={styles.cancelRow}>
           <View style={styles.shareButton}>

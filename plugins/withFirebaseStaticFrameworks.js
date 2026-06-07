@@ -61,7 +61,12 @@ function withFirebaseStaticFrameworks(config) {
         (pod) => `  pod '${pod}', :modular_headers => true`,
       ).join("\n");
 
-      const modularHeaderPatch = `\n  ${PATCH_MARKER} Enable modular headers for Firebase deps\n${modularHeaderLines}\n`;
+      const modularHeaderPatch =
+        `\n  ${PATCH_MARKER} Enable modular headers for Firebase deps\n${modularHeaderLines}\n` +
+        `  ${PATCH_MARKER} Link reCAPTCHA Enterprise so Firebase phone-auth's silent-push\n` +
+        `  ${PATCH_MARKER} -> reCAPTCHA fallback works on iOS. FirebaseAuth needs this SDK\n` +
+        `  ${PATCH_MARKER} present, else: "The reCAPTCHA SDK is not linked to your app".\n` +
+        `  pod 'RecaptchaEnterprise'\n`;
 
       // Insert after use_expo_modules!
       const useExpoModulesIdx = podfile.indexOf("use_expo_modules!");

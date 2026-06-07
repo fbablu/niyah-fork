@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useCallback, useRef } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
@@ -12,10 +12,12 @@ import { useColors } from "../../src/hooks/useColors";
 import {
   Card,
   Button,
+  SlideToConfirm,
   SessionScreenScaffold,
   withErrorBoundary,
   StatusBanner,
 } from "../../src/components";
+import { BlockTemplateChips } from "../../src/components/session";
 import * as Haptics from "expo-haptics";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useGroupSessionStore } from "../../src/store/groupSessionStore";
@@ -33,8 +35,12 @@ import {
   isScreenTimeAvailable,
   startBlocking,
   getSavedAppSelection,
-  getScreenTimeAuthStatus,
+  getAppSelectionStatus,
+  validateAndPromptForAppSelection,
+  presentAppPicker,
+  requestScreenTimeAuth,
 } from "../../src/config/screentime";
+import type { AppSelectionToken } from "../../modules/niyah-screentime";
 import { logger } from "../../src/utils/logger";
 
 const BLOCKED_APPS = [
@@ -237,6 +243,33 @@ const makeStyles = (Colors: ThemeColors) =>
       marginTop: Spacing.sm,
       fontStyle: "italic",
     },
+    setupCard: {
+      backgroundColor: Colors.primaryMuted,
+      borderWidth: 1,
+      borderColor: Colors.primary,
+      gap: Spacing.sm,
+    },
+    setupTitle: {
+      fontSize: Typography.labelMedium,
+      ...Font.semibold,
+      color: Colors.text,
+    },
+    setupDescription: {
+      fontSize: Typography.labelSmall,
+      color: Colors.textSecondary,
+    },
+    setupRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: Spacing.sm,
+      marginTop: Spacing.xs,
+    },
+    setupRowText: {
+      flex: 1,
+      fontSize: Typography.labelSmall,
+      color: Colors.textSecondary,
+    },
     disclaimer: {
       textAlign: "center",
       color: Colors.textMuted,
@@ -259,8 +292,78 @@ function ConfirmSessionScreenInner() {
   const isSolo = params.type === "solo";
   const showPartner = !isSolo && !!currentPartner;
 
+  // Screen Time readiness — gate the (stake-charging) start button so a staked
+  // session can never run unshielded. `available:false` (simulator/Android)
+  // reports ready so we don't trap the user where blocking can't apply.
+  const [appSelection, setAppSelection] = useState<AppSelectionToken | null>(
+    getSavedAppSelection,
+  );
+  const [authorized, setAuthorized] = useState(
+    () => getAppSelectionStatus().authorized,
+  );
+  const [isStarting, setIsStarting] = useState(false);
+  // Synchronous mirror of isStarting — closes the double-tap window that
+  // React-state guards can't (state reads are stale until commit).
+  const startingRef = useRef(false);
+  const stAvailable = isScreenTimeAvailable;
+  const hasApps =
+    !!appSelection && appSelection.appCount + appSelection.categoryCount > 0;
+  const blockingReady = !stAvailable || (authorized && hasApps);
+
+  const handleAuthorize = useCallback(async () => {
+    try {
+      if ((await requestScreenTimeAuth()) === "approved") {
+        setAuthorized(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch {
+      StatusBanner.show({
+        severity: "error",
+        message: "Couldn't request Screen Time access.",
+      });
+    }
+  }, []);
+
+  const handleSelectApps = useCallback(async () => {
+    try {
+      const selection = await presentAppPicker();
+      setAppSelection(selection);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {
+      // User cancelled the picker — keep prior selection.
+    }
+  }, []);
+
   const handleConfirm = async () => {
     if (!user) return;
+    // SYNCHRONOUS re-entry guard: a second confirm while the first awaits the
+    // Screen Time gate would double-charge the stake (createSoloSession is
+    // idempotent per-sessionId only, and each invocation generates a fresh
+    // id). isStarting alone can't close this — it's React state set AFTER the
+    // gate await, and the reduced-motion Button fallback has no one-shot.
+    if (startingRef.current) return;
+    startingRef.current = true;
+
+    // Gate: ensure Screen Time auth + a non-empty app selection BEFORE charging
+    // the stake. Prompts inline if missing; aborts (no charge) if declined.
+    // The gate's own prompts must stay interactive, so isStarting flips after.
+    const gate = await validateAndPromptForAppSelection();
+    if (!gate.ok) {
+      StatusBanner.show({
+        severity: "warn",
+        message:
+          gate.reason === "needs-auth"
+            ? "Screen Time access is required to block apps for your stake."
+            : "Pick at least one app or category to block before staking.",
+      });
+      setAuthorized(getAppSelectionStatus().authorized);
+      setAppSelection(getSavedAppSelection());
+      startingRef.current = false;
+      return;
+    }
+    if (gate.selection) setAppSelection(gate.selection);
+
+    setIsStarting(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     if (isSolo) {
@@ -271,6 +374,8 @@ function ConfirmSessionScreenInner() {
           error instanceof Error ? error.message : "Could not start session.";
         logger.warn("startSoloSession failed:", error);
         StatusBanner.show({ severity: "error", message });
+        setIsStarting(false);
+        startingRef.current = false;
         return;
       }
       // startSession() in sessionStore already fires startBlocking() internally.
@@ -302,9 +407,26 @@ function ConfirmSessionScreenInner() {
           },
         ];
 
-    startGroupSession(cadence, participants);
+    // startGroupSession throws synchronously when a session is already live
+    // (e.g. a free quick-block is running) — without the catch the slider
+    // would hang in an eternal loading spinner on an unhandled rejection.
+    try {
+      startGroupSession(cadence, participants);
+    } catch (error) {
+      StatusBanner.show({
+        severity: "error",
+        message:
+          error instanceof Error ? error.message : "Could not start session.",
+      });
+      setIsStarting(false);
+      startingRef.current = false;
+      return;
+    }
 
-    if (isScreenTimeAvailable && getScreenTimeAuthStatus() === "approved") {
+    // The gate above already ensured auth + a non-empty selection (or that
+    // Screen Time isn't available here), so startBlocking won't throw on an
+    // empty selection any more.
+    if (isScreenTimeAvailable) {
       try {
         await startBlocking();
       } catch (error) {
@@ -337,10 +459,15 @@ function ConfirmSessionScreenInner() {
       }
       footer={
         <>
-          <Button
-            title={showPartner ? "Start Duo Session" : "Start Solo Session"}
-            onPress={handleConfirm}
-            size="large"
+          <SlideToConfirm
+            title={
+              showPartner
+                ? "Slide to start duo session"
+                : "Slide to start solo session"
+            }
+            onConfirm={handleConfirm}
+            disabled={!blockingReady}
+            loading={isStarting}
           />
           <Text style={styles.disclaimer}>
             Your {formatMoney(config.stake)} stake will be deducted immediately
@@ -450,20 +577,56 @@ function ConfirmSessionScreenInner() {
       {/* Blocked Apps */}
       <View style={styles.blockedSection}>
         <Text style={styles.blockedTitle}>Apps that will be blocked</Text>
-        {isScreenTimeAvailable &&
-        getScreenTimeAuthStatus() === "approved" &&
-        getSavedAppSelection() ? (
-          <>
-            <View style={styles.appList}>
-              <View style={[styles.appBadge, styles.appBadgeActive]}>
-                <Text style={[styles.appName, styles.appNameActive]}>
-                  {getSavedAppSelection()?.label ?? "Selected apps"}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.blockedNote}>
-              Apps will be blocked when session starts
+        {stAvailable && !blockingReady ? (
+          // Setup Required — must authorize + pick apps before the staked
+          // session can start (the Start button is disabled until both are done).
+          <Card style={styles.setupCard}>
+            <Text style={styles.setupTitle}>Setup Required</Text>
+            <Text style={styles.setupDescription}>
+              Niyah needs Screen Time access and an app selection to block
+              distractions while your stake is on the line.
             </Text>
+            {!authorized && (
+              <View style={styles.setupRow}>
+                <Text style={styles.setupRowText}>
+                  Screen Time: not authorized
+                </Text>
+                <Button
+                  title="Authorize"
+                  onPress={handleAuthorize}
+                  size="small"
+                />
+              </View>
+            )}
+            {authorized && !hasApps && (
+              <View style={styles.setupRow}>
+                <Text style={styles.setupRowText}>No apps selected</Text>
+                <Button
+                  title="Select Apps"
+                  onPress={handleSelectApps}
+                  size="small"
+                />
+              </View>
+            )}
+          </Card>
+        ) : stAvailable && hasApps ? (
+          <>
+            <Pressable onPress={handleSelectApps}>
+              <View style={styles.appList}>
+                <View style={[styles.appBadge, styles.appBadgeActive]}>
+                  <Text style={[styles.appName, styles.appNameActive]}>
+                    {appSelection?.label ?? "Selected apps"} ›
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+            <Text style={styles.blockedNote}>
+              Tap to change · apps block the moment the session starts
+            </Text>
+            <BlockTemplateChips
+              onApplied={(selection) => setAppSelection(selection)}
+              canSaveCurrent={hasApps}
+            />
           </>
         ) : (
           <>
@@ -475,9 +638,7 @@ function ConfirmSessionScreenInner() {
               ))}
             </View>
             <Text style={styles.blockedNote}>
-              {isScreenTimeAvailable
-                ? "Set up Screen Time in Profile to actually block apps"
-                : "Demo mode: Apps are not actually blocked"}
+              Demo mode: apps are not actually blocked on this device
             </Text>
           </>
         )}

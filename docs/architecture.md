@@ -53,15 +53,17 @@ niyah/
 │   ├── config/
 │   │   ├── firebase.ts           # Firebase helpers (auth, Firestore, social)
 │   │   ├── functions.ts          # Cloud Functions client (reads project ID from env)
+│   │   ├── appCheck.ts           # App Check attestation (App Attest/DeviceCheck)
 │   │   ├── notifications.ts      # FCM push notification helpers
 │   │   ├── screentime.ts         # Screen Time API JS wrapper
-│   │   └── sslPinning.ts        # SSL public key pinning for Cloud Functions
+│   │   ├── sentry.ts             # Sentry crash/error reporting init
+│   │   └── sslPinning.ts         # SSL public key pinning for Cloud Functions
 │   ├── store/                    # Zustand state stores (one per domain)
 │   │   ├── authStore.ts          # Auth state, Firebase user, profile
 │   │   ├── sessionStore.ts       # Solo session lifecycle
 │   │   ├── walletStore.ts        # Balance, transactions, settlements
 │   │   ├── partnerStore.ts       # Partner relationships, duo sessions
-│   │   ├── groupSessionStore.ts  # N-person group sessions, transfers
+│   │   ├── groupSessionStore.ts  # N-person group sessions, de-pooled stake-back
 │   │   ├── socialStore.ts        # Following/followers, public profiles
 │   │   └── themeStore.ts         # Dark/light theme (AsyncStorage persistence)
 │   ├── hooks/
@@ -82,21 +84,21 @@ niyah/
 │   └── niyah-screentime/         # Custom Expo module for iOS Screen Time API
 ├── functions/                    # Firebase Cloud Functions (~40 exports)
 │   └── src/index.ts              # All function definitions
-├── plugins/                      # Expo config plugins
+├── plugins/                      # Expo config plugins (Firebase + build fixes only)
 │   ├── withGoogleServicesPlist.js
-│   ├── withGoogleServicesJson.js
 │   ├── withFirebaseStaticFrameworks.js
-│   ├── withScreenTimeEntitlement.js
-│   ├── withDeviceActivityMonitor.js
-│   └── withFollyCoroutinesFix.js
+│   ├── withResourceBundleSigning.js
+│   ├── withFollyCoroutinesFix.js
+│   └── withFmtConstevalFix.js
 ├── scripts/
-│   ├── dev-device.sh             # USB port forwarding dev workflow
+│   ├── dev-doctor.sh             # Diagnose Mac+iPhone dev state (pnpm doctor)
+│   ├── clean.sh / clean-deep.sh  # Reset build/Metro/pod caches
 │   ├── print-dev-url.js
 │   └── wsl_dev_setup.ps1
-├── firebase/                     # Firebase config files (gitignored)
-│   ├── GoogleService-Info.plist  # iOS (not in repo)
-│   ├── google-services.json      # Android (not in repo)
-│   └── firestore.rules           # Hardened security rules
+├── firebase/                     # Firestore rules + indexes (config plists gitignored)
+│   ├── GoogleService-Info.plist  # iOS (gitignored, local only)
+│   ├── firestore.rules           # Hardened security rules
+│   └── firestore.indexes.json    # Composite index definitions
 ├── CLAUDE.md                     # AI assistant project guide
 ├── README.md                     # Public-facing setup guide
 ├── app.config.js                 # Dynamic Expo config (replaced app.json)
@@ -127,7 +129,7 @@ Custom Expo modules in `modules/` use Swift bridged via ExpoModulesCore. iOS **a
 
 ### Firebase Config Files
 
-`GoogleService-Info.plist` and `google-services.json` are **gitignored** (removed from repo after key rotation). They live on disk in `firebase/` and are injected by config plugins at build time. For EAS cloud builds, upload as file secrets. See [Security](./security.md).
+`GoogleService-Info.plist` (iOS) is **gitignored** (removed from repo after key rotation). It lives on disk in `firebase/` and is injected by a config plugin at build time. For EAS cloud builds, upload it as a file secret. See [Security](./security.md).
 
 ### Build System
 

@@ -41,6 +41,11 @@ public class NiyahScreenTimeModule: Module {
   private static let appGroupID = "group.com.niyah.app"
   private static let selectionKey = "niyah_app_selection"
   private static let blockingKey = "niyah_is_blocking"
+  // Named block-list templates: JSON index + one plist Data blob per template.
+  private static let templatesIndexKey = "niyah_selection_templates_index"
+  private static let templateKeyPrefix = "niyah_selection_tpl_"
+  // Apps exempt from EVERY block (music, maps, …) — subtracted at apply time.
+  private static let neverBlockKey = "niyah_neverblock_selection"
 
   private var sharedDefaults: UserDefaults {
     UserDefaults(suiteName: Self.appGroupID) ?? .standard
@@ -53,6 +58,7 @@ public class NiyahScreenTimeModule: Module {
 
   // ── Violation + surrender polling ──────────────────────────────────────────
   private static let violationsKey    = "niyah_shield_violations"
+  private static let violationsByCategoryKey = "niyah_shield_violations_by_category"
   private static let surrenderKey     = "niyah_surrender_requested"
   private static let sessionContextKey = "niyah_session_context"
   private static let baselineKey       = "niyah_baseline_snapshot"
@@ -206,7 +212,10 @@ public class NiyahScreenTimeModule: Module {
                 domain: "NiyahScreenTime", code: 4,
                 userInfo: [NSLocalizedDescriptionKey: "App picker was cancelled"]
               ))
-            }
+            },
+            // Seed with the current selection so "Change Apps" edits in place
+            // instead of starting from scratch.
+            initialSelection: self.savedSelection ?? FamilyActivitySelection()
           )
           pickerVC.modalPresentationStyle = .pageSheet
 
@@ -237,6 +246,189 @@ public class NiyahScreenTimeModule: Module {
     }
 
     // ================================================================
+    // MARK: - Block-list templates (named selections)
+    // ================================================================
+    //
+    // Templates write THROUGH to the active selection key on apply, so
+    // startBlocking, the monitor extension, and every existing gate keep
+    // working unchanged — there is no separate "active template" concept.
+
+    /// Snapshot the current selection under `name`. Overwrites an existing
+    /// template with the same slug. Throws if nothing is selected.
+    AsyncFunction("saveSelectionTemplate") { [weak self] (name: String) -> [String: Any] in
+      guard #available(iOS 16.0, *) else {
+        throw NSError(domain: "NiyahScreenTime", code: 0,
+          userInfo: [NSLocalizedDescriptionKey: "Screen Time requires iOS 16+"])
+      }
+      guard let self = self, let selection = self.savedSelection,
+            !(selection.applicationTokens.isEmpty
+              && selection.categoryTokens.isEmpty
+              && selection.webDomainTokens.isEmpty) else {
+        throw NSError(domain: "NiyahScreenTime", code: 5,
+          userInfo: [NSLocalizedDescriptionKey: "No apps selected to save as a template."])
+      }
+      let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else {
+        throw NSError(domain: "NiyahScreenTime", code: 6,
+          userInfo: [NSLocalizedDescriptionKey: "Template name can't be empty."])
+      }
+      guard let data = try? PropertyListEncoder().encode(selection) else {
+        throw NSError(domain: "NiyahScreenTime", code: 7,
+          userInfo: [NSLocalizedDescriptionKey: "Couldn't encode the selection."])
+      }
+      let slug = Self.slugify(trimmed)
+      // Symbol/emoji-only names all slug to "" — distinct templates would
+      // silently collide on the same key and overwrite each other.
+      guard !slug.isEmpty else {
+        throw NSError(domain: "NiyahScreenTime", code: 6,
+          userInfo: [NSLocalizedDescriptionKey: "Template name needs at least one letter or number."])
+      }
+      self.sharedDefaults.set(data, forKey: Self.templateKeyPrefix + slug)
+
+      var index = self.loadTemplateIndex().filter { ($0["slug"] as? String) != slug }
+      var entry = self.serializeSelection(selection)
+      entry["id"] = slug
+      entry["slug"] = slug
+      entry["name"] = trimmed
+      entry["createdAt"] = Date().timeIntervalSince1970 * 1000
+      index.append(entry)
+      self.saveTemplateIndex(index)
+      NSLog("[NiyahScreenTime] saveSelectionTemplate: \(trimmed) (\(slug))")
+      return entry
+    }
+
+    /// Index of saved templates (name, slug, counts, label, createdAt).
+    Function("listSelectionTemplates") { [weak self] () -> [[String: Any]] in
+      return self?.loadTemplateIndex() ?? []
+    }
+
+    /// Load a template into the ACTIVE selection (write-through). Returns the
+    /// applied selection summary, or null if the template doesn't exist.
+    AsyncFunction("applySelectionTemplate") { [weak self] (name: String) -> [String: Any]? in
+      guard #available(iOS 16.0, *) else { return nil }
+      guard let self = self else { return nil }
+      let slug = Self.slugify(name)
+      guard let data = self.sharedDefaults.data(forKey: Self.templateKeyPrefix + slug),
+            let selection = try? PropertyListDecoder().decode(
+              FamilyActivitySelection.self, from: data)
+      else {
+        NSLog("[NiyahScreenTime] applySelectionTemplate: \(slug) not found")
+        return nil
+      }
+      self.savedSelection = selection
+      NSLog("[NiyahScreenTime] applySelectionTemplate: \(slug) applied")
+      return self.serializeSelection(selection)
+    }
+
+    AsyncFunction("deleteSelectionTemplate") { [weak self] (name: String) in
+      guard let self = self else { return }
+      let slug = Self.slugify(name)
+      self.sharedDefaults.removeObject(forKey: Self.templateKeyPrefix + slug)
+      self.saveTemplateIndex(
+        self.loadTemplateIndex().filter { ($0["slug"] as? String) != slug })
+      NSLog("[NiyahScreenTime] deleteSelectionTemplate: \(slug)")
+    }
+
+    // ================================================================
+    // MARK: - Never-block list
+    // ================================================================
+
+    /// Present the picker seeded with the current never-block selection.
+    /// These apps stay AVAILABLE during every block (subtracted at shield
+    /// apply time in startBlocking + the monitor extension).
+    AsyncFunction("presentNeverBlockPicker") { [weak self] () -> [String: Any] in
+      guard #available(iOS 16.0, *) else {
+        throw NSError(domain: "NiyahScreenTime", code: 0,
+          userInfo: [NSLocalizedDescriptionKey: "Screen Time requires iOS 16+"])
+      }
+      guard let self = self else {
+        throw NSError(domain: "NiyahScreenTime", code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "Module deallocated"])
+      }
+      return try await withCheckedThrowingContinuation { continuation in
+        DispatchQueue.main.async {
+          var resumed = false
+          let pickerVC = AppPickerHostingController(
+            onSelection: { selection in
+              guard !resumed else { return }
+              resumed = true
+              let isEmpty = selection.applicationTokens.isEmpty
+                && selection.categoryTokens.isEmpty
+                && selection.webDomainTokens.isEmpty
+              if isEmpty {
+                // allowEmptyDone: deselect-all + Done means "clear the list".
+                self.sharedDefaults.removeObject(forKey: Self.neverBlockKey)
+              } else if let data = try? PropertyListEncoder().encode(selection) {
+                self.sharedDefaults.set(data, forKey: Self.neverBlockKey)
+              }
+              NSLog("[NiyahScreenTime] presentNeverBlockPicker: saved \(selection.applicationTokens.count) apps")
+              continuation.resume(returning: self.serializeSelection(selection))
+            },
+            onCancel: {
+              guard !resumed else { return }
+              resumed = true
+              continuation.resume(throwing: NSError(
+                domain: "NiyahScreenTime", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "App picker was cancelled"]
+              ))
+            },
+            initialSelection: self.loadNeverBlockSelection() ?? FamilyActivitySelection(),
+            title: "Never Block These Apps",
+            allowEmptyDone: true
+          )
+          pickerVC.modalPresentationStyle = .pageSheet
+          guard let rootVC = self.findRootViewController() else {
+            guard !resumed else { return }
+            resumed = true
+            continuation.resume(throwing: NSError(
+              domain: "NiyahScreenTime", code: 2,
+              userInfo: [NSLocalizedDescriptionKey: "Could not find root view controller"]
+            ))
+            return
+          }
+          rootVC.present(pickerVC, animated: true)
+        }
+      }
+    }
+
+    /// Summary of the saved never-block selection, or null when none is set.
+    Function("getNeverBlockSummary") { [weak self] () -> [String: Any]? in
+      guard #available(iOS 16.0, *) else { return nil }
+      guard let self = self, let selection = self.loadNeverBlockSelection(),
+            !(selection.applicationTokens.isEmpty
+              && selection.categoryTokens.isEmpty
+              && selection.webDomainTokens.isEmpty)
+      else { return nil }
+      return self.serializeSelection(selection)
+    }
+
+    AsyncFunction("clearNeverBlockSelection") { [weak self] () in
+      self?.sharedDefaults.removeObject(forKey: Self.neverBlockKey)
+      NSLog("[NiyahScreenTime] clearNeverBlockSelection")
+    }
+
+    /// Sign-out / delete-account hygiene: wipe EVERY per-user Screen Time
+    /// artifact from the app group so the next account starts clean — the
+    /// active selection, all templates, the never-block list, the shield
+    /// session context, and violation counters.
+    AsyncFunction("clearAllSelections") { [weak self] () in
+      guard let self = self else { return }
+      for entry in self.loadTemplateIndex() {
+        if let slug = entry["slug"] as? String {
+          self.sharedDefaults.removeObject(forKey: Self.templateKeyPrefix + slug)
+        }
+      }
+      self.sharedDefaults.removeObject(forKey: Self.templatesIndexKey)
+      self.sharedDefaults.removeObject(forKey: Self.neverBlockKey)
+      self.sharedDefaults.removeObject(forKey: Self.selectionKey)
+      self.sharedDefaults.removeObject(forKey: Self.sessionContextKey)
+      self.sharedDefaults.removeObject(forKey: Self.violationsKey)
+      self.sharedDefaults.removeObject(forKey: Self.violationsByCategoryKey)
+      self._inMemorySelection = nil
+      NSLog("[NiyahScreenTime] clearAllSelections: app-group state wiped")
+    }
+
+    // ================================================================
     // MARK: - Blocking (Session Lifecycle)
     // ================================================================
 
@@ -256,19 +448,27 @@ public class NiyahScreenTimeModule: Module {
       let webCount = selection.webDomainTokens.count
       NSLog("[NiyahScreenTime] startBlocking: \(appCount) apps, \(catCount) categories, \(webCount) web domains")
 
-      // Apply shield to selected apps and categories
+      // Apply shield to selected apps and categories, minus the never-block
+      // list (apps the user keeps available in every block — music, maps…).
+      // No never-block selection saved → exact no-ops (subtracting([]) /
+      // except: []). KEEP IN SYNC with the monitor extension's
+      // applyShieldsFromSavedSelection (separate process, duplicated logic).
+      let never = self.loadNeverBlockSelection()
+      let exemptApps = never?.applicationTokens ?? []
+      let apps = selection.applicationTokens.subtracting(exemptApps)
+      let cats = selection.categoryTokens.subtracting(never?.categoryTokens ?? [])
+      let webs = selection.webDomainTokens.subtracting(never?.webDomainTokens ?? [])
       // Always assign the full token sets — empty set = "shield nothing"
-      self.managedStore.shield.applications = selection.applicationTokens.isEmpty
-        ? nil : selection.applicationTokens
-      self.managedStore.shield.applicationCategories = selection.categoryTokens.isEmpty
-        ? nil : ShieldSettings.ActivityCategoryPolicy<Application>.specific(selection.categoryTokens)
-      self.managedStore.shield.webDomains = selection.webDomainTokens.isEmpty
-        ? nil : selection.webDomainTokens
+      self.managedStore.shield.applications = apps.isEmpty ? nil : apps
+      self.managedStore.shield.applicationCategories = cats.isEmpty
+        ? nil : ShieldSettings.ActivityCategoryPolicy<Application>.specific(cats, except: exemptApps)
+      self.managedStore.shield.webDomains = webs.isEmpty ? nil : webs
 
       self.isCurrentlyBlocking = true
 
       // Clear any stale violations from previous sessions and start polling
       self.sharedDefaults.removeObject(forKey: Self.violationsKey)
+      self.sharedDefaults.removeObject(forKey: Self.violationsByCategoryKey)
       self.lastViolationCount = 0
       self.startViolationPolling()
 
@@ -284,11 +484,25 @@ public class NiyahScreenTimeModule: Module {
       self.managedStore.clearAllSettings()
       self.isCurrentlyBlocking = false
       self.stopViolationPolling()
+      // Every session-end path (complete, surrender, recover-expired, quick
+      // block end) funnels through here — clearing the shield context at this
+      // chokepoint guarantees a finished staked session can never leak its
+      // forfeit copy onto the next free block.
+      self.sharedDefaults.removeObject(forKey: Self.sessionContextKey)
       NSLog("[NiyahScreenTime] stopBlocking: all settings cleared")
     }
 
     Function("isBlocking") { [weak self] () -> Bool in
       return self?.isCurrentlyBlocking ?? false
+    }
+
+    /// Per-category blocked-app attempt counts for the current session
+    /// (cleared on startBlocking). Categories are the shield's coarse
+    /// variants ("social" | "video" | "gaming" | "news" | "other") — iOS
+    /// privacy never exposes which specific app was attempted.
+    Function("getViolationsByCategory") { [weak self] () -> [String: Int] in
+      return (self?.sharedDefaults.dictionary(forKey: Self.violationsByCategoryKey)
+        as? [String: Int]) ?? [:]
     }
 
     // ================================================================
@@ -572,6 +786,45 @@ public class NiyahScreenTimeModule: Module {
       topVC = presented
     }
     return topVC
+  }
+
+  // ================================================================
+  // MARK: - Template / never-block helpers
+  // ================================================================
+
+  /// Lowercased, alphanumerics-with-dashes, max 40 chars. Saving the same
+  /// name twice overwrites (slug equality). Truncates BEFORE the final dash
+  /// trim so a stored slug can never end with "-" (slugify must be a fixed
+  /// point: slugify(slugify(x)) == slugify(x)).
+  private static func slugify(_ name: String) -> String {
+    let lowered = name.lowercased()
+    let mapped = lowered.map { ch -> Character in
+      (ch.isLetter || ch.isNumber) ? ch : "-"
+    }
+    var slug = String(mapped)
+    while slug.contains("--") { slug = slug.replacingOccurrences(of: "--", with: "-") }
+    slug = String(slug.prefix(40))
+    return slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+  }
+
+  private func loadTemplateIndex() -> [[String: Any]] {
+    guard let json = sharedDefaults.string(forKey: Self.templatesIndexKey),
+          let data = json.data(using: .utf8),
+          let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+    else { return [] }
+    return parsed
+  }
+
+  private func saveTemplateIndex(_ index: [[String: Any]]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: index),
+          let json = String(data: data, encoding: .utf8) else { return }
+    sharedDefaults.set(json, forKey: Self.templatesIndexKey)
+  }
+
+  @available(iOS 16.0, *)
+  private func loadNeverBlockSelection() -> FamilyActivitySelection? {
+    guard let data = sharedDefaults.data(forKey: Self.neverBlockKey) else { return nil }
+    return try? PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
   }
 
   // ================================================================

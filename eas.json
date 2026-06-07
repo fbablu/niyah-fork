@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 16.3.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -25,8 +25,11 @@
       }
     },
     "production": {
-      "autoIncrement": true,
       "node": "20.19.4",
+      "env": {
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "SENTRY_CLI_EXECUTABLE": "sentry-cli"
+      },
       "ios": {
         "image": "macos-sequoia-15.4-xcode-16.3"
       }
@@ -35,7 +38,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleTeamId": "4R55F73KCP"
+        "appleTeamId": "4R55F73KCP",
+        "ascAppId": "6759573348"
       }
     }
   }

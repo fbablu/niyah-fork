@@ -16,7 +16,7 @@ import {
   type ThemeColors,
 } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
-import { withErrorBoundary } from "../../src/components";
+import { Skeleton, withErrorBoundary } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
@@ -124,8 +124,38 @@ function PublicProfileScreenInner() {
             <Text style={styles.backText}>← Back</Text>
           </Pressable>
         </View>
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.primaryLight} />
+        <View style={styles.content}>
+          <Skeleton
+            width={80}
+            height={80}
+            radius={40}
+            style={{ marginBottom: Spacing.md }}
+          />
+          <Skeleton
+            width={150}
+            height={24}
+            radius={7}
+            style={{ marginBottom: Spacing.sm }}
+          />
+          <Skeleton
+            width={120}
+            height={28}
+            radius={14}
+            style={{ marginBottom: Spacing.md }}
+          />
+          <Skeleton
+            width="100%"
+            height={6}
+            radius={3}
+            style={{ marginBottom: Spacing.xl }}
+          />
+          <Skeleton
+            width="100%"
+            height={74}
+            radius={Radius.lg}
+            style={{ marginBottom: Spacing.xl }}
+          />
+          <Skeleton width="100%" height={50} radius={Radius.full} />
         </View>
       </SafeAreaView>
     );

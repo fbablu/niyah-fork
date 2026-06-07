@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,14 @@ import {
   ScrollView,
   Linking,
 } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import {
   Typography,
@@ -17,7 +25,7 @@ import {
   type ThemeColors,
 } from "../constants/colors";
 import { useColors } from "../hooks/useColors";
-import { LEGAL_TERMS_URL, LEGAL_PRIVACY_URL } from "../constants/config";
+import { LEGAL_INDEX_URL } from "../constants/config";
 import { logger } from "../utils/logger";
 import { Button } from "./Button";
 
@@ -81,8 +89,34 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
 }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
+  const insets = useSafeAreaInsets();
+  const reducedMotion = useReducedMotion();
   const [age18, setAge18] = useState(false);
   const [agreedTerms, setAgreedTerms] = useState(false);
+
+  // Bottom-sheet entrance: backdrop fades, sheet springs up from below
+  // (centered popups read as interruptions; sheets read as part of the flow —
+  // build-21 feedback). Reduce Motion → both snap in with no travel.
+  const translateY = useSharedValue(600);
+  const backdropOpacity = useSharedValue(0);
+  useEffect(() => {
+    if (!visible) return;
+    if (reducedMotion) {
+      translateY.value = 0;
+      backdropOpacity.value = 1;
+      return;
+    }
+    translateY.value = 600;
+    backdropOpacity.value = 0;
+    translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+    backdropOpacity.value = withTiming(1, { duration: 250 });
+  }, [visible, reducedMotion, translateY, backdropOpacity]);
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<boolean>>) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -101,15 +135,21 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
   return (
     <Modal
       visible={visible}
-      animationType="fade"
+      animationType="none"
       transparent
       onRequestClose={() => {
         // Non-dismissible — no-op
       }}
     >
-      {/* Dimmed backdrop centers the card vertically + horizontally */}
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
+      {/* Dimmed backdrop pins the sheet to the bottom edge */}
+      <Animated.View style={[styles.backdrop, backdropStyle]}>
+        <Animated.View
+          style={[
+            styles.card,
+            sheetStyle,
+            { paddingBottom: insets.bottom + Spacing.lg },
+          ]}
+        >
           <Text style={styles.title}>Terms & Privacy</Text>
           <Text style={styles.subtitle}>
             Please review and accept to continue
@@ -129,25 +169,16 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
             ))}
           </ScrollView>
 
-          {/* Links out to the full hosted legal text */}
+          {/* Links out to the full hosted legal text (Terms + Privacy index) */}
           <View style={styles.links}>
             <Pressable
               style={styles.linkButton}
-              onPress={() => openLegal(LEGAL_TERMS_URL)}
+              onPress={() => openLegal(LEGAL_INDEX_URL)}
               accessibilityRole="link"
-              accessibilityLabel="Read full Terms of Service"
+              accessibilityLabel="Learn more — read the full Terms of Service and Privacy Policy"
               hitSlop={8}
             >
-              <Text style={styles.link}>Read full Terms ↗</Text>
-            </Pressable>
-            <Pressable
-              style={styles.linkButton}
-              onPress={() => openLegal(LEGAL_PRIVACY_URL)}
-              accessibilityRole="link"
-              accessibilityLabel="Read full Privacy Policy"
-              hitSlop={8}
-            >
-              <Text style={styles.link}>Read full Privacy Policy ↗</Text>
+              <Text style={styles.link}>Learn more ↗</Text>
             </Pressable>
           </View>
 
@@ -174,8 +205,8 @@ export const LegalAcceptanceOverlay: React.FC<LegalAcceptanceOverlayProps> = ({
             loading={loading}
             size="large"
           />
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 };
@@ -185,22 +216,19 @@ const makeStyles = (Colors: ThemeColors) =>
     backdrop: {
       flex: 1,
       backgroundColor: Colors.overlay,
-      justifyContent: "center",
-      alignItems: "center",
-      paddingHorizontal: Spacing.lg,
-      paddingVertical: Spacing.xl,
+      justifyContent: "flex-end",
     },
     card: {
       width: "100%",
-      maxWidth: 460,
       maxHeight: "88%",
       backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      borderTopLeftRadius: Radius.xl,
+      borderTopRightRadius: Radius.xl,
       borderWidth: 1,
+      borderBottomWidth: 0,
       borderColor: Colors.border,
       paddingHorizontal: Spacing.lg,
       paddingTop: Spacing.lg,
-      paddingBottom: Spacing.lg,
       gap: Spacing.md,
     },
     title: {
