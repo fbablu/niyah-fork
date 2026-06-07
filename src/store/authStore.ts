@@ -17,11 +17,19 @@ import {
   type PhoneConfirmationResult,
 } from "../config/firebase";
 import * as SecureStore from "expo-secure-store";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   REFERRAL_REPUTATION_BOOST,
   CURRENT_LEGAL_VERSION,
   DEMO_MODE,
 } from "../constants/config";
+
+// Survives a failed acceptLegalTerms CF call (offline, pin outage) so the
+// next launch replays the acceptance instead of re-prompting the user.
+// UID-SCOPED: a device-global marker would replay user A's acceptance (and
+// 18+ attestation) under user B's auth token after an account switch.
+const pendingLegalAcceptanceKey = (uid: string): string =>
+  `@niyah/pending_legal_acceptance:${uid}`;
 import {
   generateBlobAvatarPreset,
   normalizeBlobAvatarConfig,
@@ -168,6 +176,9 @@ interface AuthState {
   updateReputation: (updates: Partial<UserReputation>) => void;
   setBlobAvatar: (blobAvatar: BlobAvatarConfig) => void;
   acceptLegal: () => Promise<void>;
+  /** Replay an acceptance whose CF write failed (marker-driven, see
+   *  acceptLegal). Fire-and-forget from initialize(). */
+  retryPendingLegalAcceptance: () => Promise<void>;
 }
 
 const createInitialReputation = (): UserReputation => ({
@@ -346,6 +357,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           // Hydrate wallet and recover any active session (non-blocking)
           hydrateWallet(firebaseUser.uid);
           recoverSession(firebaseUser.uid);
+
+          // Replay a legal acceptance whose CF write never landed (marker-
+          // driven; no-op when the doc already carries the current version).
+          get()
+            .retryPendingLegalAcceptance()
+            .catch(() => {});
 
           // Initialize FCM notifications and subscribe to group session data
           initNotifications().catch((err) =>
@@ -686,6 +703,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     };
     resetAllUserStores();
 
+    // Wipe Screen Time state from the app group (selection, templates,
+    // never-block list, shield context, violation counters) so the next
+    // account on this device starts clean instead of inheriting the previous
+    // account's block list. Covers delete-account too (it calls logout()).
+    try {
+      const { clearAllSelections } = require("../config/screentime") as {
+        clearAllSelections: () => Promise<void>;
+      };
+      clearAllSelections().catch(() => {});
+    } catch {
+      // Native module unavailable (simulator/web) — nothing to clear
+    }
+
     try {
       await signOut();
     } catch (error) {
@@ -785,8 +815,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // ageAttested18 sit on the Firestore rules server-only denylist, so a direct
     // client write always fails permission-denied. Don't attempt one — the CF
     // (admin SDK) persists them server-side. Best-effort: if it fails, local
-    // state still advances so the user isn't trapped behind the gate, and the
-    // version check re-prompts on next launch if nothing landed.
+    // state still advances so the user isn't trapped behind the gate, and a
+    // retry marker makes the next launch re-fire the CF instead of re-prompting
+    // the user (the build-21 SSL-pin outage made this exact failure re-prompt
+    // Terms on every sign-in).
     if (!DEMO_MODE) {
       const { acceptLegalTerms } = require("../config/functions") as {
         acceptLegalTerms: (version: string) => Promise<{ success: boolean }>;
@@ -794,8 +826,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       try {
         await acceptLegalTerms(CURRENT_LEGAL_VERSION);
+        AsyncStorage.removeItem(pendingLegalAcceptanceKey(user.id)).catch(
+          () => {},
+        );
       } catch (error) {
         logger.warn("acceptLegalTerms Cloud Function failed:", error);
+        AsyncStorage.setItem(
+          pendingLegalAcceptanceKey(user.id),
+          CURRENT_LEGAL_VERSION,
+        ).catch(() => {});
       }
     }
 
@@ -808,5 +847,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       },
       hasAcceptedCurrentLegal: true,
     });
+  },
+
+  retryPendingLegalAcceptance: async () => {
+    // Fire-and-forget recovery for an acceptance the user already gave but the
+    // CF write never landed (offline, pin outage, …). Called from initialize()
+    // once the user doc is loaded: if THIS user's marker exists and the doc
+    // still lacks the current version, replay the CF; clear on success. The
+    // marker is uid-scoped, so an account switch can never replay one user's
+    // acceptance (which includes the 18+ attestation) onto another.
+    if (DEMO_MODE) return;
+    const uid = get().user?.id;
+    if (!uid) return;
+    const key = pendingLegalAcceptanceKey(uid);
+    try {
+      const pending = await AsyncStorage.getItem(key);
+      if (pending !== CURRENT_LEGAL_VERSION) return;
+      if (get().user?.legalAcceptanceVersion === CURRENT_LEGAL_VERSION) {
+        // Doc already carries it (another device / earlier retry landed).
+        await AsyncStorage.removeItem(key);
+        return;
+      }
+      const { acceptLegalTerms } = require("../config/functions") as {
+        acceptLegalTerms: (version: string) => Promise<{ success: boolean }>;
+      };
+      await acceptLegalTerms(CURRENT_LEGAL_VERSION);
+      await AsyncStorage.removeItem(key);
+      set({ hasAcceptedCurrentLegal: true });
+    } catch (error) {
+      // Keep the marker — try again next launch.
+      logger.warn("retryPendingLegalAcceptance failed:", error);
+    }
   },
 }));
