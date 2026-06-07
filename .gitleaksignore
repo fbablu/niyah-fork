@@ -1,10 +1,16 @@
-# Historical findings, assessed 2026-06-07 — see docs/security.md.
+# Firebase CLIENT API keys (AIza…) in old history commits. These are NOT
+# server secrets: they identify the project and ship inside every distributed
+# app binary by design (Google's documented model). Data access is gated by
+# Firestore rules + Auth + App Check, never by key secrecy.
 #
-# Firebase client API keys (AIza…) are NOT credentials: they identify the
-# project and ship inside every app binary; data access is gated by Firestore
-# rules + Auth + App Check (Google's documented position). The file was
-# untracked in 2026-02 (now lives gitignored in firebase/); these two
-# fingerprints are the stale history copies. Mitigation = key restrictions in
-# GCP Console (Android package + API restrictions), not history rewrite.
+# HONEST STATUS (verified 2026-06-07, do not repeat the old "rotated"/"stale"
+# claim): the keys in these two commits are the CURRENT LIVE keys builds 19–22
+# ship with — they were NOT rotated. Exposure is bounded (the repo is public
+# and the keys ship in binaries anyway) but the Android key has no application
+# restriction yet, so the open abuse vector is Identity Toolkit REST (SMS-OTP
+# pumping, signup floods, email enumeration). Mitigation is GCP key
+# restrictions + Firebase Auth hardening, tracked in docs/security.md
+# "API Key Management" — NOT history rewrite. Suppress so gitleaks stays green;
+# real fix lives in the console.
 592a32481425d7420d55cba6f2514ab2635c0df0:google-services.json:gcp-api-key:23
 406e28542277d493b66f77f52fb029177548d497:google-services.json:gcp-api-key:18
