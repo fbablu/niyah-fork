@@ -78,6 +78,40 @@ describe("generateBlobPoints / pointsToBlobPath", () => {
     expect(generateBlobPoints("x", { points: 1 }).length).toBe(4);
     expect(generateBlobPoints("x", { points: 50 }).length).toBe(12);
   });
+
+  it("keeps angular ordering monotonic (sector jitter never crosses neighbors)", () => {
+    // Point-to-point morphing assumes points stay in sector order around the
+    // center. Jitter is bounded to ±45% of a sector, so consecutive angles
+    // must strictly increase (mod 2π) for every seed.
+    for (let s = 0; s < 50; s += 1) {
+      const pts = generateBlobPoints(`order-${s}`);
+      const angles = pts.map((p) => Math.atan2(p.y - 50, p.x - 50));
+      // Unwrap relative to the first point so the sequence is comparable.
+      const unwrapped = angles.map((a) => {
+        let d = a - angles[0];
+        while (d < 0) d += Math.PI * 2;
+        return d;
+      });
+      for (let i = 1; i < unwrapped.length; i += 1) {
+        expect(unwrapped[i]).toBeGreaterThan(unwrapped[i - 1]);
+      }
+    }
+  });
+
+  it("varies shape noticeably across seeds (radius spread isn't flat)", () => {
+    // The build-21 finding was that "unique" blobs looked samey. Pin that
+    // per-seed irregularity actually produces different radius spreads.
+    const spreadOf = (seed: string): number => {
+      const radii = generateBlobPoints(seed).map((p) =>
+        Math.hypot(p.x - 50, p.y - 50),
+      );
+      return Math.max(...radii) - Math.min(...radii);
+    };
+    const spreads = Array.from({ length: 30 }, (_, i) =>
+      spreadOf(`spread-${i}`),
+    );
+    expect(Math.max(...spreads) - Math.min(...spreads)).toBeGreaterThan(4);
+  });
 });
 
 describe("normalizeBlobAvatarConfig shapeSeed", () => {

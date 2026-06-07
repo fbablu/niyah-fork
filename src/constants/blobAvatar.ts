@@ -173,10 +173,19 @@ export interface BlobGeneratorOptions {
 
 /**
  * Deterministic control points for an organic blob (blobmaker.app-style) —
- * in-house, zero deps. N points sit on a circle with seeded radius jitter.
- * Same seed → identical points, so a user's "unique" shape stays stable
- * across sessions and devices. A fixed N (default 7) also means any two
- * blobs morph cleanly point-to-point (see MorphingBlob).
+ * in-house, zero deps. N points sit on a circle with seeded radius AND
+ * angular jitter. Same seed → identical points, so a user's "unique" shape
+ * stays stable across sessions and devices. A fixed N (default 7) also means
+ * any two blobs morph cleanly point-to-point (see MorphingBlob).
+ *
+ * Variance (widened after the build-21 test — "unique" blobs looked samey):
+ * - Each point wanders within ±45% of its angular sector (never crossing a
+ *   neighbor, so point ordering — and morphing — stays clean).
+ * - When no explicit `irregularity` is passed, the amount of radius jitter is
+ *   itself per-seed in [0.18, 0.34]: some users get gentle blobs, others wild.
+ *
+ * Draw order matters for determinism: irregularity draw → per point one
+ * angle draw + one radius draw. Changing it reshapes every existing blob.
  */
 export const generateBlobPoints = (
   seed: string,
@@ -184,7 +193,6 @@ export const generateBlobPoints = (
 ): BlobPoint[] => {
   const points = Math.max(4, Math.min(12, options?.points ?? 7));
   const size = options?.size ?? 100;
-  const irregularity = options?.irregularity ?? 0.16;
   const cx = size / 2;
   const cy = size / 2;
   // 0.34 keeps even the bézier control points inside the viewBox so the blob
@@ -205,9 +213,15 @@ export const generateBlobPoints = (
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 
+  // Per-seed irregularity (consumes one draw even when overridden, so an
+  // explicit option doesn't shift the per-point draws).
+  const seedIrregularity = 0.18 + rand() * 0.16; // [0.18, 0.34]
+  const irregularity = options?.irregularity ?? seedIrregularity;
+  const sectorJitter = (Math.PI / points) * 0.45;
+
   const pts: BlobPoint[] = [];
   for (let i = 0; i < points; i += 1) {
-    const angle = (i / points) * Math.PI * 2;
+    const angle = (i / points) * Math.PI * 2 + (rand() * 2 - 1) * sectorJitter;
     const r = baseR * (1 + (rand() * 2 - 1) * irregularity);
     pts.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
   }
