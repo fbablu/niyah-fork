@@ -11,6 +11,7 @@ import {
 } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
 import { Button, AuthScreenScaffold } from "../../src/components";
+import { ScreenTimePermissionPreview } from "../../src/components/onboarding";
 import {
   isScreenTimeAvailable,
   requestScreenTimeAuth,
@@ -154,26 +155,23 @@ export default function ScreenTimeSetupScreen() {
       </View>
 
       <View style={styles.content}>
-        {/* Visual indicator */}
-        <View style={styles.iconContainer}>
-          <View
-            style={[
-              styles.iconCircle,
-              hasSelection && styles.iconCircleSuccess,
-              authDenied && styles.iconCircleDenied,
-            ]}
-          >
-            <Text style={styles.iconText}>
-              {hasSelection
-                ? "✓"
-                : authDenied
-                  ? "⚠️"
-                  : isAuthorized
-                    ? "⚑"
-                    : "⏱"}
-            </Text>
+        {/* Visual indicator — only for the post-connect states; the idle state
+            uses the tappable permission-preview card below as its focal point. */}
+        {(isAuthorized || authDenied) && (
+          <View style={styles.iconContainer}>
+            <View
+              style={[
+                styles.iconCircle,
+                hasSelection && styles.iconCircleSuccess,
+                authDenied && styles.iconCircleDenied,
+              ]}
+            >
+              <Text style={styles.iconText}>
+                {hasSelection ? "✓" : authDenied ? "⚠️" : "⚑"}
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Denied recovery instructions */}
         {authDenied && (
@@ -226,6 +224,16 @@ export default function ScreenTimeSetupScreen() {
           </View>
         )}
 
+        {/* Tappable preview of the iOS Screen Time alert — pressing it fires the
+            real authorization request, so the faux Continue / Not Now pills set
+            the expectation for the system dialog that pops up next. */}
+        {!isAuthorized && !authDenied && (
+          <ScreenTimePermissionPreview
+            onPress={handleConnect}
+            loading={isRequesting}
+          />
+        )}
+
         {/* When authorized but no selection: mock "All Apps & Categories" row
             so user knows exactly what to tap inside Apple's picker sheet. */}
         {isAuthorized && !hasSelection && (
@@ -248,38 +256,38 @@ export default function ScreenTimeSetupScreen() {
         </Text>
       </View>
 
-      {/* Buttons — no "skip"; this is a required step (hard gate). */}
-      <View style={styles.buttonSection}>
-        {authDenied ? (
-          <>
-            <Button title="Open Settings" onPress={openSettings} size="large" />
+      {/* Buttons — no "skip"; this is a required step (hard gate). The idle
+          (not-yet-authorized) state has no button here: its CTA is the tappable
+          permission-preview card above. */}
+      {(authDenied || isAuthorized) && (
+        <View style={styles.buttonSection}>
+          {authDenied ? (
+            <>
+              <Button
+                title="Open Settings"
+                onPress={openSettings}
+                size="large"
+              />
+              <Button
+                title="I've enabled it"
+                onPress={recheckAuth}
+                variant="outline"
+                size="large"
+              />
+            </>
+          ) : !hasSelection ? (
             <Button
-              title="I've enabled it"
-              onPress={recheckAuth}
-              variant="outline"
+              title={isRequesting ? "Opening picker..." : "Choose Apps"}
+              onPress={handlePickApps}
+              disabled={isRequesting}
+              loading={isRequesting}
               size="large"
             />
-          </>
-        ) : !isAuthorized ? (
-          <Button
-            title={isRequesting ? "Connecting..." : "Connect Screen Time"}
-            onPress={handleConnect}
-            disabled={isRequesting}
-            loading={isRequesting}
-            size="large"
-          />
-        ) : !hasSelection ? (
-          <Button
-            title={isRequesting ? "Opening picker..." : "Choose Apps"}
-            onPress={handlePickApps}
-            disabled={isRequesting}
-            loading={isRequesting}
-            size="large"
-          />
-        ) : (
-          <Button title="Continue" onPress={goNext} size="large" />
-        )}
-      </View>
+          ) : (
+            <Button title="Continue" onPress={goNext} size="large" />
+          )}
+        </View>
+      )}
     </AuthScreenScaffold>
   );
 }
@@ -300,7 +308,7 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     content: {
       alignItems: "center",
-      gap: Spacing.xl,
+      gap: Spacing.lg,
     },
     mockCard: {
       width: "100%",
