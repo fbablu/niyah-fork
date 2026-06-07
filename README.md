@@ -21,7 +21,6 @@ back. Quit early → forfeit it. The financial consequence is what willpower alo
 - **Node.js** v20+ (Expo SDK 54 + CI floor; Cloud Functions run on Node 22)
 - **pnpm** (`npm install -g pnpm`)
 - **Xcode** (iOS) -- install from Mac App Store, then `xcode-select --install`
-- **Android SDK** (Android) -- via [Android Studio](https://developer.android.com/studio)
 
 ### Install Dependencies
 
@@ -37,14 +36,12 @@ Copy `.env.example` to `.env` and fill in values:
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=...
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=...
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...
-EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...
 EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY=...
 ```
 
 You also need Firebase config files (not in repo):
 
 - `firebase/GoogleService-Info.plist` -- download from Firebase Console > Project Settings > iOS
-- `firebase/google-services.json` -- download from Firebase Console > Project Settings > Android
 
 ### Build & Run
 
@@ -65,18 +62,11 @@ pnpm start
 # Press 'i' to open on iOS Simulator
 ```
 
-**Android Emulator:**
-
-```bash
-npx expo prebuild --platform android --clean
-npx expo run:android
-```
-
 For subsequent runs after building, just start the dev server:
 
 ```bash
 pnpm start
-# Press 'i' for iOS Simulator, 'a' for Android emulator
+# Press 'i' for iOS Simulator
 ```
 
 **Rebuild only when:** native dependencies change (new Swift code, new native packages). All JS/TS changes are live via hot-reload.
@@ -117,7 +107,6 @@ Set up config files (never commit these):
 
 - `.env` — copy `.env.example`, fill in values from [Firebase Console](https://console.firebase.google.com/) and [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
 - `firebase/GoogleService-Info.plist` — Firebase Console > Project Settings > Your Apps > iOS > download
-- `firebase/google-services.json` — Firebase Console > Project Settings > Your Apps > Android > download
 
 You need to be added to the Firebase project first — ask the team lead.
 
@@ -202,18 +191,10 @@ npx expo prebuild --platform ios --clean
 npx expo run:ios
 ```
 
-**Android rebuild:**
-
-```bash
-rm -rf android
-npx expo prebuild --platform android --clean
-npx expo run:android
-```
-
 **Clean everything:**
 
 ```bash
-rm -rf node_modules ios android .expo
+rm -rf node_modules ios .expo
 pnpm install
 npx expo prebuild --clean
 npx expo run:ios
@@ -224,23 +205,6 @@ npx expo run:ios
 - Make sure `wsl_dev_setup.ps1` ran after last restart
 - Check that phone and laptop are on the same WiFi
 - Try entering the URL manually: `http://<wifi-ip>:8081`
-
-### Android Environment Setup
-
-Add to `~/.zshrc` or `~/.bashrc`:
-
-```bash
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-```
-
-Create AVD: Android Studio > Virtual Device Manager > Pixel 9 / API 35.
-
-If the dev client doesn't auto-connect:
-
-```bash
-adb reverse tcp:8081 tcp:8081
-```
 
 ---
 

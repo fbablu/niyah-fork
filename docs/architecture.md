@@ -86,7 +86,6 @@ niyah/
 │   └── src/index.ts              # All function definitions
 ├── plugins/                      # Expo config plugins (Firebase + build fixes only)
 │   ├── withGoogleServicesPlist.js
-│   ├── withGoogleServicesJson.js
 │   ├── withFirebaseStaticFrameworks.js
 │   ├── withResourceBundleSigning.js
 │   ├── withFollyCoroutinesFix.js
@@ -98,7 +97,6 @@ niyah/
 │   └── wsl_dev_setup.ps1
 ├── firebase/                     # Firestore rules + indexes (config plists gitignored)
 │   ├── GoogleService-Info.plist  # iOS (gitignored, local only)
-│   ├── google-services.json      # Android (gitignored, local only)
 │   ├── firestore.rules           # Hardened security rules
 │   └── firestore.indexes.json    # Composite index definitions
 ├── CLAUDE.md                     # AI assistant project guide
@@ -131,7 +129,7 @@ Custom Expo modules in `modules/` use Swift bridged via ExpoModulesCore. iOS **a
 
 ### Firebase Config Files
 
-`GoogleService-Info.plist` and `google-services.json` are **gitignored** (removed from repo after key rotation). They live on disk in `firebase/` and are injected by config plugins at build time. For EAS cloud builds, upload as file secrets. See [Security](./security.md).
+`GoogleService-Info.plist` (iOS) is **gitignored** (removed from repo after key rotation). It lives on disk in `firebase/` and is injected by a config plugin at build time. For EAS cloud builds, upload it as a file secret. See [Security](./security.md).
 
 ### Build System
 

@@ -8,7 +8,6 @@
 - **Node.js** v18+
 - **pnpm** (`npm install -g pnpm`)
 - **Xcode** (iOS) -- install from Mac App Store, then `xcode-select --install`
-- **Android SDK** (Android) -- via [Android Studio](https://developer.android.com/studio)
 - **EAS CLI** -- `npm install -g eas-cli` (for cloud builds)
 
 ## Environment Variables
@@ -20,7 +19,6 @@ Copy `.env.example` to `.env` and fill in values:
 | `EXPO_PUBLIC_FIREBASE_PROJECT_ID`      | Firebase project ID (used in dynamic config, Cloud Functions URL) |
 | `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`     | Google OAuth web client ID                                        |
 | `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`     | Google OAuth iOS client ID (also derives URL scheme)              |
-| `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` | Google OAuth Android client ID                                    |
 | `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`   | Stripe publishable key (`pk_test_...` or `pk_live_...`)           |
 
 **Server-side secrets** (never in `.env`):
@@ -31,13 +29,11 @@ Copy `.env.example` to `.env` and fill in values:
 **Firebase config files** (gitignored, required on disk):
 
 - `firebase/GoogleService-Info.plist` -- download from Firebase Console > Project Settings > iOS app
-- `firebase/google-services.json` -- download from Firebase Console > Project Settings > Android app
 
 For EAS cloud builds, upload these as file secrets:
 
 ```bash
 eas secret:create --scope project --name GOOGLE_SERVICE_INFO_PLIST --type file --value firebase/GoogleService-Info.plist
-eas secret:create --scope project --name GOOGLE_SERVICES_JSON --type file --value firebase/google-services.json
 ```
 
 ## Commands
@@ -48,7 +44,6 @@ eas secret:create --scope project --name GOOGLE_SERVICES_JSON --type file --valu
 pnpm start             # Start dev server (requires dev client build first)
 pnpm doctor            # Diagnose Mac+iPhone dev state, recommend next command
 pnpm ios               # Start with iOS simulator
-pnpm android           # Start with Android emulator
 npx expo start --clear # Clear cache and start
 ```
 
@@ -88,10 +83,9 @@ pnpm run ci            # lint + typecheck + client tests + functions tests (full
 pnpm build:local       # iOS local build to USB device (fastest, requires Xcode)
 pnpm build:local:sim   # iOS local build to Simulator
 pnpm build:dev         # iOS dev build via EAS (cloud)
-pnpm build:dev:android # Android dev build via EAS (cloud)
 pnpm build:dev:device  # iOS device-specific dev build via EAS
-pnpm build:preview     # Preview build (all platforms)
-pnpm build:production  # Production build (all platforms)
+pnpm build:preview     # iOS preview build via EAS
+pnpm build:production  # iOS production build via EAS
 ```
 
 **Important**: This project uses `expo-dev-client`, NOT Expo Go. Build a dev client first (`pnpm build:local` or `pnpm build:dev`) before running `pnpm start`.

@@ -140,30 +140,10 @@ module.exports = {
         ],
       },
     },
-    android: {
-      googleServicesFile:
-        process.env.GOOGLE_SERVICES_JSON || "./firebase/google-services.json",
-      adaptiveIcon: {
-        foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#1A1714",
-      },
-      package: "com.niyah.app",
-      edgeToEdgeEnabled: true,
-      intentFilters: [
-        {
-          action: "VIEW",
-          autoVerify: true,
-          data: [
-            {
-              scheme: "https",
-              host: `${firebaseProjectId}.firebaseapp.com`,
-              pathPrefix: "/",
-            },
-          ],
-          category: ["BROWSABLE", "DEFAULT"],
-        },
-      ],
-    },
+    // Niyah is iOS-only — no `android` block. (The Firebase Android app +
+    // its API key were removed 2026-06-07; Screen Time / FamilyControls is
+    // iOS-exclusive anyway.) `firebaseProjectId` is still used by the iOS
+    // associatedDomains above.
     web: {
       favicon: "./assets/favicon.png",
       bundler: "metro",
@@ -200,7 +180,6 @@ module.exports = {
       "./plugins/withFollyCoroutinesFix",
       "./plugins/withFmtConstevalFix",
       "./plugins/withGoogleServicesPlist",
-      "./plugins/withGoogleServicesJson",
       "./plugins/withFirebaseStaticFrameworks",
       "./plugins/withResourceBundleSigning",
       "@bacons/apple-targets",

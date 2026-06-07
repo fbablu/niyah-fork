@@ -14,7 +14,7 @@ React Native Firebase packages provide Auth and Firestore:
 | `@react-native-firebase/firestore` | User profiles, wallets, sessions, follows              |
 | `@react-native-firebase/messaging` | FCM push notifications (token management, foreground)  |
 
-**Config files**: `GoogleService-Info.plist` (iOS) and `google-services.json` (Android) live in `firebase/` (gitignored). Injected at build time by the `withGoogleServicesPlist` and `withGoogleServicesJson` config plugins. `withFirebaseStaticFrameworks` handles CocoaPods static framework linking.
+**Config file**: `GoogleService-Info.plist` (iOS) lives in `firebase/` (gitignored). Injected at build time by the `withGoogleServicesPlist` config plugin. `withFirebaseStaticFrameworks` handles CocoaPods static framework linking.
 
 **JS wrapper**: `src/config/firebase.ts` -- all auth, Firestore CRUD, and social helpers.
 
