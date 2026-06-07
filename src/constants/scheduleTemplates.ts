@@ -131,3 +131,27 @@ export const templatesConflict = (a: WindowLike, b: WindowLike): boolean => {
   const bEnd = minutesOfDay(b.endHour, b.endMinute);
   return aStart < bEnd && bStart < aEnd;
 };
+
+/**
+ * First ENABLED template that conflicts with `candidate`, or null. Disabled
+ * blocks never count — a switched-off "Work day" must not stop the user from
+ * adding "Morning" (build-21 repro). `excludeId` skips the candidate itself
+ * when re-checking an existing template (e.g. on re-enable).
+ *
+ * Single source of truth for the store's add/enable guards AND the screen's
+ * live disabled-preset state.
+ */
+export const findEnabledConflict = <
+  T extends WindowLike & { id?: string; enabled?: boolean; name?: string },
+>(
+  templates: T[],
+  candidate: WindowLike,
+  excludeId?: string,
+): T | null => {
+  for (const t of templates) {
+    if (!t.enabled) continue;
+    if (excludeId && t.id === excludeId) continue;
+    if (templatesConflict(t, candidate)) return t;
+  }
+  return null;
+};

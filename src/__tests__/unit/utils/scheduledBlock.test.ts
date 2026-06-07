@@ -7,7 +7,11 @@
  * are built around `now.getDay()` rather than a hard-coded weekday.
  */
 
-import { getActiveScheduledBlock } from "../../../utils/scheduledBlock";
+import {
+  getActiveScheduledBlock,
+  getBlockProgress,
+  formatBlockTimeLeft,
+} from "../../../utils/scheduledBlock";
 import type { ScheduledTemplate, Weekday } from "../../../types";
 
 const at = (h: number, m = 0): Date => new Date(2026, 5, 1, h, m, 0, 0); // local
@@ -95,5 +99,40 @@ describe("getActiveScheduledBlock", () => {
     });
     const live = mk({ id: "on", days: [today], startHour: 9, endHour: 17 });
     expect(getActiveScheduledBlock([disabled, live], now)).toBe(live);
+  });
+});
+
+describe("getBlockProgress", () => {
+  const window = { startHour: 9, startMinute: 0, endHour: 17, endMinute: 0 };
+
+  it("starts at fraction 0 with the full window left", () => {
+    expect(getBlockProgress(window, at(9))).toEqual({
+      fraction: 0,
+      minutesLeft: 8 * 60,
+    });
+  });
+
+  it("reports the midpoint", () => {
+    expect(getBlockProgress(window, at(13))).toEqual({
+      fraction: 0.5,
+      minutesLeft: 4 * 60,
+    });
+  });
+
+  it("clamps in the last minute and at/after the end", () => {
+    expect(getBlockProgress(window, at(16, 59)).minutesLeft).toBe(1);
+    expect(getBlockProgress(window, at(17))).toEqual({
+      fraction: 1,
+      minutesLeft: 0,
+    });
+    // Out-of-window input clamps rather than going negative.
+    expect(getBlockProgress(window, at(18)).minutesLeft).toBe(0);
+    expect(getBlockProgress(window, at(8)).fraction).toBe(0);
+  });
+
+  it("formatBlockTimeLeft renders hours+minutes / minutes-only", () => {
+    expect(formatBlockTimeLeft(130)).toBe("2h 10m left");
+    expect(formatBlockTimeLeft(45)).toBe("45m left");
+    expect(formatBlockTimeLeft(0)).toBe("0m left");
   });
 });

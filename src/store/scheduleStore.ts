@@ -5,7 +5,7 @@ import type { ScheduledTemplate } from "../types";
 import {
   type SchedulePreset,
   presetToTemplate,
-  templatesConflict,
+  findEnabledConflict,
 } from "../constants/scheduleTemplates";
 import {
   startScheduledBlocking,
@@ -93,20 +93,27 @@ interface ScheduleStore {
   _hasHydrated: boolean;
 
   /** Create a template from a preset blueprint. Returns the created template,
-   * or `null` if it would overlap/duplicate an existing block. */
+   * or `null` if it would overlap an ENABLED block (disabled blocks don't
+   * count — they're not fighting anyone for those hours). */
   addPreset: (preset: SchedulePreset) => ScheduledTemplate | null;
   /** Patch a template; re-arms the OS schedule if it's enabled. */
   updateTemplate: (id: string, patch: Partial<ScheduledTemplate>) => void;
   /** Delete a template and clear its OS schedule. */
   removeTemplate: (id: string) => void;
-  /** Enable/disable a template — arms or clears its OS schedule. */
-  setEnabled: (id: string, enabled: boolean) => void;
+  /** Enable/disable a template — arms or clears its OS schedule. Enabling
+   * re-checks conflicts against other ENABLED blocks and returns `false`
+   * (state untouched) when it would collide; disabling always succeeds. */
+  setEnabled: (id: string, enabled: boolean) => boolean;
   /** Set a template's stake (cents); 0 = free block. Display-only in Phase 2
    * (gated by SCHEDULED_STAKE_ENABLED) — the server, not the client, debits at
    * the block start, so this does NOT touch the wallet or re-arm the OS block. */
   updateStake: (id: string, stakeCents: number) => void;
   /** Re-arm every enabled template's OS schedule (call on app launch). */
   syncNative: () => void;
+  /** Logout hygiene: disarm every OS schedule and clear all templates (the
+   * persist middleware writes the cleared state through to AsyncStorage) so
+   * the next account doesn't inherit this account's scheduled blocks. */
+  reset: () => void;
 }
 
 export const useScheduleStore = create<ScheduleStore>()(
@@ -117,9 +124,11 @@ export const useScheduleStore = create<ScheduleStore>()(
 
       addPreset: (preset) => {
         const template = presetToTemplate(preset, generateId(), Date.now());
-        // Refuse overlapping/duplicate blocks (same weekday + intersecting
-        // time window) — two blocks can't fight the same hours.
-        if (get().templates.some((t) => templatesConflict(t, template))) {
+        // Refuse blocks that overlap an ENABLED one (same weekday +
+        // intersecting time window) — two armed blocks can't fight the same
+        // hours. Disabled blocks don't count (build-21 repro: a switched-off
+        // "Work day" wrongly blocked adding "Morning").
+        if (findEnabledConflict(get().templates, template)) {
           return null;
         }
         set((s) => ({ templates: [...s.templates, template] }));
@@ -148,6 +157,15 @@ export const useScheduleStore = create<ScheduleStore>()(
       },
 
       setEnabled: (id, enabled) => {
+        // Enabling re-enters the conflict pool — refuse (no state change) if
+        // another ENABLED block holds any of the same hours.
+        if (enabled) {
+          const candidate = get().templates.find((t) => t.id === id);
+          if (!candidate) return false;
+          if (findEnabledConflict(get().templates, candidate, id)) {
+            return false;
+          }
+        }
         let target: ScheduledTemplate | undefined;
         set((s) => ({
           templates: s.templates.map((t) => {
@@ -156,9 +174,10 @@ export const useScheduleStore = create<ScheduleStore>()(
             return target;
           }),
         }));
-        if (!target) return;
+        if (!target) return false;
         if (enabled) armNative(target);
         else disarmNative(id);
+        return true;
       },
 
       updateStake: (id, stakeCents) => {
@@ -178,6 +197,13 @@ export const useScheduleStore = create<ScheduleStore>()(
           if (t.enabled) armNative(t);
           else disarmNative(t.id);
         }
+      },
+
+      reset: () => {
+        for (const t of get().templates) {
+          disarmNative(t.id);
+        }
+        set({ templates: [] });
       },
     }),
     {

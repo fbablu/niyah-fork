@@ -25,6 +25,7 @@ import {
   DAY_LABELS,
   formatWindow,
   formatDays,
+  findEnabledConflict,
 } from "../../src/constants/scheduleTemplates";
 import type { ScheduledTemplate, Weekday } from "../../src/types";
 import {
@@ -90,8 +91,23 @@ export default function ScheduleScreen() {
                   <Switch
                     value={t.enabled}
                     onValueChange={(v) => {
+                      const ok = setEnabled(t.id, v);
+                      if (!ok && v) {
+                        const conflict = findEnabledConflict(
+                          templates,
+                          t,
+                          t.id,
+                        );
+                        Haptics.notificationAsync(
+                          Haptics.NotificationFeedbackType.Warning,
+                        );
+                        Alert.alert(
+                          "Overlaps a block",
+                          `"${t.name}" overlaps "${conflict?.name ?? "another block"}" — turn that one off first.`,
+                        );
+                        return;
+                      }
                       Haptics.selectionAsync();
-                      setEnabled(t.id, v);
                     }}
                     trackColor={{ true: Colors.primary, false: Colors.border }}
                   />
@@ -158,8 +174,25 @@ export default function ScheduleScreen() {
 
                 <Pressable
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    removeTemplate(t.id);
+                    // Destructive confirm — one accidental tap shouldn't
+                    // delete a schedule (Opal-style friction, build-21 ask).
+                    Alert.alert(
+                      `Remove ${t.name}?`,
+                      "This stops the scheduled block. You can add it back anytime.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Remove",
+                          style: "destructive",
+                          onPress: () => {
+                            Haptics.impactAsync(
+                              Haptics.ImpactFeedbackStyle.Medium,
+                            );
+                            removeTemplate(t.id);
+                          },
+                        },
+                      ],
+                    );
                   }}
                   style={styles.deleteBtn}
                 >
@@ -175,54 +208,76 @@ export default function ScheduleScreen() {
           {templates.length > 0 ? "Add another" : "Start with a template"}
         </Text>
         <View style={styles.presetGrid}>
-          {SCHEDULE_PRESETS.map((preset) => (
-            <Pressable
-              key={preset.key}
-              onPress={() => {
-                const added = addPreset(preset);
-                if (!added) {
+          {SCHEDULE_PRESETS.map((preset) => {
+            // Live disabled state instead of alert-after-tap: a preset that
+            // overlaps an ENABLED block dims and says which one.
+            const conflict = findEnabledConflict(templates, preset);
+            return (
+              <Pressable
+                key={preset.key}
+                disabled={!!conflict}
+                onPress={() => {
+                  const added = addPreset(preset);
+                  if (!added) {
+                    // Safety net — should be unreachable with the card disabled
+                    Haptics.notificationAsync(
+                      Haptics.NotificationFeedbackType.Warning,
+                    );
+                    return;
+                  }
                   Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Warning,
+                    Haptics.NotificationFeedbackType.Success,
                   );
-                  Alert.alert(
-                    "Overlaps a block",
-                    "That overlaps a schedule you already have on the same day. Remove or edit the other one first.",
+                }}
+                style={[styles.presetCard, conflict && styles.presetCardOff]}
+              >
+                <Text style={styles.presetName}>{preset.name}</Text>
+                <Text style={styles.presetMeta}>{formatDays(preset.days)}</Text>
+                <Text style={styles.presetMeta}>{formatWindow(preset)}</Text>
+                {conflict && (
+                  <Text style={styles.presetConflict}>
+                    Overlaps {conflict.name}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          })}
+          {(() => {
+            const customConflict = findEnabledConflict(
+              templates,
+              CUSTOM_TEMPLATE_DEFAULT,
+            );
+            return (
+              <Pressable
+                disabled={!!customConflict}
+                onPress={() => {
+                  const added = addPreset(CUSTOM_TEMPLATE_DEFAULT);
+                  if (!added) {
+                    Haptics.notificationAsync(
+                      Haptics.NotificationFeedbackType.Warning,
+                    );
+                    return;
+                  }
+                  Haptics.notificationAsync(
+                    Haptics.NotificationFeedbackType.Success,
                   );
-                  return;
-                }
-                Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Success,
-                );
-              }}
-              style={styles.presetCard}
-            >
-              <Text style={styles.presetName}>{preset.name}</Text>
-              <Text style={styles.presetMeta}>{formatDays(preset.days)}</Text>
-              <Text style={styles.presetMeta}>{formatWindow(preset)}</Text>
-            </Pressable>
-          ))}
-          <Pressable
-            onPress={() => {
-              const added = addPreset(CUSTOM_TEMPLATE_DEFAULT);
-              if (!added) {
-                Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Warning,
-                );
-                Alert.alert(
-                  "Overlaps a block",
-                  "That overlaps a schedule you already have on the same day. Remove or edit the other one first.",
-                );
-                return;
-              }
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success,
-              );
-            }}
-            style={[styles.presetCard, styles.customCard]}
-          >
-            <Text style={styles.presetName}>Custom</Text>
-            <Text style={styles.presetMeta}>Pick your own days</Text>
-          </Pressable>
+                }}
+                style={[
+                  styles.presetCard,
+                  styles.customCard,
+                  customConflict && styles.presetCardOff,
+                ]}
+              >
+                <Text style={styles.presetName}>Custom</Text>
+                <Text style={styles.presetMeta}>Pick your own days</Text>
+                {customConflict && (
+                  <Text style={styles.presetConflict}>
+                    Overlaps {customConflict.name}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          })()}
         </View>
 
         <Text style={styles.footnote}>
@@ -358,6 +413,15 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: 2,
       borderWidth: 1,
       borderColor: Colors.border,
+    },
+    presetCardOff: {
+      opacity: 0.5,
+    },
+    presetConflict: {
+      fontSize: Typography.labelSmall,
+      ...Font.medium,
+      color: Colors.loss,
+      marginTop: Spacing.xs,
     },
     customCard: {
       borderStyle: "dashed",

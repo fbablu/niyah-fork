@@ -16,6 +16,7 @@ import {
   SCHEDULE_PRESETS,
   presetToTemplate,
   templatesConflict,
+  findEnabledConflict,
   formatWindow,
   formatDays,
 } from "../../../constants/scheduleTemplates";
@@ -89,6 +90,25 @@ describe("scheduleTemplates helpers", () => {
     expect(templatesConflict(workday, weekend)).toBe(false); // no shared day
     expect(templatesConflict(workday, workday)).toBe(true); // identical
   });
+
+  it("findEnabledConflict ignores disabled blocks and the excluded id", () => {
+    const workday = presetToTemplate(WORKDAY, "wd", 0);
+    const morning = presetToTemplate(MORNING, "mo", 0);
+
+    // Enabled Work day conflicts with Morning (9–11 overlap Mon–Fri).
+    expect(findEnabledConflict([workday], MORNING)).toBe(workday);
+    // Disabled Work day does NOT (build-21 repro: OFF block wrongly blocked
+    // adding Morning).
+    expect(
+      findEnabledConflict([{ ...workday, enabled: false }], MORNING),
+    ).toBeNull();
+    // Re-enabling a template never conflicts with itself.
+    expect(findEnabledConflict([workday], workday, "wd")).toBeNull();
+    // …but does conflict with OTHER enabled overlapping blocks.
+    expect(findEnabledConflict([workday, morning], morning, "mo")).toBe(
+      workday,
+    );
+  });
 });
 
 describe("scheduleStore", () => {
@@ -115,8 +135,8 @@ describe("scheduleStore", () => {
     );
   });
 
-  it("refuses an overlapping or duplicate block", () => {
-    useScheduleStore.getState().addPreset(WORKDAY);
+  it("refuses an overlapping or duplicate block (enabled blocks only)", () => {
+    const workday = useScheduleStore.getState().addPreset(WORKDAY)!;
     jest.clearAllMocks();
 
     // Exact duplicate.
@@ -130,6 +150,38 @@ describe("scheduleStore", () => {
     // A non-overlapping block (evening) is still allowed.
     expect(useScheduleStore.getState().addPreset(STUDY)).not.toBeNull();
     expect(useScheduleStore.getState().templates).toHaveLength(2);
+
+    // DISABLED blocks don't conflict: switch Work day off → Morning adds
+    // fine (build-21 repro: "Work day is OFF, I select Morning →
+    // 'Overlaps a block'").
+    useScheduleStore.getState().setEnabled(workday.id, false);
+    expect(useScheduleStore.getState().addPreset(MORNING)).not.toBeNull();
+    expect(useScheduleStore.getState().templates).toHaveLength(3);
+  });
+
+  it("setEnabled(true) refuses when it would collide with an enabled block", () => {
+    const workday = useScheduleStore.getState().addPreset(WORKDAY)!;
+    useScheduleStore.getState().setEnabled(workday.id, false);
+    const morning = useScheduleStore.getState().addPreset(MORNING)!;
+    jest.clearAllMocks();
+
+    // Work day (Mon–Fri 9–17) collides with the now-enabled Morning (6–11).
+    expect(useScheduleStore.getState().setEnabled(workday.id, true)).toBe(
+      false,
+    );
+    expect(
+      useScheduleStore.getState().templates.find((x) => x.id === workday.id)
+        ?.enabled,
+    ).toBe(false); // state untouched
+    expect(startScheduledBlocking).not.toHaveBeenCalled();
+
+    // Disable the collider → enabling succeeds.
+    useScheduleStore.getState().setEnabled(morning.id, false);
+    expect(useScheduleStore.getState().setEnabled(workday.id, true)).toBe(true);
+    expect(
+      useScheduleStore.getState().templates.find((x) => x.id === workday.id)
+        ?.enabled,
+    ).toBe(true);
   });
 
   it("setEnabled(false) disarms; setEnabled(true) re-arms", () => {
@@ -211,6 +263,21 @@ describe("scheduleStore", () => {
       useScheduleStore.getState().templates.find((x) => x.id === t.id)
         ?.stakeCents,
     ).toBe(0);
+  });
+
+  it("reset disarms every OS schedule and clears all templates (logout hygiene)", () => {
+    const a = useScheduleStore.getState().addPreset(WORKDAY)!;
+    const b = useScheduleStore.getState().addPreset(STUDY)!;
+    useScheduleStore.getState().setEnabled(b.id, false);
+    jest.clearAllMocks();
+
+    useScheduleStore.getState().reset();
+
+    expect(useScheduleStore.getState().templates).toHaveLength(0);
+    // Both enabled AND disabled schedules are disarmed — the next account on
+    // this device must not inherit any armed DeviceActivity window.
+    expect(stopScheduledBlocking).toHaveBeenCalledWith(`niyah_sched_${a.id}`);
+    expect(stopScheduledBlocking).toHaveBeenCalledWith(`niyah_sched_${b.id}`);
   });
 
   it("syncNative arms enabled templates and clears disabled ones", () => {

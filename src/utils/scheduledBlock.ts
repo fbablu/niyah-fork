@@ -32,3 +32,40 @@ export const getActiveScheduledBlock = (
   }
   return null;
 };
+
+/**
+ * Progress through a LIVE block's window at `now` — drives the dashboard's
+ * remaining-time line ("2h 10m left" + a thin progress track). Pure, minutes
+ * resolution (the dashboard ticks every 30s; sub-minute precision would be
+ * noise on hours-long windows).
+ *
+ * `fraction` is elapsed/window clamped to [0, 1]; `minutesLeft` is the whole
+ * minutes until the end of the window (≥ 0). Callers pass a template that
+ * `getActiveScheduledBlock` returned for the same `now` — out-of-window input
+ * clamps rather than throwing.
+ */
+export const getBlockProgress = (
+  t: Pick<
+    ScheduledTemplate,
+    "startHour" | "startMinute" | "endHour" | "endMinute"
+  >,
+  now: Date,
+): { fraction: number; minutesLeft: number } => {
+  const start = minutesOfDay(t.startHour, t.startMinute);
+  const end = minutesOfDay(t.endHour, t.endMinute);
+  const cur = minutesOfDay(now.getHours(), now.getMinutes());
+  const window = Math.max(1, end - start);
+  const elapsed = Math.min(window, Math.max(0, cur - start));
+  return {
+    fraction: elapsed / window,
+    minutesLeft: Math.max(0, end - Math.min(end, Math.max(start, cur))),
+  };
+};
+
+/** "2h 10m left" / "45m left" label for a live block. */
+export const formatBlockTimeLeft = (minutesLeft: number): string => {
+  const h = Math.floor(minutesLeft / 60);
+  const m = minutesLeft % 60;
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
+};
