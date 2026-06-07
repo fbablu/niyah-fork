@@ -1,0 +1,10 @@
+# Historical findings, assessed 2026-06-07 — see docs/security.md.
+#
+# Firebase client API keys (AIza…) are NOT credentials: they identify the
+# project and ship inside every app binary; data access is gated by Firestore
+# rules + Auth + App Check (Google's documented position). The file was
+# untracked in 2026-02 (now lives gitignored in firebase/); these two
+# fingerprints are the stale history copies. Mitigation = key restrictions in
+# GCP Console (Android package + API restrictions), not history rewrite.
+592a32481425d7420d55cba6f2514ab2635c0df0:google-services.json:gcp-api-key:23
+406e28542277d493b66f77f52fb029177548d497:google-services.json:gcp-api-key:18

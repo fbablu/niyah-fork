@@ -4,10 +4,19 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-06-06 PM** — slices committed (head `edc4139`+), account cleanup DONE,
-> **functions+rules deployed to prod**, PII migration run, APNs keys uploaded, funnel events
-> added (uncommitted), buildNumber → 21. See §Remaining-to-submit for the revised launch line
-> (TestFlight internal build 21 → smoke+UX on-device → final submit).
+> Last updated: **2026-06-06 night** — build-21 field test surfaced a **prod outage**: the SSL
+> pin set (WE2 intermediate) no longer matched Google's served chain on `cloudfunctions.net`,
+> killing EVERY Cloud Function call (deposits, delete-account, legal acceptance → the
+> Terms-re-prompt). Fixed (all four GTS roots pinned) + the full build-21 UX feedback pass
+> implemented (uncommitted, ~2,000 lines / 49 files): SlideToConfirm on money CTAs, shield
+> free-vs-staked copy + session context, per-category blocked-attempt counts, block-list
+> templates + never-block, Focus tab removed, timer single-ring, solo-picker carousel, friends
+> list de-nest, schedule conflict fixes + block progress, legal bottom sheet + acceptance retry,
+> dark-pinned onboarding + solid tree, blob variance. buildNumber → **22**. CI: 826 tests green.
+> See §Remaining-to-submit.
+> Prior: 2026-06-06 PM — slices committed (head `edc4139`+), account cleanup DONE,
+> functions+rules deployed to prod, PII migration run, APNs keys uploaded, funnel events added,
+> build 21 built + uploaded to internal TestFlight.
 > Prior: 2026-06-06 AM — overnight polish loop + Blob Maker onboarding landed (uncommitted).
 > Prior: 2026-06-01 — submit-readiness audited 2026-05-31 (see
 > [submit-and-ai-plan.md](./submit-and-ai-plan.md)); 2026-05-30 PM — PR #7 merged to `main`,
@@ -177,18 +186,29 @@ actions** — Claude supplies messages only.
    `invite_opened` + `invite_redeemed`, `onboarding_step_reached` (route-level in
    `(auth)/_layout`). Pre-auth events are rules-denied by design (ASC installs =
    top-of-funnel). One shot at clean first-touch data — these MUST be in the QR build.
-7. **TestFlight internal build 21** (upload ≠ review — `eas submit` only uploads to ASC;
-   internal TestFlight needs **no** review, same as builds 3–19):
-   `eas build --platform ios --profile production --local` (writes a NEW `build-<ts>.ipa` —
-   submit THAT file, not a stale one), then
-   `eas submit --platform ios --profile production --path ./build-<ts>.ipa`.
-   `app.config.js` already bumped to `buildNumber: "21"`; extensions inherit at prebuild.
-   Build 20 (`build-1780523620368.ipa`) is superseded — never uploaded, predates the polish.
-8. **Smoke + UX pass ON the TestFlight build:** the controlled real-money smoke on a **fresh
-   clean account** (the freed real number works now) + Delete on a throwaway — full tickable
-   script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**. Then the
-   animations/UX/polish acceptance pass on the same build; iterate (build 22, 23…) until happy.
-   Each new internal build is just rebuild → re-upload, still no review.
+7. ~~TestFlight internal build 21~~ — **DONE 2026-06-06** (uploaded, installed, field-tested) —
+   **but build 21 has the SSL-pin outage**: its pinned WE2 intermediate no longer matches
+   Google's served cert chain, so every CF call dies as "Network request failed" (deposit,
+   withdraw, delete-account, acceptLegalTerms → the Terms re-prompt loop). **Superseded by
+   build 22.**
+7b. **TestFlight internal build 22** (carries the pin fix + the full build-21 feedback pass;
+   `app.config.js` already bumped to `buildNumber: "22"`). Same recipe (upload ≠ review):
+   `set -a; source .env; set +a`, then
+   `npx eas build --platform ios --profile production --local` (writes a NEW `build-<ts>.ipa` —
+   submit THAT file), then
+   `npx eas submit --platform ios --profile production --path ./build-<ts>.ipa`.
+   Optional but recommended first: `npx expo run:ios --device --configuration Release` — the
+   only pre-TestFlight way to exercise the REAL pinning (it's skipped in all dev builds, which
+   is why the outage was invisible locally). Add Funds → slide $1 → PaymentSheet opens →
+   cancel = pin fix proven, no charge.
+8. **Smoke + UX pass ON build 22:** the controlled real-money smoke on a **fresh clean
+   account** (the freed real number works now) + Delete on a throwaway — full tickable
+   script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)** (it was blocked at
+   step 1 by the pin outage). Plus the new on-device checks: free block shows non-forfeit
+   shield copy / staked shows "$X stake"; per-category attempt counts; template save/apply;
+   never-block exempts Spotify; sign-out clears selections; 4 tabs; carousel; schedule
+   Work-day-OFF → Morning adds. Then the animations/UX acceptance pass; iterate (23, 24…)
+   review-free until happy.
 9. **Final submit (only after 8 passes)** — App Review notes ready on request: Stripe (not IAP)
    because deposits/stakes/withdrawals are the user's own funds; commitment-contract (not
    gambling), Productivity category. Also: ASC App Privacy **Publish** (10 data types,
