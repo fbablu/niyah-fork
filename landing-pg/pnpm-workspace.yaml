@@ -3,3 +3,10 @@
 overrides:
   lodash: '>=4.18.1' # recharts — code injection via _.template + prototype pollution in _.unset/_.omit
   postcss: '>=8.5.10' # XSS via unescaped </style> in CSS stringify
+
+# Allow sharp's native build script (Next 16 pulls it transitively). pnpm 11
+# blocks unlisted build scripts by default → ERR_PNPM_IGNORED_BUILDS in CI.
+# pnpm 11 renamed this from `onlyBuiltDependencies` to `allowBuilds` (a map),
+# and reads it from pnpm-workspace.yaml, NOT the package.json "pnpm" field.
+allowBuilds:
+  sharp: true
