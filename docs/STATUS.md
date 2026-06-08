@@ -4,7 +4,23 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> Last updated: **2026-06-07** — the full build-21 feedback pass is now **COMMITTED** (8 slices,
+> Last updated: **2026-06-08** — everything below is **merged to `main` and pushed**
+> (`origin/main` == `main` == `b821f22`), and **all GitHub Actions are green** (CI ✅, Deploy
+> Landing Page ✅, CodeQL ✅). On top of the build-22 pass: the **Screen Time permission preview**
+> (`src/components/onboarding/ScreenTimePermissionPreview.tsx` — Opal-style tappable mock of the
+> iOS auth sheet replaces the green "Connect" button on `screentime-setup`), plus a **CI/tooling
+> rescue** (see [tooling-gotchas.md](./tooling-gotchas.md)): CI now installs pnpm via
+> `npm install -g pnpm@11.5.2` (the `pnpm/action-setup@v4` self-installer is broken), Node 22 in
+> CI, `expo-router`/`react-native-screens` deduped, and `landing-pg` builds sharp via
+> `allowBuilds` in `pnpm-workspace.yaml`. `main` is ruleset-protected; Fardeen pushes directly via
+> the **Repository-admin bypass**. **`buildNumber` still 22 — no new binary cut since
+> `build-1780863322889.ipa`, and that IPA predates the Screen Time preview + CI work, so it does
+> NOT contain them.** **Next (the needle): cut a fresh build (bump to 23 if 22 was already
+> uploaded) → device Release pin check → internal TestFlight → smoke → public QR.** A build-23 UX
+> punch-list (onboarding-shows-once, dead notification buttons → push-to-stop, schedule
+> green-toggle, profile blob-maker behind edit pencil, global content-view positioning) is
+> captured in `docs/nyc-tech-week.md`. See §Remaining-to-submit.
+> Prior: **2026-06-07** — the full build-21 feedback pass is now **COMMITTED** (8 slices,
 > `d39f7b9`→`c8f37e1`): the SSL all-four-GTS-roots **pin fix** (the prod-outage fix), SlideToConfirm
 > on money CTAs, shield free-vs-staked copy + session context, per-category blocked-attempt counts,
 > block-list templates + never-block, Focus tab removed, single-ring timer, solo-picker carousel,
@@ -348,4 +364,5 @@ stakes pre-promo). When the group multiplier/promo land, split surplus → `earn
 - Roadmap / phases: [roadmap.md](./roadmap.md)
 - Money path detail: [payments.md](./payments.md) · Legal posture: [legal.md](./legal.md)
 - Security posture: [security.md](./security.md) · Operator runbook: [security-deploy-checklist.md](./security-deploy-checklist.md)
+- **Tooling/CI/build/git gotchas (read before touching CI or builds): [tooling-gotchas.md](./tooling-gotchas.md)**
 - Historical session/resume/progress docs: [`archive/`](./archive/)
