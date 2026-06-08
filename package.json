@@ -19,6 +19,7 @@
     "build:dev:device": "eas build --profile development-device --platform ios",
     "build:preview": "eas build --profile preview --platform ios",
     "build:production": "eas build --profile production --platform ios",
+    "build:prod": "bash scripts/build-prod.sh",
     "test": "cross-env EXPO_PUBLIC_DEMO_MODE=true jest",
     "test:watch": "jest --watch",
     "test:coverage": "cross-env EXPO_PUBLIC_DEMO_MODE=true jest --coverage",

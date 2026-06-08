@@ -51,7 +51,13 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.niyah.app",
-      buildNumber: "22",
+      // Auto-incrementing build number. `scripts/build-prod.sh` sets BUILD_NUMBER
+      // ONCE per build (epoch seconds) so the main app AND every apple-targets
+      // extension read the SAME value here — they must match or App Store rejects
+      // the upload. Never compute the timestamp inline (it re-evaluates per target
+      // → mismatch). Fallback "23" only covers non-build evals (tests/metro);
+      // build 22 was the last manually-numbered upload.
+      buildNumber: process.env.BUILD_NUMBER || "23",
       appleTeamId: "4R55F73KCP",
       googleServicesFile:
         process.env.GOOGLE_SERVICE_INFO_PLIST ||

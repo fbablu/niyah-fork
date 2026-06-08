@@ -70,6 +70,26 @@
 - For a **Metro-free demo phone**: `npx expo run:ios --device --configuration Release` installs a
   standalone app over USB (valid ~1 yr on a paid Apple account). Rebuild to refresh.
 
+## Build number / versioning (auto-increment + extension sync)
+
+- `eas.json` uses `appVersionSource: "local"` → the build number comes from
+  `app.config.js` `buildNumber`. It's now **`process.env.BUILD_NUMBER || "23"`**.
+- **Build with `pnpm build:prod`** (`scripts/build-prod.sh`): it sources `.env`, sets
+  `BUILD_NUMBER=$(date +%s)` **once**, then runs `npx eas build --platform ios --profile
+  production --local`. Epoch seconds is always-increasing, unique, fits CFBundleVersion
+  (< 2³²), and needs no manual edits or state file.
+- **Why an env var, not an inline timestamp:** the 5 apple-targets extensions
+  (`targets/*`) set no `CFBundleVersion`, so they **inherit `buildNumber` from
+  `app.config.js` at prebuild**. `app.config.js` is evaluated multiple times per build
+  (app + each target). A `Date.now()` computed inline would differ per eval → app and
+  extensions desync → **App Store rejects the upload**. A single env var is stable across
+  all evals, so everything matches.
+- **Verify on each build:** the app `.ipa` Info.plist `CFBundleVersion` and all five
+  `.appex` `CFBundleVersion`s must equal the same epoch number. If they ever diverge, the
+  cause is something computing the number per-eval instead of reading `BUILD_NUMBER`.
+- Don't switch to EAS remote `autoIncrement` — apple-targets won't pick up the
+  remotely-injected version, re-introducing the extension mismatch.
+
 ## SSL pinning discipline (the build-21 prod outage)
 
 - `src/config/sslPinning.ts` pins **all four GTS roots** — roots only, **never intermediates**.

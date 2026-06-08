@@ -15,11 +15,14 @@
 > `allowBuilds` in `pnpm-workspace.yaml`. `main` is ruleset-protected; Fardeen pushes directly via
 > the **Repository-admin bypass**. **`buildNumber` still 22 — no new binary cut since
 > `build-1780863322889.ipa`, and that IPA predates the Screen Time preview + CI work, so it does
-> NOT contain them.** **Next (the needle): cut a fresh build (bump to 23 if 22 was already
-> uploaded) → device Release pin check → internal TestFlight → smoke → public QR.** A build-23 UX
-> punch-list (onboarding-shows-once, dead notification buttons → push-to-stop, schedule
-> green-toggle, profile blob-maker behind edit pencil, global content-view positioning) is
-> captured in `docs/nyc-tech-week.md`. See §Remaining-to-submit.
+> NOT contain them.** Build number now **auto-increments** — build with `pnpm build:prod`
+> (`scripts/build-prod.sh` sets `BUILD_NUMBER=$(date +%s)`; no more manual edits; build 22 was the
+> last hand-numbered upload). **Next (the needle): (1) address the latest feedback/UX notes (see
+> the build-23 punch-list in `docs/nyc-tech-week.md` — onboarding-shows-once, dead notification
+> buttons → push-to-stop, schedule green-toggle, profile blob-maker behind an edit pencil, global
+> content-view positioning) → (2) `pnpm build:prod` → (3) device Release pin check → (4) internal
+> TestFlight → (5) real-money smoke → (6) external public link → Beta App Review → QR.** See
+> §Remaining-to-submit.
 > Prior: **2026-06-07** — the full build-21 feedback pass is now **COMMITTED** (8 slices,
 > `d39f7b9`→`c8f37e1`): the SSL all-four-GTS-roots **pin fix** (the prod-outage fix), SlideToConfirm
 > on money CTAs, shield free-vs-staked copy + session context, per-category blocked-attempt counts,
