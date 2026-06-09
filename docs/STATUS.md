@@ -4,6 +4,29 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
+> **2026-06-08 (session 2 — build-23 feedback pass, IN PROGRESS on worktree branch
+> `worktree-build-23-feedback`, NOT yet on `main`; git is permission-gated this session, so Fardeen
+> commits):** Triaged the walk feedback WITH Fardeen → committed to ALL 5 build-23 UX items AND all 5
+> "later" tracks. **Item A (onboarding-shows-once) DONE** — `pnpm run ci` green (client jest + 91/91
+> functions), UNCOMMITTED: durable local legal-acceptance marker (stops the Terms re-prompt loop even
+> when `acceptLegalTerms` lags/fails) + a persisted per-uid `onboardingComplete` flag set on first
+> tabs mount that stops Screen Time / "stay in the loop" re-appearing every launch. Files:
+> `src/store/authStore.ts`, `app/index.tsx`, `app/(tabs)/_layout.tsx`,
+> `src/__tests__/unit/store/legalAcceptance.test.ts` (8/8). **Item D (blob-maker behind an edit
+> pencil) DONE** — new `BlobMakerSheet` (pencil → blob zooms to foreground, generative Shuffle, no
+> shape picker, Color/Expression pickers), `ProfileHeader` rewrite, `unique` eyes nudged up;
+> `ProfileHeader.test.tsx` 13/13; CI green. **Remaining build-23 (B native shield, C green-toggle,
+> E positioning, item-5 nav) need hot-reload/native review — documented in
+> [build-23-progress.md](./build-23-progress.md), not done blind.** Overnight (Fardeen asleep): the
+> audit ladder (/vibe-security + security docs → inefficiency → dead-comment cleanup → file
+> structure), each CI-gated. Safe fixes applied (notification crash guards, onSnapshot error logging, dead reputation+balance dual-writes removed; CI green) — see security-audit / code-quality-audit / deep-audit (2026-06-08) docs. IMPORTANT: the deep audit found REAL P0 money-path bugs DEFERRED for your review (NOT applied blind): C1 withdrawal double-debit (= the known-open issue below), C2 recovery payout race, H1 payout idempotency, M1 stake-composition validation — precise fixes in deep-audit-2026-06-08.md; land them with a real-money smoke test before the next submit. **W2 (engineering feasibility) DONE →
+> [post-1.0x-engineering-plan.md](./post-1.0x-engineering-plan.md)**: notification allow-list =
+> IMPOSSIBLE via public iOS API (+ copy-accuracy risk); zen-vs-staked nav = 100% JS-buildable;
+> anti-cheat/KYC = mostly gated on the multiplier flip (App Check enforce flip free now); "meaningful
+> minutes" = unmeasurable → ship an honest "slips" metric. **W1 (business-model + abuse-prevention)
+> DONE (salvaged from the workflow journal) → `docs/monetization-model.md`** (recommended: pure 1.0×
+> cash + non-cash affiliate "blobs" + cosmetics-only IAP; group-rake is dead; decision list inside). Detail: [build-23-progress.md](./build-23-progress.md).
+>
 > Last updated: **2026-06-08** — everything below is **merged to `main` and pushed**
 > (`origin/main` == `main` == `b821f22`), and **all GitHub Actions are green** (CI ✅, Deploy
 > Landing Page ✅, CodeQL ✅). On top of the build-22 pass: the **Screen Time permission preview**
