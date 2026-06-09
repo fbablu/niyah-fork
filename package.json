@@ -38,7 +38,8 @@
     "clean": "bash scripts/clean.sh",
     "clean:deep": "bash scripts/clean-deep.sh",
     "doctor": "bash scripts/dev-doctor.sh",
-    "prepare": "husky"
+    "prepare": "husky",
+    "android": "expo run:android"
   },
   "dependencies": {
     "@bottom-tabs/react-navigation": "^1.2.0",
@@ -52,7 +53,7 @@
     "@react-native-firebase/firestore": "^23.8.8",
     "@react-native-firebase/messaging": "^23.8.8",
     "@react-native-google-signin/google-signin": "^14.0.2",
-    "@react-navigation/native": "^7.2.5",
+    "@react-navigation/native": "^7.2.6",
     "@sentry/react-native": "~6.22.0",
     "@stripe/stripe-react-native": "^0.59.2",
     "expo": "~54.0.35",
