@@ -2,8 +2,9 @@ import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Svg, { Circle, LinearGradient, Stop, Defs } from "react-native-svg";
+import { Ionicons } from "@expo/vector-icons";
 import { BlobAvatar } from "../BlobAvatar";
+import { BlobMakerSheet } from "./BlobMakerSheet";
 import {
   Typography,
   Spacing,
@@ -15,11 +16,6 @@ import { useColors } from "../../hooks/useColors";
 import { REPUTATION_LEVELS } from "../../constants/config";
 import type { User } from "../../types";
 import {
-  BLOB_AVATAR_COLORS,
-  BLOB_AVATAR_EYES,
-  BLOB_AVATAR_SHAPES,
-  BLOB_DISPLAY_LABELS,
-  BLOB_PALETTES,
   generateBlobAvatarPreset,
   type BlobAvatarConfig,
 } from "../../constants/blobAvatar";
@@ -40,6 +36,7 @@ export function ProfileHeader({
   const Colors = useColors();
   const router = useRouter();
   const styles = React.useMemo(() => makeStyles(Colors), [Colors]);
+  const [editorVisible, setEditorVisible] = React.useState(false);
   const avatarConfig = React.useMemo(
     () => user?.blobAvatar || generateBlobAvatarPreset(user?.id || "guest"),
     [user?.blobAvatar, user?.id],
@@ -57,21 +54,36 @@ export function ProfileHeader({
     return Colors.loss;
   };
 
-  const updateBlobAvatar = (
-    key: keyof BlobAvatarConfig,
-    value: BlobAvatarConfig[keyof BlobAvatarConfig],
-  ) => {
-    if (!user || !onBlobAvatarChange) return;
-    Haptics.selectionAsync();
-    onBlobAvatarChange({
-      ...avatarConfig,
-      [key]: value,
-    } as BlobAvatarConfig);
+  const editable = !!user && !!onBlobAvatarChange;
+  const openEditor = () => {
+    if (!editable) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEditorVisible(true);
   };
 
   return (
     <View style={styles.header}>
-      <BlobAvatar size={92} config={avatarConfig} seed={user?.id} animated />
+      <View style={styles.avatarWrap}>
+        <BlobAvatar
+          size={92}
+          config={avatarConfig}
+          seed={user?.id}
+          animated
+          onPress={editable ? openEditor : undefined}
+          accessibilityLabel={editable ? "Edit your blob" : undefined}
+        />
+        {editable && (
+          <Pressable
+            onPress={openEditor}
+            style={styles.editBadge}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Edit your blob"
+          >
+            <Ionicons name="pencil" size={14} color={Colors.white} />
+          </Pressable>
+        )}
+      </View>
       <Text style={styles.name}>{user?.name || "?"}</Text>
       <Text style={styles.email}>{user?.email || ""}</Text>
 
@@ -120,159 +132,15 @@ export function ProfileHeader({
         </Pressable>
       </View>
 
-      {user ? (
-        <View style={styles.blobMakerCard}>
-          <Text style={styles.blobMakerTitle}>Blob Maker</Text>
-
-          {/* ── Color selector: gradient circle swatches ── */}
-          <Text style={styles.blobMakerLabel}>Color</Text>
-          <View style={styles.optionsRow}>
-            {BLOB_AVATAR_COLORS.map((option) => {
-              const selected = avatarConfig.colorPreset === option;
-              const swatch = BLOB_PALETTES[option];
-              return (
-                <Pressable
-                  key={option}
-                  style={({ pressed }) => [
-                    styles.swatchWrapper,
-                    pressed && styles.optionPressed,
-                  ]}
-                  onPress={() => updateBlobAvatar("colorPreset", option)}
-                >
-                  <View
-                    style={[
-                      styles.swatchRing,
-                      selected && {
-                        borderColor: Colors.primary,
-                        borderWidth: 2.5,
-                      },
-                    ]}
-                  >
-                    <Svg width={36} height={36} viewBox="0 0 36 36">
-                      <Defs>
-                        <LinearGradient
-                          id={`swatch-${option}`}
-                          x1="0"
-                          y1="0"
-                          x2="1"
-                          y2="1"
-                        >
-                          <Stop offset="0" stopColor={swatch.start} />
-                          <Stop offset="1" stopColor={swatch.end} />
-                        </LinearGradient>
-                      </Defs>
-                      <Circle
-                        cx={18}
-                        cy={18}
-                        r={16}
-                        fill={`url(#swatch-${option})`}
-                      />
-                    </Svg>
-                  </View>
-                  <Text
-                    style={[
-                      styles.swatchLabel,
-                      selected && styles.swatchLabelSelected,
-                    ]}
-                  >
-                    {BLOB_DISPLAY_LABELS[option]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* ── Shape selector: mini blob previews ── */}
-          <Text style={styles.blobMakerLabel}>Shape</Text>
-          <View style={styles.optionsRow}>
-            {BLOB_AVATAR_SHAPES.map((option) => {
-              const selected = avatarConfig.shapePreset === option;
-              return (
-                <Pressable
-                  key={option}
-                  style={({ pressed }) => [
-                    styles.previewWrapper,
-                    pressed && styles.optionPressed,
-                  ]}
-                  onPress={() => updateBlobAvatar("shapePreset", option)}
-                >
-                  <View
-                    style={[
-                      styles.previewBorder,
-                      selected && {
-                        borderColor: Colors.primary,
-                        borderWidth: 2.5,
-                      },
-                    ]}
-                  >
-                    <BlobAvatar
-                      size={48}
-                      config={{
-                        ...avatarConfig,
-                        shapePreset: option,
-                      }}
-                      seed={user?.id}
-                    />
-                  </View>
-                  <Text
-                    style={[
-                      styles.swatchLabel,
-                      selected && styles.swatchLabelSelected,
-                    ]}
-                  >
-                    {BLOB_DISPLAY_LABELS[option]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* ── Eyes selector: mini blob previews ── */}
-          <Text style={styles.blobMakerLabel}>Expression</Text>
-          <View style={styles.optionsRow}>
-            {BLOB_AVATAR_EYES.map((option) => {
-              const selected = avatarConfig.eyesPreset === option;
-              return (
-                <Pressable
-                  key={option}
-                  style={({ pressed }) => [
-                    styles.previewWrapper,
-                    pressed && styles.optionPressed,
-                  ]}
-                  onPress={() => updateBlobAvatar("eyesPreset", option)}
-                >
-                  <View
-                    style={[
-                      styles.previewBorder,
-                      selected && {
-                        borderColor: Colors.primary,
-                        borderWidth: 2.5,
-                      },
-                    ]}
-                  >
-                    <BlobAvatar
-                      size={48}
-                      config={{
-                        ...avatarConfig,
-                        eyesPreset: option,
-                      }}
-                      seed={user?.id}
-                    />
-                  </View>
-                  <Text
-                    style={[
-                      styles.swatchLabel,
-                      selected && styles.swatchLabelSelected,
-                    ]}
-                  >
-                    {BLOB_DISPLAY_LABELS[option]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
+      {editable && (
+        <BlobMakerSheet
+          visible={editorVisible}
+          onClose={() => setEditorVisible(false)}
+          uid={user.id}
+          config={avatarConfig}
+          onSave={onBlobAvatarChange}
+        />
+      )}
     </View>
   );
 }
@@ -282,6 +150,22 @@ const makeStyles = (Colors: ThemeColors) =>
     header: {
       alignItems: "center",
       marginBottom: Spacing.xl,
+    },
+    avatarWrap: {
+      position: "relative",
+    },
+    editBadge: {
+      position: "absolute",
+      right: -2,
+      bottom: -2,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: Colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: Colors.background,
     },
     name: {
       fontSize: Typography.titleLarge,
@@ -340,90 +224,5 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.labelSmall,
       color: Colors.textSecondary,
       ...Font.medium,
-    },
-    blobMakerCard: {
-      marginTop: Spacing.lg,
-      width: "100%",
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
-      padding: Spacing.md,
-      borderWidth: 1,
-      borderColor: Colors.border,
-    },
-    blobMakerTitle: {
-      fontSize: Typography.titleSmall,
-      ...Font.semibold,
-      color: Colors.text,
-      marginBottom: Spacing.md,
-    },
-    blobMakerLabel: {
-      fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
-      marginBottom: Spacing.sm,
-      marginTop: Spacing.xs,
-    },
-    optionsRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: Spacing.sm,
-      marginBottom: Spacing.md,
-    },
-    optionPill: {
-      borderWidth: 1,
-      borderColor: Colors.border,
-      backgroundColor: Colors.backgroundSecondary,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-      borderRadius: Radius.full,
-    },
-    optionPillSelected: {
-      backgroundColor: Colors.primaryMuted,
-    },
-    optionPillText: {
-      fontSize: Typography.bodySmall,
-      ...Font.medium,
-      color: Colors.textSecondary,
-    },
-    optionPillTextSelected: {
-      color: Colors.text,
-      ...Font.semibold,
-    },
-    swatchWrapper: {
-      alignItems: "center",
-      gap: 4,
-    },
-    swatchRing: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 2,
-      borderColor: "transparent",
-    },
-    swatchLabel: {
-      fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
-      ...Font.medium,
-    },
-    swatchLabelSelected: {
-      color: Colors.primary,
-      ...Font.semibold,
-    },
-    previewWrapper: {
-      alignItems: "center",
-      gap: 4,
-    },
-    previewBorder: {
-      width: 56,
-      height: 56,
-      borderRadius: Radius.lg,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 2,
-      borderColor: "transparent",
-    },
-    optionPressed: {
-      transform: [{ scale: 0.92 }],
     },
   });

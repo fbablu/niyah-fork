@@ -62,7 +62,22 @@ describe("ProfileHeader", () => {
       expect(screen.getByText("alice@test.com")).toBeTruthy();
     });
 
-    it("renders blob maker section for signed-in users", () => {
+    it("renders an edit-blob affordance for signed-in users with an onChange handler", () => {
+      render(
+        <ProfileHeader
+          user={makeUser({ name: "Bob" })}
+          followingCount={0}
+          partnerCount={0}
+          onBlobAvatarChange={jest.fn()}
+        />,
+      );
+      // Both the blob and the pencil badge expose the "Edit your blob" label.
+      expect(screen.getAllByLabelText("Edit your blob").length).toBeGreaterThan(
+        0,
+      );
+    });
+
+    it("renders no edit affordance without an onChange handler", () => {
       render(
         <ProfileHeader
           user={makeUser({ name: "Bob" })}
@@ -70,13 +85,13 @@ describe("ProfileHeader", () => {
           partnerCount={0}
         />,
       );
-      expect(screen.getByText("Blob Maker")).toBeTruthy();
+      expect(screen.queryByLabelText("Edit your blob")).toBeNull();
     });
 
     it("shows '?' when user is null", () => {
       render(<ProfileHeader user={null} followingCount={0} partnerCount={0} />);
       expect(screen.getByText("?")).toBeTruthy();
-      expect(screen.queryByText("Blob Maker")).toBeNull();
+      expect(screen.queryByLabelText("Edit your blob")).toBeNull();
     });
 
     it("shows '?' when user name is undefined", () => {

@@ -77,12 +77,13 @@ const SHAPES: Record<BlobAvatarShapePreset, ShapeConfig> = {
     eyeRadius: 4,
   },
   // Procedural blob: bodyPath is a placeholder; BlobAvatar regenerates it from
-  // the per-user `seed` at render. Centered in a 100×100 box with centered eyes.
+  // the per-user `seed` at render. Centered in a 100×100 box; eyes sit in the
+  // upper-center so the generated blob reads as a face (build-23 feedback).
   unique: {
     viewBox: "0 0 100 100",
     bodyPath: generateBlobPath("niyah"),
     eyeCenterX: 50,
-    eyeCenterY: 46,
+    eyeCenterY: 42,
     eyeGap: 18,
     eyeRadius: 4.2,
   },
