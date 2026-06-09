@@ -237,27 +237,34 @@ export function setupForegroundHandler(): () => void {
   const unsubMessages = subscribeToMessages(
     getMessagingInstance(),
     async (remoteMessage) => {
-      const { notification, data } = remoteMessage;
-      if (!notification) return;
+      // A throw here (channel creation / permission / network) would surface as
+      // an unhandled promise rejection in the FCM SDK and can crash a live
+      // session — log and drop instead, matching setupBackgroundHandler.
+      try {
+        const { notification, data } = remoteMessage;
+        if (!notification) return;
 
-      await ensureNotifeeChannel();
-      const payload = (data ?? {}) as Record<string, string>;
+        await ensureNotifeeChannel();
+        const payload = (data ?? {}) as Record<string, string>;
 
-      await notifee.displayNotification({
-        title: notification.title || "Niyah",
-        body: notification.body || "",
-        data: payload,
-        android: {
-          channelId: NOTIFEE_CHANNEL_ID,
-          pressAction: { id: "default" },
-          smallIcon: "ic_notification",
-        },
-        ios: {
-          sound: "default",
-          interruptionLevel: "timeSensitive",
-          categoryId: payload.type,
-        },
-      });
+        await notifee.displayNotification({
+          title: notification.title || "Niyah",
+          body: notification.body || "",
+          data: payload,
+          android: {
+            channelId: NOTIFEE_CHANNEL_ID,
+            pressAction: { id: "default" },
+            smallIcon: "ic_notification",
+          },
+          ios: {
+            sound: "default",
+            interruptionLevel: "timeSensitive",
+            categoryId: payload.type,
+          },
+        });
+      } catch (err) {
+        logger.error("Foreground notification display failed:", err);
+      }
     },
   );
 
@@ -324,7 +331,14 @@ let activeCleanup: (() => void) | null = null;
  * handlers. Caller guarantees permission is already granted. */
 async function setupListenersAndToken(): Promise<() => void> {
   const unsubTokenRefresh = onTokenRefresh();
-  await registerFCMToken();
+  // A token-registration failure must not orphan unsubTokenRefresh or skip the
+  // foreground/open handlers below — they still need to register and land in
+  // activeCleanup, or a re-init stacks duplicate listeners.
+  try {
+    await registerFCMToken();
+  } catch (err) {
+    logger.error("FCM token registration failed:", err);
+  }
   const unsubForeground = setupForegroundHandler();
   const unsubOpen = setupNotificationOpenHandler();
 

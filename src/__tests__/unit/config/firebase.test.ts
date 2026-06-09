@@ -1114,6 +1114,7 @@ describe("firebase config layer", () => {
       expect(mockOnSnapshot).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
+        expect.any(Function), // M3: error handler wired on the snapshot stream
       );
       expect(unsub).toBe(mockUnsub);
     });

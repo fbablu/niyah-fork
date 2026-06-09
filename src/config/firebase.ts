@@ -487,17 +487,21 @@ export const subscribeToWallet = (
   callback: (data: { balance: number; pendingBalance: number } | null) => void,
 ): (() => void) => {
   const docRef = doc(db, COLLECTIONS.WALLETS, uid);
-  return onSnapshot(docRef, (snap) => {
-    if (!snap.exists) {
-      callback(null);
-      return;
-    }
-    const data = snap.data() ?? {};
-    callback({
-      balance: (data.balance as number) ?? 0,
-      pendingBalance: (data.pendingBalance as number) ?? 0,
-    });
-  });
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (!snap.exists) {
+        callback(null);
+        return;
+      }
+      const data = snap.data() ?? {};
+      callback({
+        balance: (data.balance as number) ?? 0,
+        pendingBalance: (data.pendingBalance as number) ?? 0,
+      });
+    },
+    (error) => logger.error("subscribeToWallet snapshot error:", error),
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -638,13 +642,17 @@ export const subscribeToGroupSession = (
   callback: (data: Record<string, unknown> | null) => void,
 ): (() => void) => {
   const docRef = doc(db, COLLECTIONS.GROUP_SESSIONS, sessionId);
-  return onSnapshot(docRef, (snap) => {
-    if (!snap.exists) {
-      callback(null);
-      return;
-    }
-    callback({ __id: snap.id, ...snap.data() } as Record<string, unknown>);
-  });
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (!snap.exists) {
+        callback(null);
+        return;
+      }
+      callback({ __id: snap.id, ...snap.data() } as Record<string, unknown>);
+    },
+    (error) => logger.error("subscribeToGroupSession snapshot error:", error),
+  );
 };
 
 /**
@@ -660,16 +668,20 @@ export const subscribeToGroupInvites = (
     where("toUserId", "==", userId),
     where("status", "==", "pending"),
   );
-  return onSnapshot(q, (snap) => {
-    if (!snap) return callback([]);
-    const invites = snap.docs.map(
-      (d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
-        __id: d.id,
-        ...d.data(),
-      }),
-    ) as Array<Record<string, unknown>>;
-    callback(invites);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      if (!snap) return callback([]);
+      const invites = snap.docs.map(
+        (d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
+          __id: d.id,
+          ...d.data(),
+        }),
+      ) as Array<Record<string, unknown>>;
+      callback(invites);
+    },
+    (error) => logger.error("subscribeToGroupInvites snapshot error:", error),
+  );
 };
 
 /**
@@ -685,16 +697,21 @@ export const subscribeToActiveGroupSessions = (
     where("participantIds", "array-contains", userId),
     where("status", "in", ["pending", "ready", "active"]),
   );
-  return onSnapshot(q, (snap) => {
-    if (!snap) return callback([]);
-    const sessions = snap.docs.map(
-      (d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
-        __id: d.id,
-        ...d.data(),
-      }),
-    ) as Array<Record<string, unknown>>;
-    callback(sessions);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      if (!snap) return callback([]);
+      const sessions = snap.docs.map(
+        (d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
+          __id: d.id,
+          ...d.data(),
+        }),
+      ) as Array<Record<string, unknown>>;
+      callback(sessions);
+    },
+    (error) =>
+      logger.error("subscribeToActiveGroupSessions snapshot error:", error),
+  );
 };
 
 /** Fetch a single group session by ID (one-off read). */

@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { Transaction } from "../types";
 import { DEMO_MODE, INITIAL_BALANCE } from "../constants/config";
-import { useAuthStore } from "./authStore";
 import { getWalletDoc, subscribeToWallet } from "../config/firebase";
 import { generateId } from "../utils/id";
 import { logger } from "../utils/logger";
@@ -151,10 +150,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     // Guard the just-credited balance against a lagging realtime snapshot that
     // still carries the pre-credit (lower) server balance.
     armOptimisticFloor(get().balance);
-
-    useAuthStore.getState().updateUser({
-      balance: get().balance,
-    });
   },
 
   withdraw: (amount: number) => {
@@ -177,10 +172,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       pendingWithdrawal: state.pendingWithdrawal + amount,
       transactions: [transaction, ...state.transactions],
     }));
-
-    useAuthStore.getState().updateUser({
-      balance: get().balance,
-    });
   },
 
   deductStake: (amount: number, sessionId: string) => {
@@ -206,10 +197,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       balance: state.balance - amount,
       transactions: [transaction, ...state.transactions],
     }));
-
-    useAuthStore.getState().updateUser({
-      balance: get().balance,
-    });
   },
 
   creditPayout: (amount: number, sessionId: string) => {
@@ -226,10 +213,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       balance: state.balance + amount,
       transactions: [transaction, ...state.transactions],
     }));
-
-    useAuthStore.getState().updateUser({
-      balance: get().balance,
-    });
   },
 
   recordForfeit: (amount: number, sessionId: string) => {
