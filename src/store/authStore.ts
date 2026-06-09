@@ -30,6 +30,14 @@ import {
 // 18+ attestation) under user B's auth token after an account switch.
 const pendingLegalAcceptanceKey = (uid: string): string =>
   `@niyah/pending_legal_acceptance:${uid}`;
+
+// Records that a user finished the first-run onboarding flow (reached the
+// tabs). Once set, the launch gate won't re-trap them in the Screen Time /
+// notification setup screens if a later status read is momentarily non-approved
+// (cold-start native race) — reconnect lives in Profile. UID-scoped so a new
+// account on the same device still onboards. (build-23: onboarding shows once.)
+const onboardingCompleteKey = (uid: string): string =>
+  `@niyah/onboarding_complete:${uid}`;
 import {
   generateBlobAvatarPreset,
   normalizeBlobAvatarConfig,
@@ -152,6 +160,7 @@ interface AuthState {
   profileComplete: boolean;
   isNewUser: boolean;
   hasAcceptedCurrentLegal: boolean;
+  onboardingComplete: boolean;
 
   initialize: () => () => void; // returns unsubscribe function
   loginWithGoogle: () => Promise<void>;
@@ -179,6 +188,9 @@ interface AuthState {
   /** Replay an acceptance whose CF write failed (marker-driven, see
    *  acceptLegal). Fire-and-forget from initialize(). */
   retryPendingLegalAcceptance: () => Promise<void>;
+  /** Record that first-run onboarding finished (called when the tabs mount) so
+   *  the Screen Time / notification setup screens only show once. */
+  markOnboardingComplete: () => Promise<void>;
 }
 
 const createInitialReputation = (): UserReputation => ({
@@ -327,6 +339,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isNewUser: false,
   isSigningOut: false,
   hasAcceptedCurrentLegal: false,
+  onboardingComplete: false,
 
   initialize: () => {
     const unsubscribe = onAuthStateChanged(async (firebaseUser) => {
@@ -336,6 +349,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           const user = buildUser(firebaseUser, firestoreData);
           const profileComplete = user.profileComplete === true;
 
+          // Honor locally-recorded state so a lagging/failed CF write doesn't
+          // re-prompt Terms, and a finished onboarding isn't re-shown, on every
+          // launch (build-23 feedback). Both markers are uid-scoped;
+          // retryPendingLegalAcceptance reconciles legal to the server.
+          const [pendingLegal, onboardingDone] = await Promise.all([
+            AsyncStorage.getItem(
+              pendingLegalAcceptanceKey(firebaseUser.uid),
+            ).catch(() => null),
+            AsyncStorage.getItem(onboardingCompleteKey(firebaseUser.uid)).catch(
+              () => null,
+            ),
+          ]);
+
           set({
             firebaseUser,
             user,
@@ -343,7 +369,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             isInitialized: true,
             profileComplete,
             hasAcceptedCurrentLegal:
-              user.legalAcceptanceVersion === CURRENT_LEGAL_VERSION,
+              user.legalAcceptanceVersion === CURRENT_LEGAL_VERSION ||
+              pendingLegal === CURRENT_LEGAL_VERSION,
+            onboardingComplete: onboardingDone === "1",
             isLoading: false,
           });
 
@@ -380,6 +408,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             isInitialized: true,
             profileComplete: false,
             hasAcceptedCurrentLegal: false,
+            onboardingComplete: false,
             isLoading: false,
           });
 
@@ -402,6 +431,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isInitialized: true,
           profileComplete: false,
           hasAcceptedCurrentLegal: false,
+          onboardingComplete: false,
           isNewUser: false,
           isLoading: false,
         });
@@ -729,6 +759,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: false,
       profileComplete: false,
       hasAcceptedCurrentLegal: false,
+      onboardingComplete: false,
       isNewUser: false,
       isSigningOut: false,
     });
@@ -786,12 +817,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       newReputation.score = Math.min(100, newReputation.score + referralBoost);
 
       newReputation.level = getReputationLevel(newReputation.score);
+      // Reputation is server-driven — Cloud Functions are the authoritative
+      // writer and the client `reputation` field is on the firestore.rules
+      // denylist, so the old client write here was always rejected. Keep only
+      // the optimistic local update; the CF reconciles via the snapshot listener.
       set({ user: { ...user, reputation: newReputation } });
-
-      // Sync reputation to Firestore (fire-and-forget)
-      updateUserDoc(user.id, { reputation: newReputation }).catch((err) =>
-        logger.error("Failed to sync reputation to Firestore:", err),
-      );
     }
   },
 
@@ -820,21 +850,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // the user (the build-21 SSL-pin outage made this exact failure re-prompt
     // Terms on every sign-in).
     if (!DEMO_MODE) {
+      // Record the acceptance locally FIRST so it survives a cold start even if
+      // the CF write lags or fails — the launch gate honors this marker, so the
+      // user is never re-prompted for an acceptance they already gave (the
+      // build-21 pin outage re-prompted Terms on every launch). Cleared only
+      // once a later launch reads the doc carrying the current version (see
+      // retryPendingLegalAcceptance) — never on a bare CF "success", which a
+      // non-persisting/legacy CF could falsely report.
+      await AsyncStorage.setItem(
+        pendingLegalAcceptanceKey(user.id),
+        CURRENT_LEGAL_VERSION,
+      ).catch(() => {});
+
       const { acceptLegalTerms } = require("../config/functions") as {
         acceptLegalTerms: (version: string) => Promise<{ success: boolean }>;
       };
-
       try {
         await acceptLegalTerms(CURRENT_LEGAL_VERSION);
-        AsyncStorage.removeItem(pendingLegalAcceptanceKey(user.id)).catch(
-          () => {},
-        );
       } catch (error) {
+        // Marker stays; the next launch replays the CF.
         logger.warn("acceptLegalTerms Cloud Function failed:", error);
-        AsyncStorage.setItem(
-          pendingLegalAcceptanceKey(user.id),
-          CURRENT_LEGAL_VERSION,
-        ).catch(() => {});
       }
     }
 
@@ -872,11 +907,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         acceptLegalTerms: (version: string) => Promise<{ success: boolean }>;
       };
       await acceptLegalTerms(CURRENT_LEGAL_VERSION);
-      await AsyncStorage.removeItem(key);
+      // Keep the marker until a later launch reads the doc carrying the version
+      // (the doc-confirm branch above clears it) — a bare CF "success" from a
+      // non-persisting/legacy CF must not drop a still-unconfirmed acceptance.
       set({ hasAcceptedCurrentLegal: true });
     } catch (error) {
       // Keep the marker — try again next launch.
       logger.warn("retryPendingLegalAcceptance failed:", error);
     }
+  },
+
+  markOnboardingComplete: async () => {
+    const uid = get().user?.id;
+    if (!uid || get().onboardingComplete) return;
+    set({ onboardingComplete: true });
+    // Persist per-uid so it survives cold starts; the launch gate reads this to
+    // avoid re-showing the Screen Time / notification setup screens.
+    AsyncStorage.setItem(onboardingCompleteKey(uid), "1").catch(() => {});
   },
 }));

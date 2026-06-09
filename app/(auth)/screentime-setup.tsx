@@ -195,35 +195,6 @@ export default function ScreenTimeSetupScreen() {
           </View>
         )}
 
-        {/* Permission explanation */}
-        {!isAuthorized && !authDenied && (
-          <View style={styles.explanationCard}>
-            <Text style={styles.explanationTitle}>What this allows</Text>
-            <View style={styles.explanationItem}>
-              <Text style={styles.bulletText}>
-                Block selected apps during focus sessions
-              </Text>
-            </View>
-            <View style={styles.explanationItem}>
-              <Text style={styles.bulletText}>
-                Show a custom Niyah shield when you try to open a blocked app
-              </Text>
-            </View>
-            <View style={styles.explanationItem}>
-              <Text style={styles.bulletText}>
-                Enforced at the OS level by Apple — uninstalling Niyah, turning
-                off Wi-Fi, or restarting your phone won't unlock the block. The
-                only way out is to surrender your stake.
-              </Text>
-            </View>
-            <View style={styles.explanationItem}>
-              <Text style={styles.bulletText}>
-                Track focus streaks — never read personal data
-              </Text>
-            </View>
-          </View>
-        )}
-
         {/* Tappable preview of the iOS Screen Time alert — pressing it fires the
             real authorization request, so the faux Continue / Not Now pills set
             the expectation for the system dialog that pops up next. */}

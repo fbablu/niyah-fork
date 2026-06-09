@@ -1,11 +1,20 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Tabs } from "../../src/components/BottomTabs";
 import { useColors } from "../../src/hooks/useColors";
 import { useThemeStore } from "../../src/store/themeStore";
+import { useAuthStore } from "../../src/store/authStore";
 
 export default function TabsLayout() {
   const Colors = useColors();
   const _hasHydrated = useThemeStore((s) => s._hasHydrated);
+  const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
+
+  // Reaching the tabs means every onboarding gate cleared — record it so the
+  // Screen Time / notification setup screens never re-appear on later launches
+  // (build-23 feedback: onboarding shows once). Idempotent + uid-scoped.
+  useEffect(() => {
+    markOnboardingComplete();
+  }, [markOnboardingComplete]);
 
   // Don't mount the native UITabBarController until we know the persisted
   // theme.  Mounting it once with the correct barTintColor avoids the race

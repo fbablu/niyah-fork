@@ -831,7 +831,7 @@ describe("authStore", () => {
       expect(useAuthStore.getState().user?.currentStreak).toBe(3);
     });
 
-    it("updateReputation syncs to Firestore", async () => {
+    it("updateReputation does NOT write to Firestore (reputation is server-driven)", async () => {
       simulateAuthenticated();
 
       act(() => {
@@ -839,29 +839,21 @@ describe("authStore", () => {
       });
       await Promise.resolve();
 
-      expect(updateUserDoc).toHaveBeenCalledWith(
-        "test-uid",
-        expect.objectContaining({
-          reputation: expect.objectContaining({
-            paymentsCompleted: 1,
-          }),
-        }),
-      );
+      // Cloud Functions are the authoritative reputation writer and the client
+      // `reputation` field is rules-denied — the client must not attempt a write.
+      expect(updateUserDoc).not.toHaveBeenCalled();
     });
 
-    it("updateReputation handles Firestore error silently — local state still updated", async () => {
+    it("updateReputation merges fields into local state", async () => {
       simulateAuthenticated();
-      updateUserDoc.mockRejectedValueOnce(new Error("Firestore offline"));
 
       act(() => {
         useAuthStore
           .getState()
           .updateReputation({ paymentsCompleted: 3, paymentsMissed: 1 });
       });
-      // Flush fire-and-forget promise so the .catch handler executes (line 578)
-      await new Promise((r) => setTimeout(r, 0));
+      await Promise.resolve();
 
-      // Local state should still reflect the update
       const rep = useAuthStore.getState().user?.reputation;
       expect(rep?.paymentsCompleted).toBe(3);
       expect(rep?.paymentsMissed).toBe(1);

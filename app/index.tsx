@@ -18,6 +18,7 @@ export default function Index() {
     isInitialized,
     profileComplete,
     hasAcceptedCurrentLegal,
+    onboardingComplete,
     acceptLegal,
     initialize,
   } = useAuthStore();
@@ -88,13 +89,17 @@ export default function Index() {
     return <Redirect href="/(auth)/profile-setup" />;
   }
 
-  // Hard gate (Opal-style): Screen Time is core to Niyah, so a profiled user
-  // who hasn't granted it is sent back to setup on every launch until they do.
-  // Bypassed on devices without Screen Time and in DEMO builds so the booth
-  // demo / simulator aren't trapped (drop the DEMO_MODE check to gate demos too).
+  // Hard gate (Opal-style) DURING first-run onboarding: Screen Time is core to
+  // Niyah, so a profiled user who hasn't granted it is sent to setup. Once
+  // onboarding is complete we DON'T re-trap them on launch if the status reads
+  // non-approved (a cold-start native race, or a later revoke) — that was making
+  // the "you're all set" / "stay in the loop" screens reappear every launch
+  // (build-23 feedback). Reconnect lives in Profile; a staked session re-checks
+  // Screen Time at start. Bypassed on devices without Screen Time and in DEMO.
   if (
     isScreenTimeAvailable &&
     !DEMO_MODE &&
+    !onboardingComplete &&
     getScreenTimeAuthStatus() !== "approved"
   ) {
     return <Redirect href="/(auth)/screentime-setup" />;

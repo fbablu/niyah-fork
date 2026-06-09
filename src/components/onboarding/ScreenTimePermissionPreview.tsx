@@ -143,13 +143,6 @@ export const ScreenTimePermissionPreview: React.FC<Props> = ({
           </>
         )}
       </AnimatedPressable>
-
-      {!loading && (
-        <Animated.View style={[styles.hintRow, arrowStyle]}>
-          <Ionicons name="arrow-up" size={15} color={Colors.primary} />
-          <Text style={styles.hintText}>Tap, then choose Continue</Text>
-        </Animated.View>
-      )}
     </View>
   );
 };

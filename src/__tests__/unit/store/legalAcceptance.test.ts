@@ -1,13 +1,26 @@
 /**
- * Unit Tests for legal acceptance version comparison logic in authStore
+ * Unit tests for the legal-acceptance + onboarding-once logic in authStore.
  *
- * The authStore derives `hasAcceptedCurrentLegal` by comparing
- * `user.legalAcceptanceVersion` against `CURRENT_LEGAL_VERSION` from config.
- * This test verifies that comparison for matching, old, and missing versions.
+ * - `hasAcceptedCurrentLegal` compares `user.legalAcceptanceVersion` against
+ *   `CURRENT_LEGAL_VERSION`, OR honors a locally-recorded acceptance marker so a
+ *   lagging/failed CF write never re-prompts Terms on the next launch.
+ * - `markOnboardingComplete` records a uid-scoped flag so the Screen Time /
+ *   notification setup screens show once (build-23 feedback).
+ *
+ * The whole file runs with DEMO_MODE forced OFF so the real (non-DEMO) marker
+ * path is exercised; the acceptLegalTerms CF is mocked.
  */
 
-import { useAuthStore } from "../../../store/authStore";
-import { CURRENT_LEGAL_VERSION } from "../../../constants/config";
+// Force the non-DEMO code path; mock the CF (the only writer of the fields).
+jest.mock("../../../constants/config", () => ({
+  ...jest.requireActual("../../../constants/config"),
+  DEMO_MODE: false,
+}));
+const mockAcceptLegalTerms = jest.fn();
+jest.mock("../../../config/functions", () => ({
+  ...jest.requireActual("../../../config/functions"),
+  acceptLegalTerms: (...args: unknown[]) => mockAcceptLegalTerms(...args),
+}));
 
 // Mock Firebase config module (required by authStore imports)
 jest.mock("../../../config/firebase", () => ({
@@ -23,6 +36,15 @@ jest.mock("../../../config/firebase", () => ({
   signOut: jest.fn(),
   onAuthStateChanged: jest.fn(() => jest.fn()),
 }));
+
+import { useAuthStore } from "../../../store/authStore";
+import { CURRENT_LEGAL_VERSION } from "../../../constants/config";
+
+const AsyncStorage =
+  require("@react-native-async-storage/async-storage").default;
+
+const PENDING_KEY = "@niyah/pending_legal_acceptance:test-uid";
+const ONBOARDING_KEY = "@niyah/onboarding_complete:test-uid";
 
 const baseUser = {
   id: "test-uid",
@@ -62,6 +84,7 @@ describe("legal acceptance version comparison", () => {
       profileComplete: false,
       isNewUser: false,
       hasAcceptedCurrentLegal: false,
+      onboardingComplete: false,
     });
   });
 
@@ -118,66 +141,118 @@ describe("legal acceptance version comparison", () => {
   });
 });
 
-// ─── Acceptance retry marker (non-DEMO path) ─────────────────────────────────
+// ─── Acceptance durable marker (non-DEMO path) ───────────────────────────────
 //
-// The acceptLegalTerms CF is the only writer of the acceptance fields. When
-// that call fails (offline, the build-21 SSL-pin outage), the user must NOT
-// be re-prompted on every sign-in: acceptLegal leaves a retry marker and
-// retryPendingLegalAcceptance replays it on the next launch.
-describe("acceptLegal retry marker (non-DEMO)", () => {
-  afterEach(() => {
-    jest.dontMock("../../../constants/config");
-    jest.dontMock("../../../config/functions");
+// The client records acceptance locally the instant the user accepts, so a
+// lagging/failed CF write (offline, the build-21 SSL-pin outage, or a legacy CF
+// that doesn't persist) never re-prompts Terms on the next launch. The marker
+// is cleared ONLY once a launch reads the doc carrying the current version —
+// never on a bare CF "success".
+describe("acceptLegal durable marker (non-DEMO)", () => {
+  beforeEach(() => {
     jest.clearAllMocks();
-  });
-
-  it("writes the marker on CF failure, replays + clears it on retry", async () => {
-    jest.doMock("../../../constants/config", () => ({
-      ...jest.requireActual("../../../constants/config"),
-      DEMO_MODE: false,
-    }));
-    const acceptLegalTerms = jest
-      .fn()
-      .mockRejectedValueOnce(new Error("Network request failed"));
-    jest.doMock("../../../config/functions", () => ({ acceptLegalTerms }));
-
-    let store: typeof import("../../../store/authStore");
-    jest.isolateModules(() => {
-      store = require("../../../store/authStore");
-    });
-    const AsyncStorage =
-      require("@react-native-async-storage/async-storage").default;
-
-    store!.useAuthStore.setState({
+    mockAcceptLegalTerms.mockReset();
+    useAuthStore.setState({
       user: { ...baseUser },
       isAuthenticated: true,
       hasAcceptedCurrentLegal: false,
     } as never);
+  });
+
+  it("writes the marker even when the CF succeeds (durable until the doc confirms)", async () => {
+    mockAcceptLegalTerms.mockResolvedValue({ success: true });
+
+    await useAuthStore.getState().acceptLegal();
+
+    expect(mockAcceptLegalTerms).toHaveBeenCalledWith(CURRENT_LEGAL_VERSION);
+    // Marker is recorded up-front regardless of CF outcome, and NOT cleared on
+    // a bare success — only a later doc-confirm clears it.
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      PENDING_KEY,
+      CURRENT_LEGAL_VERSION,
+    );
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
+  });
+
+  it("on CF failure keeps the marker; replay keeps it until the doc carries the version", async () => {
+    mockAcceptLegalTerms.mockRejectedValueOnce(
+      new Error("Network request failed"),
+    );
 
     // CF fails → user is NOT trapped behind the gate, marker is written.
-    await store!.useAuthStore.getState().acceptLegal();
-    expect(store!.useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
+    await useAuthStore.getState().acceptLegal();
+    expect(useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
     expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-      "@niyah/pending_legal_acceptance:test-uid",
+      PENDING_KEY,
       CURRENT_LEGAL_VERSION,
     );
 
-    // Next launch: marker present + doc lacks the version → CF replayed,
-    // marker cleared, gate stays open.
-    acceptLegalTerms.mockResolvedValueOnce({ success: true });
+    // Next launch: marker present, doc STILL lacks the version → CF replayed,
+    // gate open, but the marker is NOT cleared on a bare success.
+    mockAcceptLegalTerms.mockResolvedValueOnce({ success: true });
     (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
       CURRENT_LEGAL_VERSION,
     );
-    store!.useAuthStore.setState({
+    (AsyncStorage.removeItem as jest.Mock).mockClear();
+    useAuthStore.setState({
       user: { ...baseUser },
       hasAcceptedCurrentLegal: false,
     } as never);
-    await store!.useAuthStore.getState().retryPendingLegalAcceptance();
+    await useAuthStore.getState().retryPendingLegalAcceptance();
 
-    expect(acceptLegalTerms).toHaveBeenCalledTimes(2);
-    expect(AsyncStorage.removeItem).toHaveBeenCalledWith(
-      "@niyah/pending_legal_acceptance:test-uid",
+    expect(mockAcceptLegalTerms).toHaveBeenCalledTimes(2);
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
+
+    // A later launch where the doc now carries the version → marker cleared,
+    // no further CF replay.
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      CURRENT_LEGAL_VERSION,
     );
-    expect(store!.useAuthStore.getState().hasAcceptedCurrentLegal).toBe(true);
+    useAuthStore.setState({
+      user: { ...baseUser, legalAcceptanceVersion: CURRENT_LEGAL_VERSION },
+      hasAcceptedCurrentLegal: true,
+    } as never);
+    await useAuthStore.getState().retryPendingLegalAcceptance();
+
+    expect(mockAcceptLegalTerms).toHaveBeenCalledTimes(2); // no extra replay
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith(PENDING_KEY);
+  });
+});
+
+// ─── Onboarding-complete milestone ───────────────────────────────────────────
+//
+// Reaching the tabs records a uid-scoped flag so the Screen Time / notification
+// setup screens (and any spurious legal re-prompt) don't re-appear on later
+// launches (build-23 feedback: onboarding shows once).
+describe("markOnboardingComplete", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("sets the flag in state + persists it per-uid, and is idempotent", async () => {
+    useAuthStore.setState({
+      user: { ...baseUser },
+      onboardingComplete: false,
+    } as never);
+
+    await useAuthStore.getState().markOnboardingComplete();
+    expect(useAuthStore.getState().onboardingComplete).toBe(true);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(ONBOARDING_KEY, "1");
+
+    // Second call no-ops (no duplicate write).
+    (AsyncStorage.setItem as jest.Mock).mockClear();
+    await useAuthStore.getState().markOnboardingComplete();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when unauthenticated", async () => {
+    useAuthStore.setState({
+      user: null,
+      onboardingComplete: false,
+    } as never);
+
+    await useAuthStore.getState().markOnboardingComplete();
+    expect(useAuthStore.getState().onboardingComplete).toBe(false);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
 });
