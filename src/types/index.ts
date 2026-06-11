@@ -135,6 +135,14 @@ export interface Session {
   dayOfWeek?: number; // 0 (Sun) – 6 (Sat), user-local at start
   surrenderReason?: SurrenderReason;
   surrenderNote?: string; // optional free text (capped)
+  /**
+   * Per-category blocked-app attempt counts captured at session end from the
+   * shield tallies ("social" | "video" | "gaming" | "news" | "other" → opens).
+   * Analytics + session-receipt display only — NO money meaning. Local-history
+   * only: NOT in the sessions update allowlist (firebase/firestore.rules), so
+   * it is never written client-side.
+   */
+  blockedByCategory?: Record<string, number>;
 }
 
 export interface Transaction {
@@ -209,6 +217,13 @@ export interface GroupSession {
   status: SessionStatus; // from current user's perspective
   completedAt?: Date;
   participants: SessionParticipant[];
+  /**
+   * Per-category blocked-app attempt counts captured at session end (this
+   * device's shield tallies — the current user only). Analytics + receipt
+   * display only; local-history only — group docs are CF-owned, never
+   * client-written.
+   */
+  blockedByCategory?: Record<string, number>;
 }
 
 // ─── Group Session (Firestore-backed, server-authoritative) ─────────────────

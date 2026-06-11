@@ -2,9 +2,6 @@ import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
-import { BlobAvatar } from "../BlobAvatar";
-import { BlobMakerSheet } from "./BlobMakerSheet";
 import {
   Typography,
   Spacing,
@@ -13,216 +10,121 @@ import {
   type ThemeColors,
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import { REPUTATION_LEVELS } from "../../constants/config";
 import type { User } from "../../types";
-import {
-  generateBlobAvatarPreset,
-  type BlobAvatarConfig,
-} from "../../constants/blobAvatar";
 
 interface ProfileHeaderProps {
   user: User | null;
   followingCount: number;
   partnerCount: number;
-  onBlobAvatarChange?: (blobAvatar: BlobAvatarConfig) => void;
 }
 
+// Header info card (profile-tab-normal frame 352:320): name + email on the
+// left, Following | Partners counters on the right. The avatar lives on the
+// BlobPlatform zone below — this card intentionally renders no blob, and
+// Clout (CloutCard) replaced the old reputation badge.
 export function ProfileHeader({
   user,
   followingCount,
   partnerCount,
-  onBlobAvatarChange,
 }: ProfileHeaderProps) {
   const Colors = useColors();
   const router = useRouter();
   const styles = React.useMemo(() => makeStyles(Colors), [Colors]);
-  const [editorVisible, setEditorVisible] = React.useState(false);
-  const avatarConfig = React.useMemo(
-    () => user?.blobAvatar || generateBlobAvatarPreset(user?.id || "guest"),
-    [user?.blobAvatar, user?.id],
-  );
 
-  const reputation = user?.reputation;
-  const reputationLevel = reputation?.level || "sapling";
-  const reputationInfo =
-    REPUTATION_LEVELS[reputationLevel as keyof typeof REPUTATION_LEVELS];
-
-  const getReputationColor = (score: number) => {
-    if (score >= 80) return Colors.gain;
-    if (score >= 60) return Colors.primary;
-    if (score >= 40) return Colors.warning;
-    return Colors.loss;
-  };
-
-  const editable = !!user && !!onBlobAvatarChange;
-  const openEditor = () => {
-    if (!editable) return;
+  const goToFriends = (tab: "following" | "partners") => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setEditorVisible(true);
+    router.push({ pathname: "/(tabs)/friends", params: { tab } });
   };
 
   return (
-    <View style={styles.header}>
-      <View style={styles.avatarWrap}>
-        <BlobAvatar
-          size={92}
-          config={avatarConfig}
-          seed={user?.id}
-          animated
-          onPress={editable ? openEditor : undefined}
-          accessibilityLabel={editable ? "Edit your blob" : undefined}
-        />
-        {editable && (
-          <Pressable
-            onPress={openEditor}
-            style={styles.editBadge}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Edit your blob"
-          >
-            <Ionicons name="pencil" size={14} color={Colors.white} />
-          </Pressable>
-        )}
-      </View>
-      <Text style={styles.name}>{user?.name || "?"}</Text>
-      <Text style={styles.email}>{user?.email || ""}</Text>
-
-      <View style={styles.reputationBadge}>
-        <View
-          style={[
-            styles.reputationDot,
-            {
-              backgroundColor: getReputationColor(reputation?.score || 50),
-            },
-          ]}
-        />
-        <Text style={styles.reputationText}>
-          {reputationInfo?.label || "Sapling"} - {reputation?.score || 50}
-          /100
+    <View style={styles.card}>
+      <View style={styles.identity}>
+        <Text
+          style={styles.name}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.55}
+        >
+          {user?.name || "?"}
+        </Text>
+        <Text style={styles.email} numberOfLines={1}>
+          {user?.email || ""}
         </Text>
       </View>
 
-      <View style={styles.headerStatsRow}>
+      <View style={styles.statsRow}>
         <Pressable
-          style={styles.headerStatItem}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push({
-              pathname: "/(tabs)/friends",
-              params: { tab: "following" },
-            });
-          }}
+          style={styles.statItem}
+          onPress={() => goToFriends("following")}
+          accessibilityRole="button"
+          accessibilityLabel={`${followingCount} following`}
         >
-          <Text style={styles.headerStatValue}>{followingCount}</Text>
-          <Text style={styles.headerStatLabel}>Following</Text>
+          <Text style={styles.statValue}>{followingCount}</Text>
+          <Text style={styles.statLabel}>Following</Text>
         </Pressable>
-        <View style={styles.headerStatDivider} />
+        <View style={styles.statDivider} />
         <Pressable
-          style={styles.headerStatItem}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push({
-              pathname: "/(tabs)/friends",
-              params: { tab: "partners" },
-            });
-          }}
+          style={styles.statItem}
+          onPress={() => goToFriends("partners")}
+          accessibilityRole="button"
+          accessibilityLabel={`${partnerCount} partners`}
         >
-          <Text style={styles.headerStatValue}>{partnerCount}</Text>
-          <Text style={styles.headerStatLabel}>Partners</Text>
+          <Text style={styles.statValue}>{partnerCount}</Text>
+          <Text style={styles.statLabel}>Partners</Text>
         </Pressable>
       </View>
-
-      {editable && (
-        <BlobMakerSheet
-          visible={editorVisible}
-          onClose={() => setEditorVisible(false)}
-          uid={user.id}
-          config={avatarConfig}
-          onSave={onBlobAvatarChange}
-        />
-      )}
     </View>
   );
 }
 
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
-    header: {
+    card: {
+      flexDirection: "row",
       alignItems: "center",
-      marginBottom: Spacing.xl,
+      justifyContent: "space-between",
+      backgroundColor: Colors.backgroundCard,
+      borderRadius: Radius.xl,
+      paddingVertical: Spacing.md,
+      paddingHorizontal: Spacing.lg,
+      marginBottom: Spacing.lg,
     },
-    avatarWrap: {
-      position: "relative",
-    },
-    editBadge: {
-      position: "absolute",
-      right: -2,
-      bottom: -2,
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: Colors.primary,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 2,
-      borderColor: Colors.background,
+    identity: {
+      flex: 1,
+      marginRight: Spacing.md,
     },
     name: {
-      fontSize: Typography.titleLarge,
+      fontSize: Typography.headlineLarge,
       ...Font.bold,
       color: Colors.text,
-      marginTop: Spacing.sm,
     },
     email: {
-      fontSize: Typography.bodySmall,
+      fontSize: Typography.bodyMedium,
       color: Colors.textSecondary,
       marginTop: Spacing.xs,
     },
-    headerStatsRow: {
+    statsRow: {
       flexDirection: "row",
       alignItems: "center",
-      marginTop: Spacing.md,
-      paddingVertical: Spacing.sm,
-      paddingHorizontal: Spacing.md,
     },
-    headerStatItem: {
+    statItem: {
       alignItems: "center",
-      minWidth: 88,
+      minWidth: 56,
     },
-    headerStatValue: {
+    statValue: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
       color: Colors.text,
     },
-    headerStatLabel: {
+    statLabel: {
       fontSize: Typography.labelSmall,
       color: Colors.textSecondary,
       marginTop: 2,
     },
-    headerStatDivider: {
+    statDivider: {
       width: 1,
       height: 28,
       backgroundColor: Colors.border,
       marginHorizontal: Spacing.md,
-    },
-    reputationBadge: {
-      flexDirection: "row",
-      alignItems: "center",
-      backgroundColor: Colors.backgroundCard,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-      borderRadius: Radius.full,
-      marginTop: Spacing.md,
-    },
-    reputationDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      marginRight: Spacing.sm,
-    },
-    reputationText: {
-      fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
-      ...Font.medium,
     },
   });

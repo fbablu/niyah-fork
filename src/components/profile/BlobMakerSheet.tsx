@@ -1,17 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
-import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { BlobAvatar } from "../BlobAvatar";
+import { BlobMakerStage } from "./BlobMakerStage";
+import { BlobOptionRows } from "./BlobOptionRows";
 import {
   Typography,
   Spacing,
@@ -24,8 +32,6 @@ import { generateId } from "../../utils/id";
 import {
   BLOB_AVATAR_COLORS,
   BLOB_AVATAR_EYES,
-  BLOB_DISPLAY_LABELS,
-  BLOB_PALETTES,
   type BlobAvatarColorPreset,
   type BlobAvatarConfig,
   type BlobAvatarEyesPreset,
@@ -41,9 +47,22 @@ interface BlobMakerSheetProps {
   onSave: (next: BlobAvatarConfig) => void;
 }
 
-// Edit-your-blob sheet: the profile blob "zooms to the foreground" and becomes
-// editable. Shapes are fully generative (no preset picker) — Shuffle re-mints a
-// one-of-a-kind seed; Color + Expression stay explicit. (build-23 feedback.)
+// Slingshot rubber-band: low-damping overshoot spring (design comment 2).
+// Shared by the hero blob AND the sheet's translateY rise.
+const SLINGSHOT_SPRING = { damping: 12, stiffness: 140 };
+const COLLAPSE_MS = 250;
+const BACKDROP_MS = 200;
+/** Partial sheet: ~66% of the screen, bottom-anchored (frame 401:106 — the
+ *  sheet rises to y≈298 of 874), so the dimmed profile and the platform's
+ *  sleepy-eyes flip (design comment 1) stay visible above it. */
+const SHEET_HEIGHT_RATIO = 0.66;
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Edit-your-blob sheet: the profile blob slingshots from its platform into
+// the foreground and becomes editable. Shapes are fully generative — Shuffle
+// re-mints a one-of-a-kind seed; Color + Eyes stay explicit; the die
+// randomizes all three (design comment 2).
 export function BlobMakerSheet({
   visible,
   onClose,
@@ -54,6 +73,8 @@ export function BlobMakerSheet({
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const reducedMotion = useReducedMotion();
+  const { height: screenHeight } = useWindowDimensions();
+  const sheetHeight = Math.round(screenHeight * SHEET_HEIGHT_RATIO);
 
   const [seed, setSeed] = useState(config.shapeSeed || uid);
   const [colorPreset, setColorPreset] = useState<BlobAvatarColorPreset>(
@@ -72,20 +93,39 @@ export function BlobMakerSheet({
     }
   }, [visible, config, uid]);
 
-  // Hero entrance: the blob grows from the background to fill the foreground.
+  // Entrance: hero slingshots off the platform with rubber-band overshoot,
+  // the sheet springs up from the bottom edge, the backdrop fades in.
   const hero = useSharedValue(0);
+  const sheet = useSharedValue(0);
+  const backdrop = useSharedValue(0);
   useEffect(() => {
     if (!visible) {
       hero.value = 0;
+      sheet.value = 0;
+      backdrop.value = 0;
       return;
     }
-    hero.value = reducedMotion
-      ? 1
-      : withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) });
-  }, [visible, reducedMotion, hero]);
+    if (reducedMotion) {
+      hero.value = 1;
+      sheet.value = 1;
+      backdrop.value = 1;
+      return;
+    }
+    hero.value = withSpring(1, SLINGSHOT_SPRING);
+    sheet.value = withSpring(1, SLINGSHOT_SPRING);
+    backdrop.value = withTiming(1, { duration: BACKDROP_MS });
+  }, [visible, reducedMotion, hero, sheet, backdrop]);
+
   const heroStyle = useAnimatedStyle(() => ({
-    opacity: hero.value,
+    opacity: Math.min(hero.value, 1),
     transform: [{ scale: 0.6 + hero.value * 0.4 }],
+  }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    // Overshoot (>1) briefly lifts past the resting line — rubber band.
+    transform: [{ translateY: (1 - sheet.value) * sheetHeight }],
+  }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(backdrop.value, 1),
   }));
 
   const editing: BlobAvatarConfig = {
@@ -105,155 +145,132 @@ export function BlobMakerSheet({
     });
   };
 
+  // Collapse-then-close: the hero slingshots back toward the platform while
+  // the sheet drops and the backdrop fades; control hands back on settle.
+  const requestClose = () => {
+    if (reducedMotion) {
+      onClose();
+      return;
+    }
+    hero.value = withTiming(0, {
+      duration: COLLAPSE_MS,
+      easing: Easing.in(Easing.cubic),
+    });
+    backdrop.value = withTiming(0, { duration: COLLAPSE_MS });
+    sheet.value = withTiming(
+      0,
+      { duration: COLLAPSE_MS, easing: Easing.in(Easing.cubic) },
+      () => {
+        runOnJS(onClose)();
+      },
+    );
+  };
+
   const handleShuffle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSeed(`${uid}:${generateId(8)}`);
     pop();
   };
 
+  // Die: one tap re-mints the seed AND draws a random color + eyes (eye
+  // geometry is per-shape, so eyes stay centered on any result).
+  const handleRandomizeAll = () => {
+    Haptics.selectionAsync();
+    setSeed(`${uid}:${generateId(8)}`);
+    setColorPreset(
+      BLOB_AVATAR_COLORS[Math.floor(Math.random() * BLOB_AVATAR_COLORS.length)],
+    );
+    setEyesPreset(
+      BLOB_AVATAR_EYES[Math.floor(Math.random() * BLOB_AVATAR_EYES.length)],
+    );
+    pop();
+  };
+
   const handleSave = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onSave(editing);
-    onClose();
+    requestClose();
   };
 
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      transparent
+      animationType="none"
+      onRequestClose={requestClose}
     >
-      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-        <View style={styles.headerRow}>
-          <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={styles.cancel}>Cancel</Text>
-          </Pressable>
-          <Text style={styles.title}>Edit your blob</Text>
-          <Pressable onPress={handleSave} hitSlop={8}>
-            <Text style={styles.done}>Done</Text>
-          </Pressable>
-        </View>
+      <View style={styles.root}>
+        <AnimatedPressable
+          testID="blob-maker-backdrop"
+          accessibilityRole="button"
+          accessibilityLabel="Close the blob editor"
+          onPress={requestClose}
+          style={[styles.backdrop, backdropStyle]}
+        />
+        <Animated.View
+          testID="blob-maker-sheet"
+          style={[styles.sheet, { height: sheetHeight }, sheetStyle]}
+        >
+          <SafeAreaView style={styles.sheetInner} edges={["bottom"]}>
+            <View style={styles.grabBar} />
+            <View style={styles.headerRow}>
+              <Pressable onPress={requestClose} hitSlop={8}>
+                <Text style={styles.cancel}>Cancel</Text>
+              </Pressable>
+              <Text style={styles.title}>Edit your blob</Text>
+              <Pressable onPress={handleSave} hitSlop={8}>
+                <Text style={styles.done}>Done</Text>
+              </Pressable>
+            </View>
 
-        <View style={styles.stage}>
-          <Animated.View style={heroStyle}>
-            <BlobAvatar size={168} config={editing} seed={uid} animated />
-          </Animated.View>
-          <Pressable
-            onPress={handleShuffle}
-            style={({ pressed }) => [
-              styles.shuffle,
-              pressed && styles.shufflePressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Shuffle blob shape"
-          >
-            <Ionicons name="shuffle" size={22} color={Colors.text} />
-            <Text style={styles.shuffleText}>Shuffle</Text>
-          </Pressable>
-        </View>
+            <BlobMakerStage
+              editing={editing}
+              uid={uid}
+              heroStyle={heroStyle}
+              onRandomize={handleRandomizeAll}
+              onSaveCollapse={handleSave}
+            />
 
-        <View style={styles.controls}>
-          <Text style={styles.label}>Color</Text>
-          <View style={styles.optionsRow}>
-            {BLOB_AVATAR_COLORS.map((option) => {
-              const selected = colorPreset === option;
-              const swatch = BLOB_PALETTES[option];
-              return (
-                <Pressable
-                  key={option}
-                  style={styles.swatchWrapper}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setColorPreset(option);
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.swatchRing,
-                      selected && {
-                        borderColor: Colors.primary,
-                        borderWidth: 2.5,
-                      },
-                    ]}
-                  >
-                    <Svg width={36} height={36} viewBox="0 0 36 36">
-                      <Defs>
-                        <LinearGradient
-                          id={`sw-${option}`}
-                          x1="0"
-                          y1="0"
-                          x2="1"
-                          y2="1"
-                        >
-                          <Stop offset="0" stopColor={swatch.start} />
-                          <Stop offset="1" stopColor={swatch.end} />
-                        </LinearGradient>
-                      </Defs>
-                      <Circle
-                        cx={18}
-                        cy={18}
-                        r={16}
-                        fill={`url(#sw-${option})`}
-                      />
-                    </Svg>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text style={styles.label}>Expression</Text>
-          <View style={styles.optionsRow}>
-            {BLOB_AVATAR_EYES.map((option) => {
-              const selected = eyesPreset === option;
-              return (
-                <Pressable
-                  key={option}
-                  style={styles.previewWrapper}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setEyesPreset(option);
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.previewBorder,
-                      selected && {
-                        borderColor: Colors.primary,
-                        borderWidth: 2.5,
-                      },
-                    ]}
-                  >
-                    <BlobAvatar
-                      size={44}
-                      config={{ ...editing, eyesPreset: option }}
-                      seed={uid}
-                    />
-                  </View>
-                  <Text
-                    style={[
-                      styles.previewLabel,
-                      selected && styles.previewLabelSelected,
-                    ]}
-                  >
-                    {BLOB_DISPLAY_LABELS[option]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      </SafeAreaView>
+            <BlobOptionRows
+              editing={editing}
+              uid={uid}
+              onSelectColor={setColorPreset}
+              onSelectEyes={setEyesPreset}
+              onShuffleShape={handleShuffle}
+            />
+          </SafeAreaView>
+        </Animated.View>
+      </View>
     </Modal>
   );
 }
 
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
-    container: {
+    root: {
       flex: 1,
+      justifyContent: "flex-end",
+    },
+    backdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: Colors.overlay,
+    },
+    sheet: {
       backgroundColor: Colors.background,
+      borderTopLeftRadius: Radius.xl,
+      borderTopRightRadius: Radius.xl,
+      overflow: "hidden",
+    },
+    sheetInner: {
+      flex: 1,
+    },
+    grabBar: {
+      alignSelf: "center",
+      width: Spacing.xxl,
+      height: Spacing.xs,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.backgroundTertiary,
+      marginTop: Spacing.sm,
     },
     headerRow: {
       flexDirection: "row",
@@ -277,79 +294,5 @@ const makeStyles = (Colors: ThemeColors) =>
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
       color: Colors.primary,
-    },
-    stage: {
-      alignItems: "center",
-      justifyContent: "center",
-      paddingVertical: Spacing.xl,
-      gap: Spacing.lg,
-    },
-    shuffle: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: Spacing.sm,
-      paddingHorizontal: Spacing.lg,
-      paddingVertical: Spacing.sm,
-      borderRadius: Radius.full,
-      backgroundColor: Colors.backgroundCard,
-      borderWidth: 1,
-      borderColor: Colors.border,
-    },
-    shufflePressed: {
-      backgroundColor: Colors.backgroundSecondary,
-    },
-    shuffleText: {
-      fontSize: Typography.bodyMedium,
-      ...Font.semibold,
-      color: Colors.text,
-    },
-    controls: {
-      paddingHorizontal: Spacing.lg,
-    },
-    label: {
-      fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
-      marginBottom: Spacing.sm,
-      marginTop: Spacing.md,
-    },
-    optionsRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: Spacing.sm,
-      marginBottom: Spacing.sm,
-    },
-    swatchWrapper: {
-      alignItems: "center",
-    },
-    swatchRing: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 2,
-      borderColor: "transparent",
-    },
-    previewWrapper: {
-      alignItems: "center",
-      gap: 4,
-    },
-    previewBorder: {
-      width: 56,
-      height: 56,
-      borderRadius: Radius.lg,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 2,
-      borderColor: "transparent",
-    },
-    previewLabel: {
-      fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
-      ...Font.medium,
-    },
-    previewLabelSelected: {
-      color: Colors.primary,
-      ...Font.semibold,
     },
   });

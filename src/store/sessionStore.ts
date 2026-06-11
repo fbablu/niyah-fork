@@ -55,6 +55,23 @@ const violationCategoryProps = (): Record<string, number> => {
   return props;
 };
 
+/** Raw per-category counts for the session-receipt history capture (zero and
+ *  malformed entries dropped; null when nothing was blocked-and-attempted).
+ *  Read at session end, BEFORE stopBlocking — tallies persist until the NEXT
+ *  startBlocking, so this is the last safe read for THIS session. Analytics +
+ *  receipt display only; never touches stake/status/balance. Local history
+ *  only — `blockedByCategory` is not in the sessions update allowlist
+ *  (firebase/firestore.rules), so no Firestore write is attempted. */
+const captureBlockedByCategory = (): Record<string, number> | null => {
+  const counts: Record<string, number> = {};
+  for (const [key, n] of Object.entries(getViolationsByCategory())) {
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) {
+      counts[key] = Math.floor(n);
+    }
+  }
+  return Object.keys(counts).length > 0 ? counts : null;
+};
+
 interface SessionState {
   currentSession: Session | null;
   sessionHistory: Session[];
@@ -267,12 +284,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!currentSession) return;
 
     const completedAt = new Date();
+    // Read shield tallies BEFORE the stopBlocking below (see helper docs).
+    const blockedByCategory = captureBlockedByCategory();
     const completedSession: Session = {
       ...currentSession,
       status: "surrendered",
       completedAt,
       actualPayout: 0,
       ...(AI_DATA_CAPTURE_ENABLED && reason ? { surrenderReason: reason } : {}),
+      ...(AI_DATA_CAPTURE_ENABLED && blockedByCategory
+        ? { blockedByCategory }
+        : {}),
     };
 
     const authStore = useAuthStore.getState();
@@ -356,12 +378,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     const payout = currentSession.potentialPayout;
     const completedAt = new Date();
+    // Read shield tallies BEFORE the stopBlocking below (see helper docs).
+    const blockedByCategory = captureBlockedByCategory();
 
     const completedSession: Session = {
       ...currentSession,
       status: "completed",
       completedAt,
       actualPayout: payout,
+      ...(AI_DATA_CAPTURE_ENABLED && blockedByCategory
+        ? { blockedByCategory }
+        : {}),
     };
 
     const authStore = useAuthStore.getState();

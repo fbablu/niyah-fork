@@ -12,6 +12,7 @@ import {
   UserReputation,
 } from "../types";
 import {
+  AI_DATA_CAPTURE_ENABLED,
   CADENCES,
   DEMO_MODE,
   USE_SHORT_TIMERS,
@@ -583,11 +584,24 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
     const currentUserResult = results.find((r) => r.userId === currentUserId);
     const didComplete = currentUserResult?.completed ?? false;
 
+    // Per-category blocked-attempt counts for this device (covers group +
+    // free quick-block ends — solo staked sessions flatten these into their
+    // own events). Read BEFORE the stopBlocking cleanup below: tallies persist
+    // until the NEXT startBlocking, so this is the last safe read for THIS
+    // session. Zero/malformed entries dropped. Analytics + receipt display
+    // only — group docs are CF-owned, so this is never written to Firestore.
+    const blockedEntries = Object.entries(getViolationsByCategory()).filter(
+      ([, n]) => typeof n === "number" && Number.isFinite(n) && n > 0,
+    );
+
     const completedSession: GroupSession = {
       ...activeGroupSession,
       status: didComplete ? "completed" : "surrendered",
       completedAt: new Date(),
       participants: finalParticipants,
+      ...(AI_DATA_CAPTURE_ENABLED && blockedEntries.length > 0
+        ? { blockedByCategory: Object.fromEntries(blockedEntries) }
+        : {}),
     };
 
     if (currentUserId) {
@@ -634,24 +648,19 @@ export const useGroupSessionStore = create<GroupSessionState>((set, get) => ({
       }
     }
 
-    // Per-category blocked-attempt summary (covers group + free quick-block
-    // ends — solo staked sessions flatten these into their own events).
-    // Read BEFORE stopBlocking-adjacent cleanup; zero-attempt sessions skip.
-    {
-      const counts = getViolationsByCategory();
-      const entries = Object.entries(counts).filter(([, n]) => n > 0);
-      if (entries.length > 0) {
-        logEvent("blocked_attempts_summary", {
-          sessionType:
-            completedSession.participants.length > 1 ? "group" : "quick",
-          ...Object.fromEntries(
-            entries.map(([key, n]) => [
-              `violations${key[0].toUpperCase()}${key.slice(1)}`,
-              n,
-            ]),
-          ),
-        });
-      }
+    // Per-category blocked-attempt analytics summary (same read as the
+    // history capture above; zero-attempt sessions skip).
+    if (blockedEntries.length > 0) {
+      logEvent("blocked_attempts_summary", {
+        sessionType:
+          completedSession.participants.length > 1 ? "group" : "quick",
+        ...Object.fromEntries(
+          blockedEntries.map(([key, n]) => [
+            `violations${key[0].toUpperCase()}${key.slice(1)}`,
+            n,
+          ]),
+        ),
+      });
     }
 
     // Clear dynamic shield context now that the session is over

@@ -89,7 +89,35 @@ const SHAPES: Record<BlobAvatarShapePreset, ShapeConfig> = {
   },
 };
 
-const Eyes: React.FC<{
+/** Resolved body outline for a blob config — the exact path (and coordinate
+ *  space) BlobAvatar draws. Lets satellite renderers (e.g. the calendar
+ *  streak badge tracing the user's chosen blob, design comment 3) reuse the
+ *  preset path data instead of duplicating it. */
+export interface BlobBodyShape {
+  viewBox: string;
+  bodyPath: string;
+}
+
+export const getBlobBodyShape = (
+  config: BlobAvatarConfig,
+  seed?: string,
+): BlobBodyShape => {
+  const shape = SHAPES[config.shapePreset];
+  // "unique" is procedural: a shuffled shapeSeed (Blob Maker) wins over the
+  // caller's uid seed; named presets use their fixed path.
+  return {
+    viewBox: shape.viewBox,
+    bodyPath:
+      config.shapePreset === "unique"
+        ? generateBlobPath(config.shapeSeed || seed || "guest")
+        : shape.bodyPath,
+  };
+};
+
+/** Eye glyph renderer, shared with the Blob Maker's eye-shape row so option
+ *  tiles draw the exact same eyes the avatar will wear (no redrawn art). Must
+ *  be composed inside an `<Svg>` — it renders raw SVG primitives. */
+export const BlobEyes: React.FC<{
   eyesPreset: BlobAvatarEyesPreset;
   centerX: number;
   centerY: number;
@@ -209,13 +237,10 @@ export const BlobAvatar: React.FC<BlobAvatarProps> = ({
 
   // "unique" shapes are procedurally generated from a per-user seed so every
   // user gets a stable, one-of-a-kind blob; named presets use their fixed
-  // path. A shuffled shapeSeed (onboarding Blob Maker) wins over the uid.
+  // path (resolution shared with getBlobBodyShape consumers).
   const bodyPath = React.useMemo(
-    () =>
-      config.shapePreset === "unique"
-        ? generateBlobPath(config.shapeSeed || seed || "guest")
-        : shape.bodyPath,
-    [config.shapePreset, config.shapeSeed, seed, shape.bodyPath],
+    () => getBlobBodyShape(config, seed).bodyPath,
+    [config, seed],
   );
 
   // Opt-in subtle "breathing" idle so hero avatars feel alive (used sparingly).
@@ -292,7 +317,7 @@ export const BlobAvatar: React.FC<BlobAvatarProps> = ({
           <Path d={bodyPath} fill="#000" opacity={0.1} x={2} y={3} />
         </G>
 
-        <Eyes
+        <BlobEyes
           eyesPreset={config.eyesPreset}
           centerX={centerX}
           centerY={shape.eyeCenterY}

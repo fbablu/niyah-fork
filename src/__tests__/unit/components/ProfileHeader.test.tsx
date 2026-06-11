@@ -1,8 +1,9 @@
 /**
- * Unit Tests for ProfileHeader component
+ * Unit Tests for ProfileHeader component (profile-tab-normal header card).
  *
- * Tests avatar initial, user info display, reputation badge coloring,
- * stat counts, and navigation on stat press.
+ * Contract: name + email + Following/Partners counters with friends-tab
+ * navigation. The blob avatar and reputation badge are intentionally GONE —
+ * BlobPlatform owns the avatar zone and CloutCard replaced reputation.
  */
 
 import React from "react";
@@ -19,9 +20,7 @@ jest.mock("expo-router", () => ({
   }),
 }));
 
-const makeReputation = (
-  overrides: Partial<UserReputation> = {},
-): UserReputation => ({
+const makeReputation = (): UserReputation => ({
   score: 50,
   level: "sapling",
   paymentsCompleted: 3,
@@ -30,7 +29,6 @@ const makeReputation = (
   totalOwedMissed: 500,
   lastUpdated: new Date(),
   referralCount: 0,
-  ...overrides,
 });
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
@@ -62,93 +60,32 @@ describe("ProfileHeader", () => {
       expect(screen.getByText("alice@test.com")).toBeTruthy();
     });
 
-    it("renders an edit-blob affordance for signed-in users with an onChange handler", () => {
-      render(
-        <ProfileHeader
-          user={makeUser({ name: "Bob" })}
-          followingCount={0}
-          partnerCount={0}
-          onBlobAvatarChange={jest.fn()}
-        />,
-      );
-      // Both the blob and the pencil badge expose the "Edit your blob" label.
-      expect(screen.getAllByLabelText("Edit your blob").length).toBeGreaterThan(
-        0,
-      );
-    });
-
-    it("renders no edit affordance without an onChange handler", () => {
-      render(
-        <ProfileHeader
-          user={makeUser({ name: "Bob" })}
-          followingCount={0}
-          partnerCount={0}
-        />,
-      );
-      expect(screen.queryByLabelText("Edit your blob")).toBeNull();
-    });
-
     it("shows '?' when user is null", () => {
       render(<ProfileHeader user={null} followingCount={0} partnerCount={0} />);
       expect(screen.getByText("?")).toBeTruthy();
-      expect(screen.queryByLabelText("Edit your blob")).toBeNull();
     });
 
     it("shows '?' when user name is undefined", () => {
-      // Force name to be undefined via type assertion
       const user = makeUser({ name: undefined as unknown as string });
       render(<ProfileHeader user={user} followingCount={0} partnerCount={0} />);
       expect(screen.getByText("?")).toBeTruthy();
     });
   });
 
-  describe("reputation badge", () => {
-    it("displays reputation level label and score", () => {
+  describe("redesign: avatar and reputation moved out of the header", () => {
+    it("renders no blob-edit affordance (BlobPlatform owns the avatar zone)", () => {
       render(
-        <ProfileHeader
-          user={makeUser({
-            reputation: makeReputation({ score: 72, level: "tree" }),
-          })}
-          followingCount={0}
-          partnerCount={0}
-        />,
+        <ProfileHeader user={makeUser()} followingCount={0} partnerCount={0} />,
       );
-      expect(screen.getByText("Tree - 72/100")).toBeTruthy();
+      expect(screen.queryByLabelText("Edit your blob")).toBeNull();
     });
 
-    it("defaults to 'Sapling - 50/100' when reputation is undefined", () => {
-      const user = makeUser();
-      // Remove reputation entirely
-      (user as any).reputation = undefined;
-      render(<ProfileHeader user={user} followingCount={0} partnerCount={0} />);
-      expect(screen.getByText("Sapling - 50/100")).toBeTruthy();
-    });
-
-    it("displays Oak label for oak level", () => {
+    it("renders no reputation badge (CloutCard replaced it)", () => {
       render(
-        <ProfileHeader
-          user={makeUser({
-            reputation: makeReputation({ score: 95, level: "oak" }),
-          })}
-          followingCount={0}
-          partnerCount={0}
-        />,
+        <ProfileHeader user={makeUser()} followingCount={0} partnerCount={0} />,
       );
-      expect(screen.getByText(/Oak/)).toBeTruthy();
-      expect(screen.getByText(/95\/100/)).toBeTruthy();
-    });
-
-    it("displays Seed label for seed level", () => {
-      render(
-        <ProfileHeader
-          user={makeUser({
-            reputation: makeReputation({ score: 10, level: "seed" }),
-          })}
-          followingCount={0}
-          partnerCount={0}
-        />,
-      );
-      expect(screen.getByText("Seed - 10/100")).toBeTruthy();
+      expect(screen.queryByText(/\/100/)).toBeNull();
+      expect(screen.queryByText(/Sapling/)).toBeNull();
     });
   });
 

@@ -60,6 +60,22 @@ jest.mock("../../../config/functions", () => ({
     })),
 }));
 
+// Mirrors sessionStore.fireAndForget.test.ts — needed so the per-category
+// capture tests below can drive getViolationsByCategory fixtures. Defaults
+// keep every other test's behavior identical to the real no-op JS wrapper.
+jest.mock("../../../config/screentime", () => ({
+  startBlocking: jest.fn(() => Promise.resolve()),
+  stopBlocking: jest.fn(() => Promise.resolve()),
+  onSurrenderRequested: jest.fn(() => jest.fn()),
+  onShieldViolation: jest.fn(() => jest.fn()),
+  startLiveActivity: jest.fn(() => Promise.resolve(false)),
+  updateLiveActivity: jest.fn(() => Promise.resolve(false)),
+  endLiveActivity: jest.fn(() => Promise.resolve(false)),
+  setSessionContext: jest.fn(() => Promise.resolve()),
+  clearSessionContext: jest.fn(() => Promise.resolve()),
+  getViolationsByCategory: jest.fn(() => ({})),
+}));
+
 import { act } from "react";
 import { useSessionStore } from "../../../store/sessionStore";
 import { useWalletStore } from "../../../store/walletStore";
@@ -69,6 +85,10 @@ import {
   DEMO_MODE,
   INITIAL_BALANCE,
 } from "../../../constants/config";
+import {
+  getViolationsByCategory,
+  stopBlocking,
+} from "../../../config/screentime";
 
 describe("sessionStore", () => {
   beforeEach(() => {
@@ -528,6 +548,86 @@ describe("sessionStore", () => {
         store.completeSession();
       });
 
+      expect(useWalletStore.getState().balance).toBe(balanceBefore + payout);
+    });
+  });
+
+  describe("blockedByCategory capture (session receipts, design comment 5)", () => {
+    const mockViolations = getViolationsByCategory as jest.Mock;
+    const mockStopBlocking = stopBlocking as jest.Mock;
+
+    beforeEach(() => {
+      mockViolations.mockClear();
+      mockStopBlocking.mockClear();
+      act(() => {
+        useSessionStore.getState().startSession("daily");
+      });
+    });
+
+    afterEach(() => {
+      // Restore the no-violations default so other suites stay unaffected.
+      mockViolations.mockReturnValue({});
+    });
+
+    it("completeSession captures shield tallies into history (zero counts dropped)", () => {
+      mockViolations.mockReturnValue({ social: 3, video: 0, gaming: 1 });
+
+      act(() => {
+        useSessionStore.getState().completeSession();
+      });
+
+      expect(
+        useSessionStore.getState().sessionHistory[0].blockedByCategory,
+      ).toEqual({ social: 3, gaming: 1 });
+    });
+
+    it("surrenderSession captures shield tallies into history too", () => {
+      mockViolations.mockReturnValue({ news: 2 });
+
+      act(() => {
+        useSessionStore.getState().surrenderSession();
+      });
+
+      const entry = useSessionStore.getState().sessionHistory[0];
+      expect(entry.status).toBe("surrendered");
+      expect(entry.blockedByCategory).toEqual({ news: 2 });
+    });
+
+    it("omits the field entirely when nothing was blocked-and-attempted", () => {
+      mockViolations.mockReturnValue({});
+
+      act(() => {
+        useSessionStore.getState().completeSession();
+      });
+
+      expect(
+        useSessionStore.getState().sessionHistory[0].blockedByCategory,
+      ).toBeUndefined();
+    });
+
+    it("reads the tallies BEFORE stopBlocking (native counts only persist until the next startBlocking)", () => {
+      mockViolations.mockReturnValue({ social: 1 });
+
+      act(() => {
+        useSessionStore.getState().completeSession();
+      });
+
+      const firstRead = mockViolations.mock.invocationCallOrder[0];
+      const stopCall = mockStopBlocking.mock.invocationCallOrder[0];
+      expect(firstRead).toBeLessThan(stopCall);
+    });
+
+    it("never touches money: payout and wallet are identical with and without tallies", () => {
+      mockViolations.mockReturnValue({ social: 99 });
+      const balanceBefore = useWalletStore.getState().balance;
+      const payout = useSessionStore.getState().currentSession!.potentialPayout;
+
+      act(() => {
+        useSessionStore.getState().completeSession();
+      });
+
+      const entry = useSessionStore.getState().sessionHistory[0];
+      expect(entry.actualPayout).toBe(payout);
       expect(useWalletStore.getState().balance).toBe(balanceBefore + payout);
     });
   });

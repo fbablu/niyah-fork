@@ -26,7 +26,6 @@ import { useThemeStore } from "../../src/store/themeStore";
 import * as Haptics from "expo-haptics";
 import {
   Card,
-  Balance,
   LegalContentView,
   InviteCTA,
   withErrorBoundary,
@@ -37,6 +36,8 @@ import { useAuthStore } from "../../src/store/authStore";
 import { useWalletStore } from "../../src/store/walletStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
+import { useSessionStore } from "../../src/store/sessionStore";
+import { useGroupSessionStore } from "../../src/store/groupSessionStore";
 import { formatMoney } from "../../src/utils/format";
 import { Linking } from "react-native";
 import {
@@ -47,11 +48,25 @@ import {
 import { getFunctionErrorMessage } from "../../src/utils/errors";
 import {
   ProfileHeader,
-  ReputationCard,
   ScreenTimeCard,
   NeverBlockCard,
   TransactionHistory,
+  BalanceSection,
+  BlobPlatform,
+  BlobMakerSheet,
+  CloutCard,
+  CloutInfoSheet,
+  SessionCalendar,
+  SessionReceiptSheet,
+  type CalendarStamp,
 } from "../../src/components/profile";
+import { computeCloutScore, deriveCloutCounters } from "../../src/utils/clout";
+import {
+  deriveCalendarStamps,
+  latestStampId,
+} from "../../src/utils/calendarStamps";
+import { getViolationsByCategory } from "../../src/config/screentime";
+import { generateBlobAvatarPreset } from "../../src/constants/blobAvatar";
 import { logger } from "../../src/utils/logger";
 
 function ProfileScreenInner() {
@@ -69,6 +84,10 @@ function ProfileScreenInner() {
   const partners = usePartnerStore((s) => s.partners);
   const following = useSocialStore((s) => s.following);
   const loadMyFollows = useSocialStore((s) => s.loadMyFollows);
+  const sessionHistory = useSessionStore((s) => s.sessionHistory);
+  const groupSessionHistory = useGroupSessionStore(
+    (s) => s.groupSessionHistory,
+  );
 
   useEffect(() => {
     if (user?.id) {
@@ -81,6 +100,61 @@ function ProfileScreenInner() {
   const [bankActionLoading, setBankActionLoading] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  // Profile-tab redesign sheets (docs/profile-redesign-brief.md)
+  const [blobSheetVisible, setBlobSheetVisible] = useState(false);
+  const [cloutInfoVisible, setCloutInfoVisible] = useState(false);
+  const [receiptVisible, setReceiptVisible] = useState(false);
+  const [receiptStamp, setReceiptStamp] = useState<CalendarStamp | null>(null);
+  const [receiptByCategory, setReceiptByCategory] = useState<Record<
+    string,
+    number
+  > | null>(null);
+
+  const avatarConfig = useMemo(
+    () => user?.blobAvatar || generateBlobAvatarPreset(user?.id || "guest"),
+    [user?.blobAvatar, user?.id],
+  );
+
+  const cloutScore = useMemo(
+    () =>
+      computeCloutScore(
+        deriveCloutCounters({
+          soloHistory: sessionHistory,
+          groupHistory: groupSessionHistory,
+          uid: user?.id ?? "",
+          fallbackCompletedSessions: user?.completedSessions,
+        }),
+      ),
+    [sessionHistory, groupSessionHistory, user?.id, user?.completedSessions],
+  );
+
+  const stamps = useMemo(
+    () => deriveCalendarStamps(sessionHistory, groupSessionHistory),
+    [sessionHistory, groupSessionHistory],
+  );
+
+  const handleStampPress = (stamp: CalendarStamp) => {
+    // Prefer the per-session counts captured into history at completion and
+    // carried on the stamp (design comment 5 — every receipt, not just the
+    // newest). Sessions completed before that capture landed fall back to
+    // the on-device shield tallies, which are cleared natively on every
+    // startBlocking — so they only describe the MOST RECENT session, and
+    // only while no newer session has started since. Anything else: null
+    // (receipt renders without the app-activity block).
+    if (stamp.byCategory) {
+      setReceiptByCategory(stamp.byCategory);
+    } else {
+      const isLatest = stamp.sessionId === latestStampId(stamps);
+      const sessionRunning =
+        !!useSessionStore.getState().currentSession ||
+        !!useGroupSessionStore.getState().activeGroupSession;
+      setReceiptByCategory(
+        isLatest && !sessionRunning ? getViolationsByCategory() : null,
+      );
+    }
+    setReceiptStamp(stamp);
+    setReceiptVisible(true);
+  };
 
   const handleManageBank = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -241,20 +315,50 @@ function ProfileScreenInner() {
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
-        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.scrollContent}
       >
+        {/* 1 — Header info card: name / email / Following | Partners */}
         <ProfileHeader
           user={user}
           followingCount={following.length}
           partnerCount={partners.length}
-          onBlobAvatarChange={setBlobAvatar}
         />
 
-        <ReputationCard
-          reputation={user?.reputation}
-          partnerCount={partners.length}
+        {/* 2 — Blob on its platform; expand slingshots into the customizer */}
+        <View style={styles.blobZone}>
+          <BlobPlatform
+            config={avatarConfig}
+            uid={user?.id ?? "guest"}
+            customizerOpen={blobSheetVisible}
+            onExpand={() => setBlobSheetVisible(true)}
+          />
+        </View>
+
+        {/* 3 — Balance pill + all-time ticker + deposit/withdraw chooser */}
+        <BalanceSection
+          balanceCents={balance}
+          transactions={transactions}
+          onDeposit={() => router.push("/session/deposit")}
+          onWithdraw={() => router.push("/session/withdraw")}
         />
+
+        {/* 4 — Clout (replaces the social-credit ReputationCard here) */}
+        <CloutCard
+          score={cloutScore}
+          onInfoPress={() => setCloutInfoVisible(true)}
+        />
+
+        {/* 5 — Streaks + collectible-stamp calendar */}
+        <View style={styles.calendarSection}>
+          <SessionCalendar
+            stamps={stamps}
+            streakCount={user?.currentStreak ?? 0}
+            blobConfig={user?.blobAvatar}
+            onStampPress={handleStampPress}
+          />
+        </View>
+
+        {/* ── Functional cards the design doesn't show, below the calendar ── */}
 
         {/* Invite Friends Card */}
         <InviteCTA style={styles.inviteCard} />
@@ -288,32 +392,18 @@ function ProfileScreenInner() {
           </Card>
         )}
 
-        {/* Balance Card */}
-        <Card style={styles.balanceCard}>
-          <View style={styles.balanceRow}>
-            <View>
-              <Text style={styles.balanceLabel}>Available Balance</Text>
-              <Balance amount={balance} size="medium" />
-            </View>
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push("/session/withdraw");
-              }}
-              style={styles.withdrawButton}
-            >
-              <Text style={styles.withdrawButtonText}>Withdraw</Text>
-            </Pressable>
-          </View>
-          {pendingWithdrawal > 0 && (
-            <View style={styles.pendingRow}>
-              <Text style={styles.pendingLabel}>Pending</Text>
+        {/* Pending withdrawal (live-money info; deposit/withdraw moved into
+            BalanceSection's +/- chooser) */}
+        {pendingWithdrawal > 0 && (
+          <Card style={styles.balanceCard}>
+            <View style={styles.pendingRowStandalone}>
+              <Text style={styles.pendingLabel}>Pending withdrawal</Text>
               <Text style={styles.pendingAmount}>
                 {formatMoney(pendingWithdrawal)}
               </Text>
             </View>
-          )}
-        </Card>
+          </Card>
+        )}
 
         {/* Stats Grid */}
         <View style={styles.statsRow}>
@@ -422,6 +512,29 @@ function ProfileScreenInner() {
           </View>
         </Modal>
 
+        {/* Blob customizer (slingshot sheet) — saves via authStore */}
+        <BlobMakerSheet
+          visible={blobSheetVisible}
+          onClose={() => setBlobSheetVisible(false)}
+          uid={user?.id ?? "guest"}
+          config={avatarConfig}
+          onSave={setBlobAvatar}
+        />
+
+        {/* "What is Clout?" info sheet (CloutCard's (i) button) */}
+        <CloutInfoSheet
+          visible={cloutInfoVisible}
+          onClose={() => setCloutInfoVisible(false)}
+        />
+
+        {/* Session receipt for a tapped calendar stamp */}
+        <SessionReceiptSheet
+          visible={receiptVisible}
+          onClose={() => setReceiptVisible(false)}
+          stamp={receiptStamp}
+          byCategory={receiptByCategory}
+        />
+
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Niyah v1.0.0</Text>
@@ -451,13 +564,14 @@ const makeStyles = (Colors: ThemeColors) =>
     inviteCard: {
       marginBottom: Spacing.md,
     },
+    blobZone: {
+      marginBottom: Spacing.lg,
+    },
+    calendarSection: {
+      marginBottom: Spacing.xl,
+    },
     balanceCard: {
       marginBottom: Spacing.md,
-    },
-    balanceRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
     },
     balanceLabel: {
       fontSize: Typography.labelSmall,
@@ -493,25 +607,10 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.semibold,
       color: Colors.text,
     },
-    withdrawButton: {
-      backgroundColor: Colors.backgroundTertiary,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-      borderRadius: Radius.md,
-    },
-    withdrawButtonText: {
-      fontSize: Typography.bodySmall,
-      ...Font.semibold,
-      color: Colors.text,
-    },
-    pendingRow: {
+    pendingRowStandalone: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      marginTop: Spacing.md,
-      paddingTop: Spacing.md,
-      borderTopWidth: 1,
-      borderTopColor: Colors.border,
     },
     pendingLabel: {
       fontSize: Typography.bodySmall,
