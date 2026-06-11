@@ -148,7 +148,6 @@ const makeStyles = (Colors: ThemeColors) =>
     body: {
       flex: 1,
       alignItems: "center",
-      paddingTop: Spacing.xxl,
     },
     iconContainer: {
       width: 80,

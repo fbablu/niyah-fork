@@ -127,11 +127,11 @@ const makeStyles = (Colors: ThemeColors) =>
     content: {
       flex: 1,
       paddingHorizontal: Spacing.lg,
-      paddingTop: Spacing.md,
+      paddingTop: Spacing.lg,
     },
     scrollContent: {
       paddingHorizontal: Spacing.lg,
-      paddingTop: Spacing.xl,
+      paddingTop: Spacing.lg,
       paddingBottom: Spacing.xxl,
     },
     backButton: {

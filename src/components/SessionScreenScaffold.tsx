@@ -243,7 +243,7 @@ const makeStyles = (Colors: ThemeColors) =>
     // ── Footer ──
     footer: {
       padding: Spacing.lg,
-      paddingBottom: Spacing.xl,
+      paddingBottom: Spacing.lg,
       gap: Spacing.md,
       borderTopWidth: 1,
       borderTopColor: Colors.border,

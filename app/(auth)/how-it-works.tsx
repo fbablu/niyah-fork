@@ -127,7 +127,6 @@ const makeStyles = (Colors: ThemeColors) =>
       flexDirection: "row",
       justifyContent: "center",
       gap: Spacing.sm,
-      marginTop: Spacing.md,
       marginBottom: Spacing.xl,
     },
     dot: {

@@ -5,7 +5,7 @@
 > **never** pooled, shared, or redistributed between users. NOT gambling (see Legal below).
 >
 > **Current status (read first):** [docs/STATUS.md](docs/STATUS.md)
-> **Detailed docs**: [Architecture](docs/architecture.md) | [Development](docs/development.md) | [Features](docs/features.md) | [Native Modules](docs/native-modules.md) | [Security](docs/security.md) | [Roadmap](docs/roadmap.md) | [Payments](docs/payments.md) | [Legal](docs/legal.md) | [UI & Animation](docs/ui-animation.md)
+> **Detailed docs**: [Architecture](docs/architecture.md) | [Development](docs/development.md) | [Features](docs/features.md) | [Native Modules](docs/native-modules.md) | [Security](docs/security.md) | [Roadmap](docs/roadmap.md) | [Payments](docs/payments.md) | [Legal](docs/legal.md) | [UI & Animation](docs/ui-animation.md) | [Figma Design Rules](docs/figma-design-rules.md)
 
 ## Tech Stack
 
@@ -112,9 +112,11 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 
 ## Current Phase
 
-**Launch — App Store submission.** Working branch is `wallet-ledger` (de-pooled v1). Full
-current state, "remaining to submit," and post-submit dormant flips live in **[docs/STATUS.md](docs/STATUS.md)
-— read that first in a new session.** Phases/history: [docs/roadmap.md](docs/roadmap.md).
+**Launch — App Store submission.** All work now lives on `main` (de-pooled v1; the old
+`wallet-ledger` working branch plus side branches and worktrees were consolidated into `main` on
+2026-06-09). Full current state, "remaining to submit," and post-submit dormant flips live in
+**[docs/STATUS.md](docs/STATUS.md) — read that first in a new session.** Phases/history:
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Gotchas (don't get burned)
 
@@ -123,6 +125,7 @@ current state, "remaining to submit," and post-submit dormant flips live in **[d
 - **Run `/vibe-security`** on auth/payments/rules diffs before commit; fix Critical + High first.
 - **Fardeen runs all git/deploy/outward actions** — supply commit messages only; never push/merge/deploy.
 - **Commit style:** one-liner subject, no body, no Co-Authored-By trailer.
+- **No git worktrees** — they don't carry gitignored config (firebase plists / `.env`) and pollute `eslint .` / `git add -A`. Work on `main` or a plain `git checkout -b` branch.
 - **Drifted test account `cMtHvQkJJZOgU6pgYARj8nN5Wpf1` stays frozen** — don't reuse for clean tests.
 - **No VAIL / Dr. White references** — purged, never re-add.
 

@@ -93,7 +93,6 @@ const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     body: {
       flex: 1,
-      paddingHorizontal: Spacing.lg,
       gap: Spacing.lg,
     },
     card: {

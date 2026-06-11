@@ -578,7 +578,6 @@ function DashboardScreenInner() {
         <ScrollView
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
-          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.scrollContent}
         >
           {/* Header */}
