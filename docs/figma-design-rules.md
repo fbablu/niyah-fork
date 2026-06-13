@@ -56,8 +56,12 @@ light are warm cream (`background #f5ead8ff` → `backgroundTertiary #D9CEC0`). 
 Also: `warning(+Light)`, `danger(+Light)`, `info(+Light)`, `buttonPrimary/Secondary/Disabled`,
 `border/borderLight/borderFocused`, `overlay/overlayLight`, `shimmer`, `skeleton`, `white`.
 
-**Figma-green note:** the file's green platform/calendar greens map to the `primary` family;
-pick the nearest semantic key rather than sampling Figma's exact hex.
+**Figma-green note:** the file's greens ARE the brand tokens — `#1b4332` = `primaryDark`,
+`#2d6a4f` = `primary`, `#40916c` = `primaryLight` — and the profile tab is a FULL-BLEED green
+screen: `primaryDark` background, `primary` surfaces, white text/borders, `glassLight`/`glassMid`/
+`glassDark` translucent overlays (identical in both themes). Do NOT substitute the standard
+`background*` tokens when the design shows the green world — that mistake caused the v1 profile
+rework (see profile-redesign-brief.md "v2 feedback round").
 
 **Theme switching** (`src/hooks/useColors.ts`, `src/store/themeStore.ts`): zustand + AsyncStorage
 (`"niyah-theme"`); `ThemeOverrideContext` pins subtrees (whole `(auth)` group is pinned dark).

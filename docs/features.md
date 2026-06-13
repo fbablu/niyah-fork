@@ -34,6 +34,13 @@ In addition to Firebase's server-side rate limits, the client persists `{ lastSe
 
 ## Session Modes
 
+> **Planned restructure (not yet shipped):** the dashboard's current multi-button start flow is
+> slated to collapse to **two buttons** — *Focus* (free → quick-block) and *Stake a session* (a new
+> wizard route group `app/session/wizard/{people,stake,apps,schedule,review}`) — driven by a haptic
+> `Dial` and ticket-stub invites. `propose.tsx`'s never-wired Day/Time pickers are removed by it.
+> The flows below describe what ships **today** (builds 25–28). Full spec:
+> [staking-wizard-plan.md](./staking-wizard-plan.md); phase: [roadmap.md](./roadmap.md#phase-7--staking-wizard-next-planned).
+
 ### Solo Session
 
 **Store**: `sessionStore.ts` | **Screens**: `app/session/`
@@ -121,13 +128,74 @@ See [Payments](./payments.md) for the wallet ledger, Stripe/Plaid integration, a
 - Reputation boost for both inviter and invitee
 - Partner auto-connect on referral acceptance
 
+## Profile Tab (redesigned)
+
+**Screen**: `app/(tabs)/profile.tsx` | **Components**: `src/components/profile/`
+
+The Profile tab was rebuilt in the green-world redesign (builds 25–28) around a set of dedicated
+components. Spec + verbatim Figma comments: [profile-redesign-brief.md](./profile-redesign-brief.md).
+
+### Clout Score + Tiers
+
+A commitment-weighted score (`src/utils/clout.ts`) that rewards *staked* and *group* sessions over
+free solo ones, plus breadth of people committed-with:
+
+- **Per-session weights**: solo no-stake `1` · solo staked `3` · group no-stake `4` · group staked `8`
+- **Breadth bonus**: `round(4 · √(distinct friends completed-with))` — rewards range, resists one-friend farming
+- **Tiers**: Newcomer `0–49` · Committed `50–149` · Trusted `150–399` · Inner Circle `400+`
+
+Rendered by `CloutCard`, with a `CloutInfoSheet` bottom sheet (using `CloutWeightRow`) that explains
+the weights. Clout replaces the Social-Credit/Reputation card **on the Profile tab only** — the
+[Reputation System](#reputation-system) (5 tiers) is unchanged and still drives friends/user screens;
+migrating those to Clout is a future product decision.
+
+### Blob-Stamp Streak Calendar
+
+`SessionCalendar` (`CalendarHeader` + `CalendarStampBlob`) shows a month grid where each completed
+session drops a collectible blob stamp, seeded by `sessionId` so the same session always renders the
+same blob. Tapping a stamp opens `SessionReceiptSheet`, which includes a `ReceiptActivitySection`
+breaking down per-category app usage captured at session completion.
+
+### Balance + All-Time Ticker + Glass +/- Chooser
+
+`BalanceSection` shows the wallet balance with an `AllTimeTicker` — an all-time return percentage
+(green up / red down) computed by `src/utils/balanceDelta.ts`, fail-safe hidden when the ledger is
+incomplete. A liquid-glass `+/-` pill is the deposit/withdraw chooser.
+
+> The SwiftUI liquid-glass `+/-` pill via `@expo/ui` is **hard-disabled** (`POD_INCLUDED = false`)
+> after a confirmed iOS-26 render crash (builds 25/26); the pod is excluded from autolinking and the
+> React Native glass fallback ships. Revisit at SDK 55.
+
+### Blob Customizer v2
+
+`BlobMakerSheet` v2 is a partial `pageSheet` (`BlobMakerStage` + `BlobOptionRows` + `BlobPlatform`)
+behind an edit pencil, with `ProfileHeader` rewritten. The "sleepy-eye" platform vertical flip is
+kept; spins/slingshot/hero-spring motion was removed for a near-static feel.
+
 ## Theme System
 
 **Store**: `themeStore.ts` | **Hook**: `useColors()`
 
-- Dark/light theme persisted to AsyncStorage
-- Colors defined in `src/constants/colors.ts` (`DarkColors`, `LightColors`)
-- Access via `useColors()` hook which returns `ThemeColors`
+Niyah ships a **single brand theme** (founder decision 2026-06-12). The whole app — every tab, all
+16 session screens, money screens, `app/blocked.tsx`, `app/user/[uid].tsx`, and shared components —
+renders on a green-world field: full-bleed `Colors.primaryDark` (#1B4332) fields, `Colors.primary`
+(#2D6A4F) surfaces, `Colors.primaryLight` (#40916C) sheets, a white text hierarchy
+(white / white@0.7 / white@0.55), proportional sizing (percentage widths, `aspectRatio` cells), and
+translucent glass overlays.
+
+- The dark/light **UI toggle was removed** from Profile settings. `app/(tabs)/_layout.tsx`,
+  `app/session/_layout.tsx`, `user/[uid]`, and `blocked` wrap their subtrees in
+  `ThemeOverrideContext.Provider value="dark"` (the same mechanism `app/(auth)` uses) so
+  theme-driven children resolve dark on the green field.
+- `themeStore` machinery (`toggleTheme` / `setTheme`) is **retained** for a future light variant;
+  only the UI toggle is gone.
+- Colors defined in `src/constants/colors.ts` (`DarkColors`, `LightColors` — now identical brand
+  greens), plus glass tokens (`glassLight`, `glassMid`, `glassDark`, `glassSolid`, `black`) and
+  `BLOB_INK` (#120505) consolidated in `src/constants/blobAvatar.ts`.
+- Access via the `useColors()` hook which returns `ThemeColors`.
+- Motion is intentionally near-static: ~200ms entrance fades, no springs/spins/stagger; the
+  founder-loved "sleepy-eye" platform flip and house press-scale springs are the only kept motion.
+  All reduced-motion aware. Design-system rules: [figma-design-rules.md](./figma-design-rules.md).
 
 ## Demo Mode
 

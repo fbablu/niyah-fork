@@ -48,7 +48,15 @@ niyah/
 │   │   ├── Confetti.tsx          # Celebration animation
 │   │   ├── MoneyPlant.tsx        # Money plant visualization
 │   │   ├── PeachAvatar.tsx       # Peach blob avatar
-│   │   ├── profile/              # Profile sub-components
+│   │   ├── profile/              # Profile-tab sub-components (green-world v2)
+│   │   │   ├── ProfileHeader.tsx        # Header (rewritten)
+│   │   │   ├── CloutCard.tsx + CloutInfoSheet.tsx + CloutWeightRow.tsx  # Clout (profile tab)
+│   │   │   ├── ReputationCard.tsx       # Reputation (friends/user screens — unchanged)
+│   │   │   ├── SessionCalendar.tsx + CalendarHeader.tsx + CalendarStampBlob.tsx  # Collectible session stamps
+│   │   │   ├── SessionReceiptSheet.tsx + ReceiptActivitySection.tsx    # Per-session receipt + usage
+│   │   │   ├── BalanceSection.tsx + AllTimeTicker.tsx   # Balance + all-time % ticker + +/- pill
+│   │   │   ├── BlobMakerSheet.tsx + BlobMakerStage.tsx + BlobOptionRows.tsx + BlobPlatform.tsx  # Avatar maker v2
+│   │   │   └── ScreenTimeCard.tsx, NeverBlockCard.tsx, TransactionHistory.tsx
 │   │   └── onboarding/           # Onboarding scene components (8 scenes)
 │   ├── config/
 │   │   ├── firebase.ts           # Firebase helpers (auth, Firestore, social)
@@ -65,19 +73,24 @@ niyah/
 │   │   ├── partnerStore.ts       # Partner relationships, duo sessions
 │   │   ├── groupSessionStore.ts  # N-person group sessions, de-pooled stake-back
 │   │   ├── socialStore.ts        # Following/followers, public profiles
-│   │   └── themeStore.ts         # Dark/light theme (AsyncStorage persistence)
+│   │   └── themeStore.ts         # Theme store (single dark/green theme shipped; light variant retained, no UI toggle)
 │   ├── hooks/
 │   │   ├── useCountdown.ts       # Countdown timer hook
-│   │   ├── useColors.ts          # Current theme colors from themeStore
+│   │   ├── useColors.ts          # Current theme colors from themeStore (+ ThemeOverrideContext dark-pin)
 │   │   ├── useScreenProtection.ts # Prevent screenshots/screen recording
 │   │   └── ScrollContext.tsx      # Shared scroll context
 │   ├── types/index.ts            # All app type definitions
 │   ├── constants/
 │   │   ├── colors.ts             # DarkColors, LightColors, Spacing, Typography, Font, Radius
+│   │   │                         #   + green-world tokens (glassLight/Mid/Dark/Solid, black) in BOTH palettes
+│   │   ├── blobAvatar.ts         # Blob avatar presets + BLOB_INK ("#120505", consolidated)
 │   │   └── config.ts             # Cadences, DEMO_MODE, INITIAL_BALANCE, reputation levels
 │   ├── utils/
 │   │   ├── format.ts             # Formatting utilities
 │   │   ├── logger.ts             # Logging utility
+│   │   ├── clout.ts + cloutDerive.ts  # Clout score/tiers (profile tab) + history-shape parsing
+│   │   ├── calendarStamps.ts     # Completed-session history → calendar stamps
+│   │   ├── balanceDelta.ts       # All-time up/down balance ticker from transactions
 │   │   └── payoutAlgorithm.ts    # Solo & group payout calculation
 │   └── __tests__/                # Test suites (unit + integration)
 ├── modules/
@@ -123,6 +136,16 @@ Zustand stores are the source of truth. Firestore writes are fire-and-forget (no
 
 Expo Router file-based routing in `app/`. Groups `(auth)` and `(tabs)` define layouts. Typed routes enabled via `experiments.typedRoutes: true`.
 
+### Single-Theme Dark Pin (green-world)
+
+The app ships a single brand theme (full-bleed `Colors.primaryDark` field, `primary`/`primaryLight`
+surfaces/sheets, white text hierarchy). The dark/light **toggle was removed** from Profile settings
+(2026-06-12); `themeStore` machinery (`toggleTheme`/`setTheme`) is retained for a future light
+variant but has no UI. To make theme-driven children resolve dark on the green field, `app/(tabs)/_layout.tsx`,
+`app/session/_layout.tsx`, `app/user/[uid].tsx`, and `app/blocked.tsx` wrap their subtrees in
+`ThemeOverrideContext.Provider value="dark"` (defined in `src/hooks/useColors.ts`) — the same
+mechanism `app/(auth)` already used.
+
 ### Native Module Bridge
 
 Custom Expo modules in `modules/` use Swift bridged via ExpoModulesCore. iOS **app extensions** (Screen Time + Live Activity) live in top-level `targets/` and are registered by `@bacons/apple-targets` (entitlements + target registration via `targets/*/expo-target.config.json`). Config plugins in `plugins/` only inject Firebase static-framework + build fixes. Module directory referenced via `nativeModulesDir: "modules"` in `app.config.js`.
@@ -133,4 +156,11 @@ Custom Expo modules in `modules/` use Swift bridged via ExpoModulesCore. iOS **a
 
 ### Build System
 
-EAS Build for production/preview. `expo-dev-client` for development (NOT Expo Go). Native Firebase and Screen Time modules require custom builds.
+EAS Build for production/preview. `expo-dev-client` for development (NOT Expo Go). Native Firebase and Screen Time modules require custom builds. `BUILD_NUMBER` is epoch-seconds via `scripts/build-prod.sh` (`eas.json` `appVersionSource: "local"`).
+
+### `@expo/ui` Excluded from Autolinking
+
+`@expo/ui` (0.2.0-beta.10) is installed but its **pod is excluded** via `package.json` →
+`expo.autolinking.exclude` — it does not compile against SDK 54's `expo-modules-core`. The SwiftUI
+liquid-glass +/- pill is therefore hard-disabled (`BalanceSection.tsx` `POD_INCLUDED=false`) after a
+confirmed iOS-26 render crash in builds 25/26; the RN glass fallback ships. Revisit at SDK 55.

@@ -5,7 +5,7 @@
 > **never** pooled, shared, or redistributed between users. NOT gambling (see Legal below).
 >
 > **Current status (read first):** [docs/STATUS.md](docs/STATUS.md)
-> **Detailed docs**: [Architecture](docs/architecture.md) | [Development](docs/development.md) | [Features](docs/features.md) | [Native Modules](docs/native-modules.md) | [Security](docs/security.md) | [Roadmap](docs/roadmap.md) | [Payments](docs/payments.md) | [Legal](docs/legal.md) | [UI & Animation](docs/ui-animation.md) | [Figma Design Rules](docs/figma-design-rules.md)
+> **Detailed docs**: [Architecture](docs/architecture.md) | [Development](docs/development.md) | [Features](docs/features.md) | [Native Modules](docs/native-modules.md) | [Security](docs/security.md) | [Roadmap](docs/roadmap.md) | [Payments](docs/payments.md) | [Legal](docs/legal.md) | [UI & Animation](docs/ui-animation.md) | [Figma Design Rules](docs/figma-design-rules.md) | [Staking Wizard Plan](docs/staking-wizard-plan.md)
 
 ## Tech Stack
 
@@ -112,9 +112,18 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 
 ## Current Phase
 
-**Launch — App Store submission.** All work now lives on `main` (de-pooled v1; the old
-`wallet-ledger` working branch plus side branches and worktrees were consolidated into `main` on
-2026-06-09). Full current state, "remaining to submit," and post-submit dormant flips live in
+**Launch — green-world redesign on TestFlight (builds 25–28).** A whole-app GREEN-WORLD
+redesign shipped: every tab + all 16 session screens + money/blocked/public-profile screens
+restyled to a single brand theme (full-bleed `Colors.primaryDark` fields, white text hierarchy,
+proportional sizing, glass overlays). The **dark/light toggle was removed** (founder decision —
+theme is now single brand-green; `themeStore` machinery retained for a future light variant).
+Motion is **near-static** (fades, no springs/spins). The **Profile tab was rebuilt** around
+`src/components/profile/*` + a new **Clout** model (`src/utils/clout.ts`, replaces the
+Social-Credit card on Profile only — `ReputationCard` unchanged on friends/user screens).
+Design system + specs: [docs/figma-design-rules.md](docs/figma-design-rules.md) +
+[docs/profile-redesign-brief.md](docs/profile-redesign-brief.md). **Next major work = the
+staking wizard** ([docs/staking-wizard-plan.md](docs/staking-wizard-plan.md)). Full current
+state, "remaining to submit," and the still-open money P0s live in
 **[docs/STATUS.md](docs/STATUS.md) — read that first in a new session.** Phases/history:
 [docs/roadmap.md](docs/roadmap.md).
 
@@ -128,6 +137,8 @@ Full tree: [docs/architecture.md](docs/architecture.md)
 - **No git worktrees** — they don't carry gitignored config (firebase plists / `.env`) and pollute `eslint .` / `git add -A`. Work on `main` or a plain `git checkout -b` branch.
 - **Drifted test account `cMtHvQkJJZOgU6pgYARj8nN5Wpf1` stays frozen** — don't reuse for clean tests.
 - **No VAIL / Dr. White references** — purged, never re-add.
+- **`@expo/ui` POD stays excluded** (`package.json` `expo.autolinking.exclude`) — it doesn't compile against SDK 54's `expo-modules-core`, and the SwiftUI liquid-glass pill crashed iOS-26 (builds 25/26). RN glass fallback ships; revisit at SDK 55.
+- **`BUILD_NUMBER` is epoch-seconds** via `scripts/build-prod.sh` (`eas.json` `appVersionSource: "local"`) — don't hand-edit; build with `pnpm build:prod`.
 
 ## Demo Mode
 

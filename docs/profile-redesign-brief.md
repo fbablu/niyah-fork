@@ -197,3 +197,66 @@ Clout = 1·solo_none + 3·solo_stake + 4·group_none + 8·group_staked
 - Dark/light themes + reduced-motion variants required (Reanimated; respect `useReducedMotion`).
 - Component conventions: see [figma-design-rules.md](./figma-design-rules.md) (tokens, scaffolds,
   `makeStyles(Colors)`, <150-line components).
+
+## v2 feedback round (2026-06-12, after build 24 on-device review)
+
+Fardeen's verdict on v1: *"the profile concept and vision looks REALLY bad compared to what I
+created and designed on figma… The animations, color scheme, background and calendar all look not
+so great, compressed, smaller, and the animations are way too exaggerated and not good looking."*
+
+**Updated Figma frames** (structurally identical to the originals — the spec didn't change, the
+implementation diverged):
+
+| Frame | Node | Link |
+| --- | --- | --- |
+| `profile-tab-normal` v2 | `429:186` | <https://www.figma.com/design/GXxiG7IYSw0o6WGc9UHwzn/Niyah?node-id=429-186&m=dev> |
+| `profile-tab-blob-customizer` v2 | `429:347` | <https://www.figma.com/design/GXxiG7IYSw0o6WGc9UHwzn/Niyah?node-id=429-347&m=dev> |
+
+### Root causes of v1's look
+
+1. **Palette:** the design is a full-bleed GREEN brand screen — bg `#1b4332` (== `Colors.primaryDark`),
+   surfaces `#2d6a4f` (== `Colors.primary`), customizer sheet `#40916c` (== `Colors.primaryLight`),
+   white text/borders, translucent glass overlays. v1 instead rendered onto the standard
+   dark-earth/cream background tokens (the design-rules "map greens to nearest semantic key" note
+   was over-applied). Because primary/primaryDark/primaryLight are IDENTICAL across themes, the
+   green screen is automatically theme-stable.
+2. **Proportions:** components sat inside the scaffold's standard padding plus their own → smaller/
+   "compressed" vs the design's widths. Correct proportions (of the 402-wide frame): header card
+   372 (92.5%), balance pill 325 (80.8%), clout bar 300 (74.6%), calendar grid 283 (70.4%,
+   centered), footer pills 324 (80.6%), cells perfectly square (`aspectRatio: 1`).
+3. **Motion:** overshoot springs everywhere (slingshot damping 12, stamp 1.5→1, die 360° spin)
+   read exaggerated/cartoonish. v2 = subtle iOS feel (see motion spec below).
+
+### v2 exact values (from Figma-generated reference code, node 429:186 / 429:347)
+
+- **Tokens added** for the glass layers: `Colors.glassLight` rgba(217,217,217,0.25),
+  `Colors.glassMid` rgba(217,217,217,0.5), `Colors.glassDark` rgba(0,0,0,0.5).
+- Header card: `glassLight`, radius ~23; name 33 bold white, email 15 white, counters 19 bold
+  white over 12 labels, hairline white divider between Following|Partners.
+- Balance: "Balance" 29 bold white centered; amount 47 bold white; `+/-` ~25 bold on a glass pill —
+  `+` green / `-` red at low alpha (liquid glass), routes deposit/withdraw.
+- Clout: label 16 white; track `#d9d9d9` 11px tall radius 22.
+- Month nav: "June" 22 bold white + SF chevrons 17 white; streak = white circle (~19pt) with
+  15 bold BLACK count, top-right of calendar.
+- Calendar: grid bg `primary`, 1px WHITE borders, header row ~27 tall w/ ~13 bold white S-M-T-W-T-F-S,
+  date numerals small bold white pinned top-right of each cell (inset inner frame), trailing-month
+  dates hidden.
+- Footer: Log out / Delete account pills 44 tall radius 55 `glassDark`.
+- Customizer sheet (429:347): top radius ~57, bg `primaryLight`, dimmed `glassDark` above it with
+  the platform (sleepy eyes) visible; white grab bar (~52 wide); option rows 77.5 tall radius 33 bg
+  `primary`; selected-option circle 64 radius 26 `glassMid`; color swatches 32 radius full
+  (#caa23e, #7cf799, #ec6b6b, #4947be + gradient paintpalette custom slot — custom color still
+  rules-deferred, render the slot disabled or omit).
+
+### v2 motion spec (subtle, iOS-native feel — kill the overshoots)
+
+- Calendar stamp: opacity 0→1 + scale 1.12→1, `withTiming` ~280ms `Easing.out(Easing.cubic)`,
+  ~60ms stagger; blink = tiny, rare (≥6s apart), latest stamp only.
+- Customizer sheet: rise with house spring `{damping: 20, stiffness: 180}` (NO overshoot);
+  hero blob 0.92→1; close ~220ms timing.
+- Die: one ≤180° rotation, ~350ms ease-out, gentle pop — no 360° spin.
+- Platform eye flip: ~180ms timing. Press feedback stays the standard 0.97 spring.
+- Where it genuinely fits, prefer SwiftUI-hosted polish via `@expo/ui/swift-ui` (Fardeen's explicit
+  ask): the liquid-glass `+/-` pill is the first candidate. Native dep → needs a rebuild; keep an
+  RN fallback and a jest mock.
+- Everything stays `useReducedMotion`-aware.

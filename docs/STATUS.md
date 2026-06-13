@@ -4,6 +4,59 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
+> **2026-06-13 (green-world redesign — on `redesign-green-world`, UNCOMMITTED; Fardeen commits):**
+> A whole-app **GREEN-WORLD redesign shipped to TestFlight (builds 25–28)**. Every tab
+> (dashboard/schedule/friends/profile), all 16 session screens, the money screens,
+> `app/blocked.tsx`, and `app/user/[uid].tsx` were restyled to a **single brand theme**: full-bleed
+> `Colors.primaryDark` (#1B4332) fields, `Colors.primary` (#2D6A4F) surfaces, `Colors.primaryLight`
+> (#40916C) sheets, white text hierarchy (white / @0.7 / @0.55), proportional sizing (percent widths
+> / `aspectRatio` cells, no absolute px), and translucent glass overlays. New tokens in
+> `src/constants/colors.ts` (BOTH palettes identical — they layer on theme-stable brand greens):
+> `glassLight/glassMid/glassDark/glassSolid/black`; `BLOB_INK "#120505"` consolidated into
+> `src/constants/blobAvatar.ts` (was 21 dup literals). **Theme is now SINGLE** — the dark/light
+> toggle was **removed** from Profile (founder decision 2026-06-12); `app/(tabs)/_layout.tsx`,
+> `app/session/_layout.tsx`, `user/[uid]`, and `blocked` wrap their subtrees in
+> `ThemeOverrideContext.Provider value="dark"` (same mechanism `app/(auth)` uses) so theme-driven
+> children resolve dark on the green field. `themeStore` (`toggleTheme`/`setTheme`) is retained for a
+> future light variant; the UI toggle is gone. **Motion is near-static** (founder taste): entrance
+> fades ~200ms `Easing.out(cubic)`, NO springs/overshoot/spins/stagger; calendar-stamp blink and the
+> customizer slingshot/hero-spring removed (plain 220ms slide); die randomize is instant + a 150ms
+> opacity dip. KEPT: the platform "sleepy-eye" vertical flip (180ms) and house press-scale springs
+> (`{damping:15,stiffness:220}`). All reduced-motion aware. **Profile tab rebuilt** around
+> `src/components/profile/*`: **Clout** (`src/utils/clout.ts` — weights soloNone 1 / soloStake 3 /
+> groupNone 4 / groupStaked 8 + `round(4·√distinctFriends)`; tiers Newcomer 0–49 / Committed 50–149 /
+> Trusted 150–399 / Inner Circle 400+; `CloutCard` + `CloutInfoSheet` + `CloutWeightRow`) replaces
+> the Social-Credit/Reputation card **on this tab only** (`ReputationCard` is unchanged on
+> friends/user screens — Clout migration there is a future product decision); `SessionCalendar` +
+> `CalendarHeader` + `CalendarStampBlob` (collectible blob stamps seeded by `sessionId`, one per
+> completed session) + `SessionReceiptSheet` + `ReceiptActivitySection` (per-session app-usage by
+> category, captured at completion); `BalanceSection` + `AllTimeTicker` (green up / red down all-time
+> %, fail-safe hidden when ledger incomplete, `src/utils/balanceDelta.ts`); the +/- liquid-glass pill
+> (deposit/withdraw chooser); `BlobMakerSheet` v2 + `BlobMakerStage`/`BlobOptionRows`/`BlobPlatform`;
+> `ProfileHeader` rewritten. **`@expo/ui` (0.2.0-beta.10) is installed but its POD is EXCLUDED** via
+> `package.json` `expo.autolinking.exclude` (doesn't compile vs SDK 54's `expo-modules-core`); the
+> SwiftUI liquid-glass +/- pill is **hard-disabled** (`BalanceSection.tsx` `POD_INCLUDED=false`)
+> after a confirmed iOS-26 render crash in builds 25/26 (missing `ExpoUI` Fabric view, no `.ips`) —
+> the RN glass fallback ships; revisit at SDK 55. **Builds this cycle:** 25 (profile v2), 26 (full
+> all-tabs sweep), 27 (crash fix), 28 (near-static motion + remaining old-scheme components converted
+> + toggle removed). `BUILD_NUMBER` is now epoch-seconds via `scripts/build-prod.sh` (`eas.json`
+> `appVersionSource: "local"`); **latest = 28**. **Gates green:** typecheck 0 errors, jest ~957/963
+> (6 intentional skips), eslint 0/0. Specs: [figma-design-rules.md](./figma-design-rules.md),
+> [profile-redesign-brief.md](./profile-redesign-brief.md) (Clout model + verbatim Figma comments).
+> History of the overnight run: [redesign-all-tabs-progress.md](./redesign-all-tabs-progress.md).
+> **Next major build = the STAKING WIZARD** ([staking-wizard-plan.md](./staking-wizard-plan.md)):
+> dashboard collapses to TWO buttons (Focus = free → quick-block; Stake a session → new wizard route
+> group `app/session/wizard/{people,stake,apps,schedule,review}`); reusable haptic `Dial` (people
+> 1–5, dollar amount); ticket-stub invites (Phase A = share sheet over the existing
+> `niyah.live/join` universal link + restyled invites screen; Phase B App Clip specced, NOT
+> scheduled). The group server surface already supports it; solo needs a small reviewed
+> `createSoloSession` extension (Option A) or snaps to the cadence ladder (Option B). `propose.tsx`'s
+> Day/Time pickers were never wired server-side and are removed by the wizard. **Still-open money P0s
+> (Fardeen-reviewed, NOT applied):** C1 withdrawal double-debit (deterministic `txnRef`), C2 recovery
+> payout race (client writes status before `cloudComplete`), H1 payout `idempotencyKey`, M1
+> `stakeComposition` validation — precise fixes in `deep-audit-2026-06-08.md`. **C2 is a hard
+> prerequisite for force-quit/recovery testing of the wizard.**
+>
 > **2026-06-08 (session 2 — build-23 feedback pass, IN PROGRESS on worktree branch
 > `worktree-build-23-feedback`, NOT yet on `main`; git is permission-gated this session, so Fardeen
 > commits):** Triaged the walk feedback WITH Fardeen → committed to ALL 5 build-23 UX items AND all 5
@@ -117,36 +170,36 @@
 
 ## Right now
 
-- **Branch:** `wallet-ledger` == `main` == `origin/main` == `41dfb43` — the de-pooled v1, **fully
-  merged** (PR #7 squash-merged the landing de-pool; **0 commits divergence** either way). The whole
-  money path + `firestore.rules` + indexes + the landing de-pool are on `main`. All de-pool / legal
-  / money-path-hardening / privacy-manifest work is **committed**. (4 stale worktree branches still
-  exist — `fix/appstore-copy`, `chore/dead-code`, `chore/docs`, `feat/ux-onboarding` — clean up
-  post-deploy.)
-  - **Legal-UX polish (committed):** acceptance overlay redesigned; legal gate fires right after
-    sign-in (before profile setup); the permission-denied on accept fixed; `acceptLegalTerms` CF
-    made idempotent. Detail in the **Legal** bullet below. The CF change needs the functions deploy
-    to fully persist a new user's acceptance.
-  - **Money-path security hardening (committed):** `/vibe-security` run → all findings fixed across
-    3 adversarial verification rounds. The bucket ledger (`balance == Σbuckets`) is now enforced
-    **everywhere money moves**: withdrawal is bucket-aware; promo → `bonus`; delete refunds
-    `deposited`-to-card only (+ pays/holds withdrawable house money, records forfeits, guards
-    frozen/drifted wallets); group cancel/timeout refunds + account merge move buckets in lockstep;
-    group refunds are now **idempotent**. Detail in **Audit findings** below. **Needs the functions
-    + rules deploy to take effect.**
-- **Merged + pushed to `main`; landing is LIVE; functions NOT yet deployed.** niyah.live is
-  de-pooled and serves `/legal/{privacy,terms}` (PR #7 → main → GitHub Pages); the
-  `niyah.live/stripe/return` bounce is live. The **prod money path is still the OLD `launch`
-  functions** — the new bucket ledger is on `main` but ships at the **next** deploy.
-- **Pre-deploy QA in progress (2026-05-30 PM).** Pre-flight is **all green** (next subsection); the
-  controlled post-deploy run is **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**.
-- **Tests green:** ~742 client (Jest) + **52/52 functions** (`wallet.test.ts` — 14
-  bucket/withdrawal/deletion contract tests + `security`/`withdraw-earned`). Functions suites run
-  via `pnpm test:functions` (Node built-in runner + `tsx`) and are **gated in CI** (`ci` script
-  + `.github/workflows/ci.yml`). `tsc` clean both sides, eslint 0 errors.
-- **Deployed previously:** the `launch` security/payments work (rules + functions deploy ran;
-  migration 16 processed / 9 migrated). The `wallet-ledger` changes are **not** part of that — they
-  ship at the next deploy.
+- **Branch:** `redesign-green-world`, **UNCOMMITTED** (Fardeen commits) — the whole-app green-world
+  redesign + Profile v2 rebuild, on TestFlight as **builds 25–28 (latest = 28)**. Branches off
+  `main` (the de-pooled v1 line; the old `wallet-ledger` working branch + side branches/worktrees
+  were consolidated into `main` 2026-06-09). All money-path / legal / privacy-manifest work from the
+  pre-redesign line is on `main`; this branch is **UI/UX-only** plus the new Clout/Calendar/Balance
+  Profile components and constants — **no money-path or rules changes** rode the redesign.
+  - **Single brand theme (this branch):** dark/light toggle removed from Profile (founder decision
+    2026-06-12); subtrees wrap in `ThemeOverrideContext.Provider value="dark"`. `themeStore` retained
+    for a future light variant. New tokens in `src/constants/colors.ts` + `BLOB_INK` in
+    `src/constants/blobAvatar.ts`. See the dated header entry for the full component list.
+  - **Profile rebuilt:** `src/components/profile/*` + **Clout** (`src/utils/clout.ts`) replaces the
+    Social-Credit card **on Profile only**; `ReputationCard` unchanged on friends/user screens.
+  - **`@expo/ui` POD excluded / SwiftUI pill hard-disabled** after a confirmed iOS-26 render crash in
+    builds 25/26 — RN glass fallback ships; revisit at SDK 55. See the dated header + CLAUDE.md
+    Gotchas.
+- **Still-open money P0s (Fardeen-reviewed pass, NOT applied):** C1 withdrawal double-debit
+  (deterministic `txnRef`), C2 recovery payout race, H1 payout `idempotencyKey`, M1
+  `stakeComposition` validation — precise fixes in `deep-audit-2026-06-08.md`. **C2 is a hard
+  prerequisite** for force-quit/recovery testing of the staking wizard. Land these with a real-money
+  smoke test before the next submit.
+- **Next major build = the STAKING WIZARD** — [staking-wizard-plan.md](./staking-wizard-plan.md):
+  dashboard → two buttons (Focus free / Stake a session → `app/session/wizard/*`), haptic `Dial`,
+  ticket-stub invites over `niyah.live/join`. Group server surface already supports it; solo needs a
+  small reviewed `createSoloSession` extension or snaps to the cadence ladder. `propose.tsx` Day/Time
+  pickers (never wired server-side) are removed by the wizard.
+- **Landing is LIVE; prod money path = the deployed de-pooled `main` functions.** niyah.live is
+  de-pooled and serves `/legal/{privacy,terms}`; the `niyah.live/stripe/return` bounce is live.
+- **Gates green (this branch):** typecheck 0 errors · jest ~957/963 (6 intentional skips) · eslint
+  0/0. Functions suites run via `pnpm test:functions` (Node built-in runner + `tsx`); rules via
+  `pnpm test:rules` (emulator). `tsc` clean both sides.
 
 ### Pre-flight — verified 2026-05-30 PM (all green)
 
@@ -243,23 +296,29 @@ actions** — Claude supplies messages only.
    Google's served cert chain, so every CF call dies as "Network request failed" (deposit,
    withdraw, delete-account, acceptLegalTerms → the Terms re-prompt loop). **Superseded by
    build 22.**
-7b. **TestFlight internal build 22** (carries the pin fix + the full build-21 feedback pass;
-   `app.config.js` already bumped to `buildNumber: "22"`). Same recipe (upload ≠ review):
-   `set -a; source .env; set +a`, then
+7b. ~~**TestFlight internal builds 22–28**~~ — the build-22 pin fix + build-23 feedback pass + the
+   **green-world redesign (25–28)** all shipped to internal TestFlight, **latest = 28** (near-static
+   motion + full all-tabs sweep + Profile v2 + toggle removed). `BUILD_NUMBER` is now epoch-seconds
+   via `scripts/build-prod.sh` — **build with `pnpm build:prod`** (don't hand-number). Same upload
+   recipe (upload ≠ review): `set -a; source .env; set +a`, then
    `npx eas build --platform ios --profile production --local` (writes a NEW `build-<ts>.ipa` —
-   submit THAT file), then
-   `npx eas submit --platform ios --profile production --path ./build-<ts>.ipa`.
-   Optional but recommended first: `npx expo run:ios --device --configuration Release` — the
-   only pre-TestFlight way to exercise the REAL pinning (it's skipped in all dev builds, which
-   is why the outage was invisible locally). Add Funds → slide $1 → PaymentSheet opens →
-   cancel = pin fix proven, no charge.
-8. **Smoke + UX pass ON build 22:** the controlled real-money smoke on a **fresh clean
-   account** (the freed real number works now) + Delete on a throwaway — full tickable
-   script in **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)** (it was blocked at
-   step 1 by the pin outage). Plus the new on-device checks: free block shows non-forfeit
-   shield copy / staked shows "$X stake"; per-category attempt counts; template save/apply;
-   never-block exempts Spotify; sign-out clears selections; 4 tabs; carousel; schedule
-   Work-day-OFF → Morning adds. Then the animations/UX acceptance pass; iterate (23, 24…)
+   submit THAT file), then `npx eas submit --platform ios --profile production --path ./build-<ts>.ipa`.
+7c. **Merge `redesign-green-world` → `main` deliberately** — the redesign + Profile v2 are
+   UNCOMMITTED on the branch (UI/UX-only, no money-path/rules changes). Re-merge at the end of the
+   cycle; `main` is the live-payments branch.
+7d. **Land the still-open money P0s before the next submit** — C1 double-debit, C2 recovery race,
+   H1 payout idempotency, M1 stake-composition (precise fixes in `deep-audit-2026-06-08.md`);
+   **C2 is a hard prerequisite for force-quit/recovery testing of the staking wizard.** Pair with a
+   real-money smoke. The staking wizard ([staking-wizard-plan.md](./staking-wizard-plan.md)) is the
+   next major build on top.
+8. **Smoke + UX pass ON build 28:** the controlled real-money smoke on a **fresh clean account**
+   (the freed real number works now) + Delete on a throwaway — full tickable script in
+   **[smoke-test-2026-05-30.md](./smoke-test-2026-05-30.md)**. Plus the on-device checks: every tab +
+   all 16 session screens + money/blocked/public-profile render correctly on the single green theme
+   (no leftover light-scheme surfaces); free block shows non-forfeit shield copy / staked shows "$X
+   stake"; per-category attempt counts; template save/apply; never-block exempts Spotify; sign-out
+   clears selections; Profile Clout card / calendar stamps / balance ticker; the SwiftUI pill stays
+   on the RN glass fallback (no iOS-26 crash). Then the animations/UX acceptance pass; iterate
    review-free until happy.
 9. **Final submit (only after 8 passes)** — App Review notes ready on request: Stripe (not IAP)
    because deposits/stakes/withdrawals are the user's own funds; commitment-contract (not
