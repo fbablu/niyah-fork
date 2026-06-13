@@ -15,7 +15,6 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { BlobMakerStage } from "./BlobMakerStage";
@@ -47,11 +46,20 @@ interface BlobMakerSheetProps {
   onSave: (next: BlobAvatarConfig) => void;
 }
 
-// Slingshot rubber-band: low-damping overshoot spring (design comment 2).
-// Shared by the hero blob AND the sheet's translateY rise.
-const SLINGSHOT_SPRING = { damping: 12, stiffness: 140 };
-const COLLAPSE_MS = 250;
-const BACKDROP_MS = 200;
+// v3 motion spec (near-static): plain timed rise, no spring, no overshoot,
+// no hero slingshot — the hero just appears statically with the sheet.
+// Open = backdrop fade + sheet translateY ease-out; close = reverse, faster.
+const SHEET_IN_MS = 220;
+const SHEET_OUT_MS = 180;
+const BACKDROP_MS = 180;
+/** Bare opacity dip on the hero while shuffle/randomize swaps its content. */
+const HERO_DIP_MS = 150;
+const HERO_DIP_OPACITY = 0.4;
+/** Customizer sheet top-corner radius (frame 429:347, rounded-[57.46]) —
+ *  intentionally far beyond Radius.xl; the giant curve IS the design. */
+const SHEET_TOP_RADIUS = 57;
+/** White grab bar width (frame 429:347, line 429:553 ≈ 52pt). */
+const GRAB_BAR_WIDTH = 52;
 /** Partial sheet: ~66% of the screen, bottom-anchored (frame 401:106 — the
  *  sheet rises to y≈298 of 874), so the dimmed profile and the platform's
  *  sleepy-eyes flip (design comment 1) stay visible above it. */
@@ -59,10 +67,10 @@ const SHEET_HEIGHT_RATIO = 0.66;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// Edit-your-blob sheet: the profile blob slingshots from its platform into
-// the foreground and becomes editable. Shapes are fully generative — Shuffle
-// re-mints a one-of-a-kind seed; Color + Eyes stay explicit; the die
-// randomizes all three (design comment 2).
+// Edit-your-blob sheet (frame 429:347): the profile blob moves from its
+// platform into the foreground and becomes editable. Shapes are fully
+// generative — Shuffle re-mints a one-of-a-kind seed; Color + Eyes stay
+// explicit; the die randomizes all three (design comment 2).
 export function BlobMakerSheet({
   visible,
   onClose,
@@ -93,35 +101,35 @@ export function BlobMakerSheet({
     }
   }, [visible, config, uid]);
 
-  // Entrance: hero slingshots off the platform with rubber-band overshoot,
-  // the sheet springs up from the bottom edge, the backdrop fades in.
-  const hero = useSharedValue(0);
+  // Entrance: the sheet rises from the bottom edge on a plain ease-out
+  // timing while the backdrop fades in. The hero rides inside the sheet —
+  // no separate entrance animation (near-static spec).
+  const heroDip = useSharedValue(1);
   const sheet = useSharedValue(0);
   const backdrop = useSharedValue(0);
   useEffect(() => {
     if (!visible) {
-      hero.value = 0;
+      heroDip.value = 1;
       sheet.value = 0;
       backdrop.value = 0;
       return;
     }
     if (reducedMotion) {
-      hero.value = 1;
       sheet.value = 1;
       backdrop.value = 1;
       return;
     }
-    hero.value = withSpring(1, SLINGSHOT_SPRING);
-    sheet.value = withSpring(1, SLINGSHOT_SPRING);
+    sheet.value = withTiming(1, {
+      duration: SHEET_IN_MS,
+      easing: Easing.out(Easing.cubic),
+    });
     backdrop.value = withTiming(1, { duration: BACKDROP_MS });
-  }, [visible, reducedMotion, hero, sheet, backdrop]);
+  }, [visible, reducedMotion, heroDip, sheet, backdrop]);
 
   const heroStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(hero.value, 1),
-    transform: [{ scale: 0.6 + hero.value * 0.4 }],
+    opacity: heroDip.value,
   }));
   const sheetStyle = useAnimatedStyle(() => ({
-    // Overshoot (>1) briefly lifts past the resting line — rubber band.
     transform: [{ translateY: (1 - sheet.value) * sheetHeight }],
   }));
   const backdropStyle = useAnimatedStyle(() => ({
@@ -135,31 +143,28 @@ export function BlobMakerSheet({
     ...(seed !== uid ? { shapeSeed: seed } : {}),
   };
 
-  const pop = () => {
+  // Shuffle/randomize feedback: the content swap is instant; a bare opacity
+  // dip (instant drop, 150ms recovery) softens it. No transforms.
+  const dip = () => {
     if (reducedMotion) return;
-    hero.value = withTiming(0.92, { duration: 90 }, () => {
-      hero.value = withTiming(1, {
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-      });
+    heroDip.value = HERO_DIP_OPACITY;
+    heroDip.value = withTiming(1, {
+      duration: HERO_DIP_MS,
+      easing: Easing.out(Easing.cubic),
     });
   };
 
-  // Collapse-then-close: the hero slingshots back toward the platform while
-  // the sheet drops and the backdrop fades; control hands back on settle.
+  // Close: the sheet drops and the backdrop fades (reverse of open, faster);
+  // control hands back on settle.
   const requestClose = () => {
     if (reducedMotion) {
       onClose();
       return;
     }
-    hero.value = withTiming(0, {
-      duration: COLLAPSE_MS,
-      easing: Easing.in(Easing.cubic),
-    });
-    backdrop.value = withTiming(0, { duration: COLLAPSE_MS });
+    backdrop.value = withTiming(0, { duration: SHEET_OUT_MS });
     sheet.value = withTiming(
       0,
-      { duration: COLLAPSE_MS, easing: Easing.in(Easing.cubic) },
+      { duration: SHEET_OUT_MS, easing: Easing.in(Easing.cubic) },
       () => {
         runOnJS(onClose)();
       },
@@ -169,7 +174,7 @@ export function BlobMakerSheet({
   const handleShuffle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSeed(`${uid}:${generateId(8)}`);
-    pop();
+    dip();
   };
 
   // Die: one tap re-mints the seed AND draws a random color + eyes (eye
@@ -183,7 +188,7 @@ export function BlobMakerSheet({
     setEyesPreset(
       BLOB_AVATAR_EYES[Math.floor(Math.random() * BLOB_AVATAR_EYES.length)],
     );
-    pop();
+    dip();
   };
 
   const handleSave = () => {
@@ -253,12 +258,14 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     backdrop: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: Colors.overlay,
+      // The dimmed profile (and the platform's sleepy-eyes flip) stays
+      // visible through the glass above the sheet (frame 429:347).
+      backgroundColor: Colors.glassDark,
     },
     sheet: {
-      backgroundColor: Colors.background,
-      borderTopLeftRadius: Radius.xl,
-      borderTopRightRadius: Radius.xl,
+      backgroundColor: Colors.primaryLight,
+      borderTopLeftRadius: SHEET_TOP_RADIUS,
+      borderTopRightRadius: SHEET_TOP_RADIUS,
       overflow: "hidden",
     },
     sheetInner: {
@@ -266,10 +273,10 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     grabBar: {
       alignSelf: "center",
-      width: Spacing.xxl,
+      width: GRAB_BAR_WIDTH,
       height: Spacing.xs,
       borderRadius: Radius.full,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.white,
       marginTop: Spacing.sm,
     },
     headerRow: {
@@ -278,21 +285,19 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "space-between",
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
-      borderBottomWidth: 1,
-      borderBottomColor: Colors.border,
     },
     title: {
       fontSize: Typography.bodyLarge,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     cancel: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: Colors.white,
     },
     done: {
       fontSize: Typography.bodyMedium,
-      ...Font.semibold,
-      color: Colors.primary,
+      ...Font.bold,
+      color: Colors.white,
     },
   });

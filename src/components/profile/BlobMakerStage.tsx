@@ -7,12 +7,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
+import Animated from "react-native-reanimated";
 import { BlobAvatar } from "../BlobAvatar";
 import { Spacing, Radius, type ThemeColors } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
@@ -22,18 +17,21 @@ interface BlobMakerStageProps {
   /** The in-progress config being edited (hero preview). */
   editing: BlobAvatarConfig;
   uid: string;
-  /** Animated slingshot style owned by the sheet (entrance/collapse). */
+  /** Animated hero style owned by the sheet (entrance/collapse). */
   heroStyle: StyleProp<ViewStyle>;
-  /** Die tap — the stage spins the die itself; randomizing is the sheet's. */
+  /** Die tap — randomizing (and its content-swap dip) is the sheet's. */
   onRandomize: () => void;
-  /** Collapse arrows — saves and slingshots back onto the platform. */
+  /** Collapse arrows — saves and settles back onto the platform. */
   onSaveCollapse: () => void;
 }
 
-const DIE_SPIN_MS = 400;
+// v3 motion spec (near-static): the die itself does not animate — randomize
+// is an instant content change; the sheet dips the hero's opacity only.
+/** Glass circle the hero blob floats on (frame 429:347). */
+const HERO_CIRCLE = 200;
 
-// Customizer hero zone (frame 401:106): die (randomize-all) on the left,
-// hero blob center, collapse arrows on the right.
+// Customizer hero zone (frame 429:347): die (randomize-all) on the left,
+// hero blob on its glass circle in the center, collapse arrows on the right.
 export function BlobMakerStage({
   editing,
   uid,
@@ -43,24 +41,11 @@ export function BlobMakerStage({
 }: BlobMakerStageProps) {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  const reducedMotion = useReducedMotion();
-
-  // "The die icon simply spins" (design comment 2) — one full turn per tap.
-  const dieSpin = useSharedValue(0);
-  const dieStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${dieSpin.value * 360}deg` }],
-  }));
-  const handleDie = () => {
-    if (!reducedMotion) {
-      dieSpin.value = withTiming(dieSpin.value + 1, { duration: DIE_SPIN_MS });
-    }
-    onRandomize();
-  };
 
   return (
     <View style={styles.stage}>
       <Pressable
-        onPress={handleDie}
+        onPress={onRandomize}
         style={({ pressed }) => [
           styles.stageButton,
           pressed && styles.stageButtonPressed,
@@ -68,14 +53,14 @@ export function BlobMakerStage({
         accessibilityRole="button"
         accessibilityLabel="Randomize your blob"
       >
-        <Animated.View style={dieStyle}>
-          <Ionicons name="dice-outline" size={24} color={Colors.text} />
-        </Animated.View>
+        <Ionicons name="dice-outline" size={24} color={Colors.white} />
       </Pressable>
 
-      <Animated.View style={heroStyle}>
-        <BlobAvatar size={168} config={editing} seed={uid} animated />
-      </Animated.View>
+      <View style={styles.heroCircle}>
+        <Animated.View style={heroStyle}>
+          <BlobAvatar size={168} config={editing} seed={uid} animated />
+        </Animated.View>
+      </View>
 
       <Pressable
         onPress={onSaveCollapse}
@@ -86,7 +71,7 @@ export function BlobMakerStage({
         accessibilityRole="button"
         accessibilityLabel="Save and collapse"
       >
-        <Ionicons name="contract" size={24} color={Colors.text} />
+        <Ionicons name="contract" size={24} color={Colors.white} />
       </Pressable>
     </View>
   );
@@ -98,20 +83,26 @@ const makeStyles = (Colors: ThemeColors) =>
       flexDirection: "row",
       alignItems: "flex-end",
       justifyContent: "center",
-      gap: Spacing.md,
-      paddingVertical: Spacing.xl,
+      gap: Spacing.sm,
+      paddingVertical: Spacing.lg,
     },
     stageButton: {
-      width: 48,
-      height: 48,
+      width: 56,
+      height: 56,
       borderRadius: Radius.full,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: Colors.backgroundCard,
-      borderWidth: 1,
-      borderColor: Colors.border,
+      backgroundColor: Colors.glassLight,
     },
     stageButtonPressed: {
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassMid,
+    },
+    heroCircle: {
+      width: HERO_CIRCLE,
+      height: HERO_CIRCLE,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassLight,
+      alignItems: "center",
+      justifyContent: "center",
     },
   });

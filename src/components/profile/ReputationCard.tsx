@@ -3,13 +3,18 @@ import { View, Text, StyleSheet } from "react-native";
 import {
   Typography,
   Spacing,
+  Radius,
   Font,
   type ThemeColors,
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import { Card } from "../Card";
 import { REPUTATION_LEVELS } from "../../constants/config";
 import type { UserReputation } from "../../types";
+
+// White hierarchy on the glass seat — rgba so opacities never compound with
+// layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
 
 interface ReputationCardProps {
   reputation: UserReputation | undefined;
@@ -35,7 +40,7 @@ export function ReputationCard({
   };
 
   return (
-    <Card style={styles.reputationCard}>
+    <View style={styles.reputationCard}>
       <View style={styles.reputationHeader}>
         <Text style={styles.reputationTitle}>Social Credit</Text>
         <Text style={styles.reputationDescription}>
@@ -85,17 +90,19 @@ export function ReputationCard({
           <Text style={styles.paymentLabel}>Referred</Text>
         </View>
       </View>
-    </Card>
+    </View>
   );
 }
 
+// Glass seat on the green field (v2 language): glassLight surface, white
+// text hierarchy, Radius.xl; rep-level/semantic fill colors kept.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     reputationCard: {
       marginBottom: Spacing.md,
-      backgroundColor: Colors.primaryMuted,
-      borderWidth: 1,
-      borderColor: Colors.primary,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      padding: Spacing.lg,
     },
     reputationHeader: {
       marginBottom: Spacing.md,
@@ -103,19 +110,20 @@ const makeStyles = (Colors: ThemeColors) =>
     reputationTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     reputationDescription: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
     progressBarContainer: {
       marginBottom: Spacing.md,
     },
+    // Solid glass track (CloutCard family) so the semantic fill reads on it.
     progressBar: {
       height: 8,
-      backgroundColor: Colors.border,
+      backgroundColor: Colors.glassSolid,
       borderRadius: 4,
       overflow: "hidden",
     },
@@ -130,14 +138,14 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     progressLabel: {
       fontSize: 10,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
     paymentStats: {
       flexDirection: "row",
       justifyContent: "space-around",
       paddingTop: Spacing.md,
       borderTopWidth: 1,
-      borderTopColor: Colors.border,
+      borderTopColor: Colors.glassMid,
     },
     paymentStat: {
       alignItems: "center",
@@ -145,11 +153,11 @@ const makeStyles = (Colors: ThemeColors) =>
     paymentValue: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     paymentLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
   });

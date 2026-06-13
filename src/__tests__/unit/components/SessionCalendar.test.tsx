@@ -126,7 +126,7 @@ describe("SessionCalendar", () => {
   });
 
   describe("streak counter", () => {
-    it("falls back to a plain outlined circle ONLY when there is no blobConfig", () => {
+    it("falls back to a plain white circle ONLY when there is no blobConfig", () => {
       renderCal({ streakCount: 3 });
       const badge = screen.getByTestId("streak-circle");
       expect(within(badge).getByText("3")).toBeTruthy();
@@ -134,7 +134,7 @@ describe("SessionCalendar", () => {
       expect(screen.queryByTestId("streak-blob-path")).toBeNull();
     });
 
-    it("traces the named preset's body path (stroke-only) — same source BlobAvatar draws", () => {
+    it("traces the named preset's body path (white-filled, v2 inversion) — same source BlobAvatar draws", () => {
       const blobConfig: BlobAvatarConfig = {
         colorPreset: "sunset",
         shapePreset: "wave",
@@ -145,15 +145,16 @@ describe("SessionCalendar", () => {
       expect(within(badge).getByText("5")).toBeTruthy();
       const path = screen.getByTestId("streak-blob-path");
       // Cross-validated against the avatar's own shape record — these MUST
-      // agree or the streak ring stops matching the user's chosen blob.
+      // agree or the streak badge stops matching the user's chosen blob.
       expect(path.props.d).toBe(getBlobBodyShape(blobConfig).bodyPath);
       // Pins the preset branch: NOT the procedural fallback path.
       expect(path.props.d).not.toBe(generateBlobPath("guest"));
-      expect(path.props.fill).toBe("none");
+      // v2 white/black inversion: white-filled silhouette (was stroke-only).
+      expect(path.props.fill).toBe("#FFFFFF");
       expect(screen.queryByTestId("streak-circle")).toBeNull();
     });
 
-    it("draws the user's blob outline (stroke-only, deterministic) from the shapeSeed", () => {
+    it("draws the user's blob silhouette (white-filled, deterministic) from the shapeSeed", () => {
       renderCal({
         streakCount: 7,
         blobConfig: {
@@ -167,7 +168,7 @@ describe("SessionCalendar", () => {
       expect(within(badge).getByText("7")).toBeTruthy();
       const path = screen.getByTestId("streak-blob-path");
       expect(path.props.d).toBe(generateBlobPath("uid:seed1"));
-      expect(path.props.fill).toBe("none");
+      expect(path.props.fill).toBe("#FFFFFF");
       expect(screen.queryByTestId("streak-circle")).toBeNull();
     });
 

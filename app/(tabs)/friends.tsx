@@ -37,6 +37,13 @@ import {
 } from "../../src/types";
 import { logger } from "../../src/utils/logger";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 // Cap how many invite rows we mount at once. The rows live inside the
 // FlatList header (non-virtualized), so rendering every device contact
 // stutters on open. Collapsed shows the first few alphabetically; "Show more"
@@ -46,11 +53,14 @@ const INVITE_COLLAPSED_COUNT = 5;
 
 // ─── Styles (makeStyles) ──────────────────────────────────────────────────────
 
+// Full-bleed GREEN brand screen (mirrors profile/index/schedule, v2 node
+// 429:186): primaryDark field, no shared horizontal padding — each section
+// owns its proportional width (~92.5%, centered).
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     center: {
       flex: 1,
@@ -58,29 +68,38 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "center",
     },
     header: {
+      width: "92.5%",
+      alignSelf: "center",
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      paddingHorizontal: Spacing.lg,
       paddingTop: Spacing.lg,
       paddingBottom: Spacing.md,
     },
     title: {
       fontSize: Typography.headlineMedium,
       ...Font.heavy,
-      color: Colors.text,
+      color: Colors.white,
       letterSpacing: -0.5,
     },
-    inviteLink: {
-      fontSize: Typography.bodyMedium,
-      ...Font.semibold,
-      color: Colors.primaryLight,
+    // Dark-glass circle so the icon reads on the green field (the dashboard
+    // header's invite treatment).
+    headerInviteBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
+      alignItems: "center",
+      justifyContent: "center",
     },
+    // Dark-glass pill rail; the selected segment flips to the white circle /
+    // primaryDark text treatment (schedule day chips, dashboard done steps).
     segmentRow: {
+      width: "92.5%",
+      alignSelf: "center",
       flexDirection: "row",
-      marginHorizontal: Spacing.lg,
       marginBottom: Spacing.md,
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.full,
       padding: 4,
       gap: 4,
@@ -92,80 +111,93 @@ const makeStyles = (Colors: ThemeColors) =>
       alignItems: "center",
     },
     segmentActive: {
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
     },
     segmentLabel: {
       fontSize: Typography.labelLarge,
       ...Font.semibold,
-      color: Colors.textMuted,
+      color: WHITE_70,
     },
     segmentLabelActive: {
-      color: Colors.white,
+      color: Colors.primaryDark,
     },
     list: {
       flex: 1,
     },
     listContent: {
-      paddingHorizontal: Spacing.lg,
       paddingBottom: Spacing.xxl,
       gap: Spacing.sm,
     },
     emptyState: {
+      width: "92.5%",
+      alignSelf: "center",
       paddingTop: Spacing.xxl,
       alignItems: "center",
     },
     emptyText: {
       fontSize: Typography.bodyMedium,
       ...Font.regular,
-      color: Colors.textMuted,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: 22,
     },
+    // Friend rows = glass seats (glassLight, Radius.xl, borderless), like the
+    // dashboard balance/CTA cards.
     row: {
       flexDirection: "row",
       alignItems: "center",
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.md,
-      borderWidth: 1,
-      borderColor: Colors.border,
       gap: Spacing.md,
     },
+    // Seat width for rows mounted directly in the FlatList (header-nested rows
+    // inherit their section's 92.5% instead).
+    listRow: {
+      width: "92.5%",
+      alignSelf: "center",
+    },
+    skeletonStack: {
+      width: "92.5%",
+      alignSelf: "center",
+      gap: Spacing.sm,
+    },
+    // "Me" row = the brand surface (primary fill + white@0.25 border), the
+    // dashboard active-session treatment — distinct from the glass seats.
     standingRowMe: {
-      borderColor: Colors.primary,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.primary,
+      borderWidth: 1,
+      borderColor: WHITE_25,
     },
     standingRank: {
       fontSize: Typography.titleSmall,
       ...Font.bold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       minWidth: 24,
       textAlign: "center",
     },
     standingMeta: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: 2,
     },
     standingRate: {
       fontSize: Typography.titleSmall,
       ...Font.bold,
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
     avatar: {
       width: 44,
       height: 44,
       borderRadius: 22,
-      backgroundColor: Colors.primaryMuted,
-      borderWidth: 1,
-      borderColor: Colors.primaryLight,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
     },
     avatarInitial: {
       fontSize: Typography.titleSmall,
       ...Font.bold,
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
     rowInfo: {
       flex: 1,
@@ -179,7 +211,7 @@ const makeStyles = (Colors: ThemeColors) =>
     rowName: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     tagBadge: {
       fontSize: Typography.labelSmall,
@@ -203,21 +235,22 @@ const makeStyles = (Colors: ThemeColors) =>
     repScore: {
       fontSize: Typography.labelMedium,
       ...Font.regular,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
+    // Quiet outline pill (the dashboard secondary ActionButton treatment).
     unfollowBtn: {
       paddingVertical: 6,
       paddingHorizontal: Spacing.md,
       borderRadius: Radius.full,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: WHITE_55,
       minWidth: 80,
       alignItems: "center",
     },
     unfollowBtnText: {
       fontSize: Typography.labelLarge,
       ...Font.medium,
-      color: Colors.textMuted,
+      color: Colors.white,
     },
     followBtn: {
       paddingVertical: 6,
@@ -230,7 +263,7 @@ const makeStyles = (Colors: ThemeColors) =>
     followingBtn: {
       backgroundColor: "transparent",
       borderWidth: 1,
-      borderColor: Colors.primaryLight,
+      borderColor: WHITE_55,
     },
     followBtnText: {
       fontSize: Typography.labelLarge,
@@ -238,28 +271,32 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.white,
     },
     followingBtnText: {
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
+    // Add affordance = Colors.primary brand surface with the white@0.25
+    // border (the schedule preset-card treatment).
     findFriendsBtn: {
+      width: "92.5%",
+      alignSelf: "center",
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: Spacing.sm,
-      marginHorizontal: Spacing.lg,
       marginBottom: Spacing.md,
       paddingVertical: Spacing.md,
-      backgroundColor: Colors.primaryMuted,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.primary,
+      borderRadius: Radius.xl,
       borderWidth: 1,
-      borderColor: Colors.primary,
+      borderColor: WHITE_25,
     },
     findFriendsBtnText: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.primary,
+      color: Colors.white,
     },
     contactMatchSection: {
-      marginHorizontal: Spacing.lg,
+      width: "92.5%",
+      alignSelf: "center",
       marginBottom: Spacing.md,
     },
     contactMatchHeader: {
@@ -271,74 +308,78 @@ const makeStyles = (Colors: ThemeColors) =>
     contactMatchTitle: {
       fontSize: Typography.labelLarge,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: Colors.white,
     },
     contactMatchDismiss: {
       fontSize: Typography.labelMedium,
-      color: Colors.textMuted,
+      color: WHITE_70,
     },
+    // Dark-glass search pill: white text, white@0.55 placeholder (set on the
+    // TextInput's placeholderTextColor prop).
     inviteSearchInput: {
       height: 36,
-      backgroundColor: Colors.backgroundSecondary,
-      borderRadius: Radius.md,
+      backgroundColor: Colors.glassDark,
+      borderRadius: Radius.full,
       paddingHorizontal: Spacing.md,
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     inviteShowMore: {
       fontSize: Typography.bodySmall,
       ...Font.semibold,
-      color: Colors.primaryLight,
+      color: Colors.white,
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
     },
     inviteTruncatedHint: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: Spacing.xs,
       paddingHorizontal: Spacing.md,
     },
+    // Compact glass seat (Radius.lg keeps the corner proportional to the
+    // shorter row).
     inviteRow: {
       flexDirection: "row",
       alignItems: "center",
       paddingVertical: Spacing.sm,
       paddingHorizontal: Spacing.md,
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.lg,
       gap: Spacing.sm,
     },
     inviteAvatar: {
       width: 32,
       height: 32,
       borderRadius: 16,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
     },
     inviteAvatarText: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     inviteContactName: {
       flex: 1,
       fontSize: Typography.bodySmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     inviteBtn: {
       paddingVertical: 4,
       paddingHorizontal: Spacing.md,
       borderRadius: Radius.full,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.primary,
       borderWidth: 1,
-      borderColor: Colors.primary,
+      borderColor: WHITE_25,
     },
     inviteBtnText: {
       fontSize: Typography.labelSmall,
       ...Font.semibold,
-      color: Colors.primary,
+      color: Colors.white,
     },
   });
 
@@ -390,7 +431,9 @@ const repColor = (level: string, Colors: ThemeColors): string => {
     case "sprout":
       return Colors.warning;
     default:
-      return Colors.textMuted;
+      // Was Colors.textMuted — theme-dependent murky brown that vanishes on
+      // the green field; the base level reads as quiet white instead.
+      return WHITE_55;
   }
 };
 
@@ -405,7 +448,7 @@ const FollowingRow: React.FC<{
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable style={[styles.row, styles.listRow]} onPress={onPress}>
       <View style={styles.avatar}>
         <Text style={styles.avatarInitial}>
           {profile.name.charAt(0).toUpperCase()}
@@ -429,7 +472,7 @@ const FollowingRow: React.FC<{
         disabled={unfollowLoading}
       >
         {unfollowLoading ? (
-          <ActivityIndicator size="small" color={Colors.textMuted} />
+          <ActivityIndicator size="small" color={Colors.white} />
         ) : (
           <Text style={styles.unfollowBtnText}>Unfollow</Text>
         )}
@@ -463,7 +506,7 @@ const PartnerRow: React.FC<{
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable style={[styles.row, styles.listRow]} onPress={onPress}>
       <View style={styles.avatar}>
         <Text style={styles.avatarInitial}>{name.charAt(0).toUpperCase()}</Text>
       </View>
@@ -488,7 +531,7 @@ const PartnerRow: React.FC<{
         disabled={followLoading}
       >
         {followLoading ? (
-          <ActivityIndicator size="small" color={Colors.primaryLight} />
+          <ActivityIndicator size="small" color={Colors.white} />
         ) : (
           <Text
             style={[
@@ -515,7 +558,9 @@ const StandingRowBase: React.FC<{
   const ratePct = Math.round(entry.completionRate * 100);
   const displayName = entry.name || "Member";
   return (
-    <View style={[styles.row, entry.isMe && styles.standingRowMe]}>
+    <View
+      style={[styles.row, styles.listRow, entry.isMe && styles.standingRowMe]}
+    >
       <Text style={styles.standingRank}>{rank}</Text>
       <View style={styles.avatar}>
         <Text style={styles.avatarInitial}>
@@ -985,8 +1030,9 @@ function FriendsScreenInner() {
             hitSlop={10}
             accessibilityLabel="Invite friends"
             accessibilityRole="button"
+            style={styles.headerInviteBtn}
           >
-            <Ionicons name="person-add" size={22} color={Colors.primaryLight} />
+            <Ionicons name="person-add" size={22} color={Colors.white} />
           </Pressable>
         </View>
 
@@ -997,7 +1043,7 @@ function FriendsScreenInner() {
           disabled={isImporting}
         >
           {isImporting ? (
-            <ActivityIndicator size="small" color={Colors.primary} />
+            <ActivityIndicator size="small" color={Colors.white} />
           ) : null}
           <Text style={styles.findFriendsBtnText}>
             {isImporting
@@ -1075,7 +1121,7 @@ function FriendsScreenInner() {
             <TextInput
               style={styles.inviteSearchInput}
               placeholder="Search contacts..."
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={WHITE_55}
               value={inviteSearch}
               onChangeText={setInviteSearch}
               autoCapitalize="none"
@@ -1167,7 +1213,7 @@ function FriendsScreenInner() {
   const listEmpty = useMemo(() => {
     if (tab === "standings" && leaderboardLoading) {
       return (
-        <View style={{ gap: Spacing.sm }}>
+        <View style={styles.skeletonStack}>
           {Array.from({ length: 5 }).map((_, i) => (
             <View key={`standing-skeleton-${i}`} style={styles.row}>
               <Skeleton width={24} height={18} radius={5} />
@@ -1204,7 +1250,7 @@ function FriendsScreenInner() {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
         <View style={styles.center}>
-          <ActivityIndicator color={Colors.primaryLight} />
+          <ActivityIndicator color={Colors.white} />
         </View>
       </SafeAreaView>
     );

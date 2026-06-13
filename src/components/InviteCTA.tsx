@@ -11,13 +11,20 @@ import {
 } from "../constants/colors";
 import { useColors } from "../hooks/useColors";
 
+// Brand-surface treatment (index.tsx/friends.tsx WHITE_25 precedent): the
+// sole consumer is the profile tab's glassDark functional zone on the green
+// field, where the old primaryMuted tint + theme text washed out (and went
+// dark-on-dark in light theme).
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     inviteCard: {
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.primary,
       borderRadius: Radius.lg,
       borderWidth: 1,
-      borderColor: Colors.primaryLight,
+      borderColor: WHITE_25,
       paddingVertical: Spacing.md,
       paddingHorizontal: Spacing.lg,
     },
@@ -29,15 +36,16 @@ const makeStyles = (Colors: ThemeColors) =>
     inviteCardTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     inviteCardSubtitle: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: 2,
     },
     inviteBadge: {
-      backgroundColor: Colors.primary,
+      // glassDark, not primary — the badge has to read on the now-primary card
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.full,
       paddingVertical: 4,
       paddingHorizontal: Spacing.md,

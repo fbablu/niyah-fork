@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Appearance } from "react-native";
 import { type Theme } from "../constants/colors";
 
 interface ThemeStore {
@@ -12,14 +11,15 @@ interface ThemeStore {
   setTheme: (theme: Theme) => void;
 }
 
-// Use the device's current color scheme as the initial default so the very
-// first render already has the right color before AsyncStorage finishes loading.
-const deviceTheme = (Appearance.getColorScheme() as Theme) ?? "dark";
-
+// Single brand theme: Niyah ships "dark" unconditionally (the green world is
+// pinned dark by construction; the old Appearance.getColorScheme() seed is
+// gone). The Light Mode UI toggle was removed 2026-06-12 per founder decision
+// — toggleTheme/setTheme stay exported so the store API is unchanged and a
+// future light variant can be re-enabled without rewiring consumers.
 export const useThemeStore = create<ThemeStore>()(
   persist(
     (set, get) => ({
-      theme: deviceTheme,
+      theme: "dark",
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
       toggleTheme: () =>
@@ -30,8 +30,13 @@ export const useThemeStore = create<ThemeStore>()(
       name: "niyah-theme",
       storage: createJSONStorage(() => AsyncStorage),
       // Mark hydration complete so layouts can wait for the persisted value
-      // before committing native appearance props to UITabBar.
+      // before committing native appearance props to UITabBar. With the UI
+      // toggle gone, a previously persisted "light" would strand the user on
+      // the retired theme — normalize it back to the single brand theme.
       onRehydrateStorage: () => (state) => {
+        if (state?.theme !== "dark") {
+          state?.setTheme("dark");
+        }
         state?.setHasHydrated(true);
       },
     },

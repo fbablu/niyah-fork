@@ -62,21 +62,33 @@ function getUntilTonightMs(): number {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    // Brand-surface attention card: Colors.primary fill + white@0.25 border.
     setupCard: {
       padding: Spacing.lg,
       marginBottom: Spacing.md,
+      backgroundColor: Colors.primary,
+      borderWidth: 1,
+      borderColor: WHITE_25,
+      borderRadius: Radius.xl,
     },
     setupTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     setupDescription: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.md,
       lineHeight: 20,
     },
@@ -98,15 +110,26 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.medium,
     },
     setupDone: {
-      color: Colors.gain,
+      color: Colors.white,
     },
     setupPending: {
-      color: Colors.textMuted,
+      color: WHITE_70,
+    },
+    // White-flip pills (Colors.white + primaryDark content) so the setup CTAs
+    // read on the brand-surface fill — via Button's public style props only.
+    setupButton: {
+      backgroundColor: Colors.white,
+      borderRadius: Radius.full,
+    },
+    setupButtonText: {
+      color: Colors.primaryDark,
     },
     sectionLabel: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: WHITE_70,
+      textTransform: "uppercase" as const,
+      letterSpacing: 0.5,
       marginBottom: Spacing.md,
     },
     durationGrid: {
@@ -115,32 +138,34 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: Spacing.sm,
       marginBottom: Spacing.md,
     },
+    // Dark-glass duration chips; the selected one flips to Colors.white with
+    // primaryDark content (propose.tsx scheduleChip precedent).
     durationChip: {
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
       borderRadius: Radius.lg,
-      backgroundColor: Colors.backgroundCard,
-      borderWidth: 2,
-      borderColor: "transparent",
+      backgroundColor: Colors.glassDark,
       minWidth: "45%",
       alignItems: "center",
       flexGrow: 1,
     },
     durationChipSelected: {
-      borderColor: Colors.primary,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.white,
     },
     durationLabel: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: WHITE_70,
     },
     durationLabelSelected: {
-      color: Colors.primary,
+      color: Colors.primaryDark,
     },
+    // Glass seat for the current app selection (glassLight, Radius.xl).
     appSelectionCard: {
       padding: Spacing.lg,
       marginBottom: Spacing.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     appSelectionRow: {
       flexDirection: "row",
@@ -149,33 +174,37 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     appSelectionLabel: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       flex: 1,
     },
     appSelectionValue: {
       fontSize: Typography.bodySmall,
       ...Font.semibold,
-      color: Colors.primary,
+      color: Colors.white,
     },
     infoCard: {
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.md,
       marginBottom: Spacing.md,
     },
     infoText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: 20,
       textAlign: "center",
     },
     infoBold: {
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
+    },
+    // Shared Button styled via its public style prop only (Radius.full pill).
+    footerButton: {
+      borderRadius: Radius.full,
     },
     disclaimer: {
       textAlign: "center",
-      color: Colors.textMuted,
+      color: WHITE_55,
       fontSize: Typography.labelSmall,
     },
   });
@@ -313,6 +342,7 @@ function QuickBlockScreenInner() {
       title="Block Apps"
       subtitle="Focus without distractions"
       centerTitle={false}
+      backgroundColor={Colors.primaryDark}
       footer={
         <>
           <Button
@@ -323,6 +353,7 @@ function QuickBlockScreenInner() {
               (isScreenTimeAvailable && (!isAuthorized || !hasApps))
             }
             size="large"
+            style={styles.footerButton}
           />
           <Text style={styles.disclaimer}>No money involved. Just focus.</Text>
         </>
@@ -354,6 +385,8 @@ function QuickBlockScreenInner() {
                 title="Authorize"
                 onPress={handleAuthorize}
                 size="small"
+                style={styles.setupButton}
+                textStyle={styles.setupButtonText}
               />
             </View>
           )}
@@ -373,6 +406,8 @@ function QuickBlockScreenInner() {
                 title="Select Apps"
                 onPress={handleSelectApps}
                 size="small"
+                style={styles.setupButton}
+                textStyle={styles.setupButtonText}
               />
             </View>
           )}

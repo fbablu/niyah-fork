@@ -1,9 +1,10 @@
 import React, { useMemo, useEffect, useState } from "react";
-import BlobsBackground from "../../src/components/BlobsBackground";
 import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import Animated, {
+  Easing,
   useSharedValue,
   useAnimatedStyle,
+  useReducedMotion,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
@@ -36,6 +37,13 @@ import {
 import { formatWindow } from "../../src/constants/scheduleTemplates";
 import { MIN_STAKE_CENTS } from "../../src/constants/config";
 import { generateBlobAvatarPreset } from "../../src/constants/blobAvatar";
+
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
 
 interface ActionButtonProps {
   label: string;
@@ -80,15 +88,15 @@ const ActionButton: React.FC<ActionButtonProps> = ({
         actionButtonSecondary: {
           backgroundColor: "transparent",
           borderWidth: 1,
-          borderColor: Colors.border,
+          borderColor: WHITE_55,
         },
         actionButtonText: {
-          color: Colors.background,
+          color: Colors.white,
           ...Font.semibold,
           fontSize: Typography.bodySmall,
         },
         actionButtonTextSecondary: {
-          color: Colors.text,
+          color: Colors.white,
         },
       }),
     [Colors],
@@ -140,7 +148,7 @@ const StatCardBase: React.FC<StatCardProps> = ({
         statCard: {
           width: "48%",
           flexGrow: 1,
-          backgroundColor: Colors.backgroundCard,
+          backgroundColor: Colors.glassLight,
           borderRadius: Radius.lg,
           padding: Spacing.md,
           alignItems: "center",
@@ -148,26 +156,40 @@ const StatCardBase: React.FC<StatCardProps> = ({
         statValue: {
           fontSize: Typography.headlineSmall,
           ...Font.bold,
-          color: Colors.text,
+          color: Colors.white,
         },
         statLabel: {
           fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginTop: Spacing.xs,
         },
       }),
     [Colors],
   );
 
-  // Pop the value in on mount and re-pop whenever it changes (e.g. the streak
-  // ticks up after a completed session) so the stat feels alive, not static.
-  const scale = useSharedValue(0.8);
+  // Settle the value in on mount and whenever it changes (e.g. the streak
+  // ticks up after a completed session). v2 motion spec: subtle 1.12→1
+  // timing settle (no overshoot spring), reduced-motion aware.
+  const reducedMotion = useReducedMotion();
+  const scale = useSharedValue(1.12);
   const opacity = useSharedValue(0);
   useEffect(() => {
-    scale.value = 0.8;
-    scale.value = withSpring(1, { damping: 9, stiffness: 140 });
-    opacity.value = withTiming(1, { duration: 300 });
-  }, [value, scale, opacity]);
+    if (reducedMotion) {
+      scale.value = 1;
+      opacity.value = 1;
+      return;
+    }
+    scale.value = 1.12;
+    scale.value = withTiming(1, {
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+    });
+    opacity.value = 0;
+    opacity.value = withTiming(1, {
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [value, scale, opacity, reducedMotion]);
   const valueAnimatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ scale: scale.value }],
@@ -266,9 +288,12 @@ function DashboardScreenInner() {
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        // Full-bleed GREEN brand screen (mirrors profile.tsx, v2 node
+        // 429:186): primaryDark field, no shared horizontal padding — each
+        // section owns its proportional width (~92.5% cards, centered).
         container: {
           flex: 1,
-          backgroundColor: Colors.background,
+          backgroundColor: Colors.primaryDark,
         },
         safeArea: {
           flex: 1,
@@ -277,35 +302,45 @@ function DashboardScreenInner() {
           flex: 1,
         },
         scrollContent: {
-          paddingHorizontal: Spacing.lg,
           paddingTop: Spacing.lg,
           paddingBottom: Spacing.xxl,
         },
 
+        // Glass identity card, like the profile header (glassLight, 92.5%).
         header: {
+          width: "92.5%",
+          alignSelf: "center",
           flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "center",
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
+          paddingVertical: Spacing.md,
+          paddingHorizontal: Spacing.lg,
           marginBottom: Spacing.lg,
         },
         greeting: {
           fontSize: Typography.bodyMedium,
-          color: Colors.textSecondary,
+          color: WHITE_70,
         },
         name: {
           fontSize: Typography.headlineMedium,
           ...Font.bold,
-          color: Colors.text,
+          color: Colors.white,
           marginTop: 2,
         },
         balanceCard: {
+          width: "92.5%",
+          alignSelf: "center",
           alignItems: "center",
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           paddingVertical: Spacing.xl,
           marginBottom: Spacing.md,
         },
         balanceLabel: {
           fontSize: Typography.labelMedium,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginBottom: Spacing.sm,
           textTransform: "uppercase",
           letterSpacing: 1,
@@ -328,12 +363,17 @@ function DashboardScreenInner() {
           gap: Spacing.sm,
           marginTop: Spacing.lg,
         },
+        // Active session / focus block: a Colors.primary section fill with a
+        // white live-edge indicator — the brand surface of the green world.
         activeSessionCard: {
+          width: "92.5%",
+          alignSelf: "center",
           flexDirection: "row",
           alignItems: "center",
-          backgroundColor: Colors.primaryMuted,
-          borderColor: Colors.primary,
+          backgroundColor: Colors.primary,
+          borderColor: WHITE_25,
           borderWidth: 1,
+          borderRadius: Radius.xl,
           marginBottom: Spacing.md,
           overflow: "hidden",
         },
@@ -345,29 +385,39 @@ function DashboardScreenInner() {
         groupRecoveryTitle: {
           fontSize: Typography.bodyMedium,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
+        },
+        groupRecoveryCard: {
+          width: "92.5%",
+          alignSelf: "center",
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
+          borderColor: WHITE_25,
+        },
+        groupRecoveryView: {
+          color: Colors.white,
         },
         blockProgressTrack: {
           height: 3,
-          backgroundColor: Colors.backgroundTertiary,
+          backgroundColor: Colors.glassDark,
           borderRadius: Radius.full,
           overflow: "hidden",
           marginTop: Spacing.sm,
         },
         blockProgressFill: {
           height: "100%",
-          backgroundColor: Colors.primary,
+          backgroundColor: Colors.white,
           borderRadius: Radius.full,
         },
         blockProgressLabel: {
           fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginTop: Spacing.xs,
         },
         activeSessionIndicator: {
           width: 4,
           height: "100%",
-          backgroundColor: Colors.primary,
+          backgroundColor: Colors.white,
           position: "absolute",
           left: 0,
         },
@@ -377,44 +427,66 @@ function DashboardScreenInner() {
         },
         activeSessionLabel: {
           fontSize: Typography.labelSmall,
-          color: Colors.primary,
+          color: WHITE_70,
           ...Font.bold,
           letterSpacing: 1,
         },
         activeSessionText: {
           fontSize: Typography.bodyLarge,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
           marginTop: 2,
         },
         activeSessionPayout: {
           fontSize: Typography.bodySmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginTop: 2,
         },
         activeSessionArrow: {
           fontSize: Typography.bodySmall,
           ...Font.semibold,
-          color: Colors.primary,
+          color: Colors.white,
         },
         ctaCard: {
+          width: "92.5%",
+          alignSelf: "center",
           alignItems: "center",
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           paddingVertical: Spacing.xl,
           marginBottom: Spacing.md,
         },
         ctaTitle: {
           fontSize: Typography.titleLarge,
           ...Font.bold,
-          color: Colors.text,
+          color: Colors.white,
         },
         ctaSubtitle: {
           fontSize: Typography.bodyMedium,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginTop: Spacing.xs,
           marginBottom: Spacing.lg,
           textAlign: "center",
         },
+        // Seat-level pill treatment for the shared Buttons (style/textStyle
+        // props only — Button internals are U7's job). Card padding insets
+        // the column so the pills land at ~81% of screen width, matching the
+        // profile footer pills.
+        ctaButton: {
+          borderRadius: Radius.full,
+        },
+        ctaButtonOutline: {
+          borderRadius: Radius.full,
+          borderColor: WHITE_55,
+        },
+        ctaButtonOutlineText: {
+          color: Colors.white,
+        },
         onboardingCard: {
+          width: "92.5%",
+          alignSelf: "center",
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           marginBottom: Spacing.md,
           padding: Spacing.lg,
         },
@@ -424,12 +496,12 @@ function DashboardScreenInner() {
         onboardingTitle: {
           fontSize: Typography.titleLarge,
           ...Font.bold,
-          color: Colors.text,
+          color: Colors.white,
           marginBottom: Spacing.xs,
         },
         onboardingSubtitle: {
           fontSize: Typography.bodySmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
         },
         onboardingStep: {
           flexDirection: "row",
@@ -443,39 +515,42 @@ function DashboardScreenInner() {
         onboardingStepLabel: {
           fontSize: Typography.bodyMedium,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
         },
         onboardingStepLabelDone: {
-          color: Colors.textMuted,
+          color: WHITE_55,
           textDecorationLine: "line-through",
         },
         onboardingStepHint: {
           fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
+          color: WHITE_55,
           marginTop: 2,
         },
+        // Pending step = dark-glass circle / white numeral; done step flips
+        // to a white circle with a primaryDark check (the profile streak
+        // badge's white-circle treatment).
         onboardingStepNumber: {
           width: 28,
           height: 28,
-          borderRadius: 14,
-          backgroundColor: Colors.primaryMuted,
+          borderRadius: Radius.full,
+          backgroundColor: Colors.glassDark,
           alignItems: "center",
           justifyContent: "center",
         },
         onboardingStepNumberDone: {
-          backgroundColor: Colors.gainLight,
+          backgroundColor: Colors.white,
         },
         onboardingStepNumberText: {
           fontSize: Typography.labelMedium,
           ...Font.bold,
-          color: Colors.primary,
+          color: Colors.white,
         },
         onboardingStepNumberTextDone: {
-          color: Colors.gain,
+          color: Colors.primaryDark,
         },
         onboardingStepChevron: {
           fontSize: Typography.bodyLarge,
-          color: Colors.primary,
+          color: Colors.white,
           ...Font.bold,
         },
         plantSection: {
@@ -484,20 +559,25 @@ function DashboardScreenInner() {
         plantCard: {
           padding: Spacing.md,
         },
+        // Dark-glass circle so the icon reads on the glassLight header card.
         headerInviteBtn: {
           width: 44,
           height: 44,
+          borderRadius: Radius.full,
+          backgroundColor: Colors.glassDark,
           alignItems: "center",
           justifyContent: "center",
           marginRight: Spacing.sm,
         },
         statsSection: {
+          width: "92.5%",
+          alignSelf: "center",
           marginBottom: Spacing.lg,
         },
         sectionTitle: {
           fontSize: Typography.titleSmall,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
           marginBottom: Spacing.md,
         },
         statsGrid: {
@@ -506,9 +586,13 @@ function DashboardScreenInner() {
           gap: Spacing.sm,
         },
         recentSection: {
+          width: "92.5%",
+          alignSelf: "center",
           marginBottom: Spacing.lg,
         },
         activityCard: {
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           marginBottom: Spacing.sm,
           padding: Spacing.md,
         },
@@ -523,11 +607,11 @@ function DashboardScreenInner() {
         activityTitle: {
           fontSize: Typography.bodyMedium,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
         },
         activityDate: {
           fontSize: Typography.labelSmall,
-          color: Colors.textTertiary,
+          color: WHITE_55,
           marginTop: 2,
         },
         activityResult: {
@@ -563,17 +647,22 @@ function DashboardScreenInner() {
           color: Colors.loss,
           ...Font.medium,
         },
+        invitesCard: {
+          width: "92.5%",
+          alignSelf: "center",
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
+        },
       }),
     [Colors],
   );
 
   return (
     <View style={styles.container}>
-      {/* Full-screen blob background sits OUTSIDE SafeAreaView so it fills all
-          the way to the screen edges. The green blob (bottom: -30) ends up
-          directly behind the tab bar, giving the UITabBar liquid-glass blur
-          something colorful to refract. */}
-      <BlobsBackground />
+      {/* BlobsBackground dropped for the green world: the blue/red gradient
+          blobs fought the full-bleed primaryDark brand field (profile, the
+          reference tab, renders pure green with no backdrop) — the tab bar's
+          liquid glass now refracts the brand green itself. */}
       <SafeAreaView style={styles.safeArea} edges={["top"]}>
         <ScrollView
           style={styles.scrollView}
@@ -599,11 +688,7 @@ function DashboardScreenInner() {
               accessibilityRole="button"
               style={styles.headerInviteBtn}
             >
-              <Ionicons
-                name="person-add"
-                size={22}
-                color={Colors.textSecondary}
-              />
+              <Ionicons name="person-add" size={22} color={Colors.white} />
             </Pressable>
             <BlobAvatar
               size={56}
@@ -616,8 +701,9 @@ function DashboardScreenInner() {
             />
           </View>
 
-          {/* Balance Card */}
-          <Card style={styles.balanceCard} variant="elevated">
+          {/* Balance Card — glass seat (elevated shadow dropped: it bleeds
+              through the translucent glass fill) */}
+          <Card style={styles.balanceCard}>
             <Text style={styles.balanceLabel}>Total Balance</Text>
             {isWalletHydrated ? (
               <Balance amount={balance} size="display" />
@@ -889,6 +975,7 @@ function DashboardScreenInner() {
                   title="Start a Focus Session (Free)"
                   onPress={() => router.push("/session/quick-block")}
                   size="large"
+                  style={styles.ctaButton}
                 />
                 <Button
                   title="Stake a Solo Session"
@@ -899,12 +986,16 @@ function DashboardScreenInner() {
                   }
                   size="large"
                   variant="outline"
+                  style={styles.ctaButtonOutline}
+                  textStyle={styles.ctaButtonOutlineText}
                 />
                 <Button
                   title="Stake a Group Session"
                   onPress={() => router.push("/session/propose")}
                   size="large"
                   variant="outline"
+                  style={styles.ctaButtonOutline}
+                  textStyle={styles.ctaButtonOutlineText}
                 />
               </View>
             </Card>
@@ -932,14 +1023,14 @@ function DashboardScreenInner() {
                 }}
                 style={{ marginBottom: Spacing.sm }}
               >
-                <Card variant="interactive">
+                <Card variant="interactive" style={styles.groupRecoveryCard}>
                   <View style={styles.groupRecoveryRow}>
                     <Text style={styles.groupRecoveryTitle}>
                       {session.status === "active"
                         ? "Session Active"
                         : `Group Session ${session.status === "ready" ? "Ready" : "Pending"}`}
                     </Text>
-                    <Text style={{ color: Colors.primary }}>View →</Text>
+                    <Text style={styles.groupRecoveryView}>View →</Text>
                   </View>
                 </Card>
               </Pressable>
@@ -953,7 +1044,7 @@ function DashboardScreenInner() {
               }
               style={{ marginBottom: Spacing.md }}
             >
-              <Card variant="elevated">
+              <Card style={styles.invitesCard}>
                 <View
                   style={{
                     flexDirection: "row",
@@ -973,7 +1064,7 @@ function DashboardScreenInner() {
                   >
                     <Text
                       style={{
-                        color: Colors.background,
+                        color: Colors.white,
                         fontWeight: "700",
                         fontSize: 16,
                       }}
@@ -984,7 +1075,7 @@ function DashboardScreenInner() {
                   <View style={{ flex: 1 }}>
                     <Text
                       style={{
-                        color: Colors.text,
+                        color: Colors.white,
                         fontSize: 16,
                         fontWeight: "600",
                       }}
@@ -994,7 +1085,7 @@ function DashboardScreenInner() {
                     </Text>
                     <Text
                       style={{
-                        color: Colors.textSecondary,
+                        color: WHITE_70,
                         fontSize: 13,
                         marginTop: 2,
                       }}
@@ -1002,9 +1093,7 @@ function DashboardScreenInner() {
                       Tap to view and respond
                     </Text>
                   </View>
-                  <Text style={{ color: Colors.textTertiary, fontSize: 20 }}>
-                    ›
-                  </Text>
+                  <Text style={{ color: WHITE_55, fontSize: 20 }}>›</Text>
                 </View>
               </Card>
             </Pressable>
@@ -1017,7 +1106,7 @@ function DashboardScreenInner() {
               <StatCard
                 value={user?.currentStreak || 0}
                 label="Current Streak"
-                color={user?.currentStreak ? Colors.primary : undefined}
+                color={user?.currentStreak ? Colors.white : undefined}
                 loading={!user}
               />
               <StatCard

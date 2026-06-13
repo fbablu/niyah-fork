@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import Animated, {
   Easing,
@@ -29,6 +29,120 @@ export interface BalanceSectionProps {
   onWithdraw: () => void;
 }
 
+interface PlusMinusGlassPillProps {
+  onPress: () => void;
+}
+
+// --- SwiftUI liquid glass (iOS 26+) ----------------------------------------
+// The native glassEffect modifier silently no-ops below iOS 26 and on
+// binaries not built with Xcode 26 (verified in @expo/ui's
+// GlassEffectModifier.swift: `#available(iOS 26.0, *)` + `#if compiler(>=6.2)`
+// else passthrough) — the pill would render with NO background. So this
+// version gate is load-bearing, not cosmetic. Exported for tests.
+export function supportsLiquidGlass(
+  os: string = Platform.OS,
+  version: string | number = Platform.Version,
+): boolean {
+  if (os !== "ios") return false;
+  const major = parseInt(String(version), 10);
+  return Number.isFinite(major) && major >= 26;
+}
+
+interface ExpoSwiftUi {
+  ui: typeof import("@expo/ui/swift-ui");
+  modifiers: typeof import("@expo/ui/swift-ui/modifiers");
+}
+
+let expoSwiftUiCache: ExpoSwiftUi | null | undefined;
+
+// Lazy require + try/catch (src/config sslPinning.ts convention): a binary
+// built before the @expo/ui pod was added throws "Cannot find native module
+// 'ExpoUI'" at require time — fall back to the RN pill instead of crashing.
+function getExpoSwiftUi(): ExpoSwiftUi | null {
+  // HARD-DISABLED until the @expo/ui pod ships again (SDK 55+): the pod is
+  // autolinking-excluded (package.json), and on iOS 26 devices this gate
+  // passes while the 'ExpoUI' native view is absent from the binary — the
+  // require can succeed and the failure lands at RENDER time, crashing the
+  // profile tab (suspected build-25/26 crash). Re-enable only WITH the pod.
+  const POD_INCLUDED = false;
+  if (!POD_INCLUDED) return null;
+  if (!supportsLiquidGlass()) return null;
+  if (expoSwiftUiCache !== undefined) return expoSwiftUiCache;
+  try {
+    expoSwiftUiCache = {
+      ui: require("@expo/ui/swift-ui"),
+      modifiers: require("@expo/ui/swift-ui/modifiers"),
+    };
+  } catch {
+    expoSwiftUiCache = null;
+  }
+  return expoSwiftUiCache;
+}
+
+// Self-contained glass +/- pill (deposit/withdraw chooser trigger). On
+// iOS 26+ builds that include @expo/ui, this is a real SwiftUI liquid-glass
+// circle (interactive glassEffect); everywhere else it stays the RN
+// glassDark pill. Only `onPress` crosses the boundary (haptics + chooser
+// state live in the parent).
+function PlusMinusGlassPill({ onPress }: PlusMinusGlassPillProps) {
+  const Colors = useColors();
+  const styles = useMemo(() => makeStyles(Colors), [Colors]);
+
+  const swiftUi = getExpoSwiftUi();
+  if (swiftUi) {
+    const { Host, HStack, Text: SwiftUIText } = swiftUi.ui;
+    const { accessibilityLabel, font, frame, glassEffect } = swiftUi.modifiers;
+    const glyphFont = font({
+      weight: "bold",
+      size: Typography.headlineSmall,
+      design: "rounded",
+    });
+    return (
+      <Host style={styles.plusMinusHost}>
+        <HStack
+          spacing={0}
+          onPress={onPress}
+          modifiers={[
+            frame({ width: Spacing.xxl, height: Spacing.xxl }),
+            glassEffect({
+              glass: { variant: "regular", interactive: true },
+              shape: "circle",
+            }),
+            accessibilityLabel("Deposit or withdraw"),
+          ]}
+        >
+          <SwiftUIText color={Colors.gain} modifiers={[glyphFont]}>
+            +
+          </SwiftUIText>
+          <SwiftUIText color={Colors.glassMid} modifiers={[glyphFont]}>
+            /
+          </SwiftUIText>
+          <SwiftUIText color={Colors.loss} modifiers={[glyphFont]}>
+            -
+          </SwiftUIText>
+        </HStack>
+      </Host>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Deposit or withdraw"
+      testID="plus-minus-fallback"
+      onPress={onPress}
+      style={styles.plusMinusButton}
+      hitSlop={Spacing.sm}
+    >
+      <Text style={styles.plusMinusText}>
+        <Text style={styles.plusSign}>+</Text>
+        <Text style={styles.slashSign}>/</Text>
+        <Text style={styles.minusSign}>-</Text>
+      </Text>
+    </Pressable>
+  );
+}
+
 export function BalanceSection({
   balanceCents,
   transactions,
@@ -46,6 +160,8 @@ export function BalanceSection({
     [balanceCents, transactions],
   );
 
+  // v3 motion spec (near-static): the chooser is a bare 180ms fade — no
+  // slide, no transforms.
   const setChooser = useCallback(
     (open: boolean) => {
       setChooserOpen(open);
@@ -53,7 +169,7 @@ export function BalanceSection({
       chooserProgress.value = reducedMotion
         ? target
         : withTiming(target, {
-            duration: 220,
+            duration: 180,
             easing: Easing.out(Easing.cubic),
           });
     },
@@ -77,7 +193,6 @@ export function BalanceSection({
 
   const chooserStyle = useAnimatedStyle(() => ({
     opacity: chooserProgress.value,
-    transform: [{ translateY: (1 - chooserProgress.value) * -Spacing.sm }],
   }));
 
   return (
@@ -89,19 +204,7 @@ export function BalanceSection({
             {formatMoney(balanceCents)}
           </Text>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Deposit or withdraw"
-          onPress={toggleChooser}
-          style={styles.plusMinusButton}
-          hitSlop={Spacing.sm}
-        >
-          <Text style={styles.plusMinusText}>
-            <Text style={{ color: Colors.gain }}>+</Text>
-            <Text style={{ color: Colors.textSecondary }}>/</Text>
-            <Text style={{ color: Colors.loss }}>-</Text>
-          </Text>
-        </Pressable>
+        <PlusMinusGlassPill onPress={toggleChooser} />
       </View>
       {delta && <AllTimeTicker delta={delta} />}
       {chooserOpen && (
@@ -127,15 +230,21 @@ export function BalanceSection({
   );
 }
 
+// Full-bleed green screen (v2, node 429:186): the section is proportional
+// (~94.7% of the 402 frame so the pill itself lands at the design's 80.8% —
+// the section minus the 8pt gap + 48pt +/- pill), dark-glass pill, white
+// display amount.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     section: {
+      width: "94.7%",
+      alignSelf: "center",
       marginBottom: Spacing.xl,
     },
     heading: {
       fontSize: Typography.headlineMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
       marginBottom: Spacing.sm,
     },
@@ -146,7 +255,7 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     pill: {
       flex: 1,
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.full,
       paddingVertical: Spacing.sm,
       paddingHorizontal: Spacing.lg,
@@ -154,23 +263,34 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     amount: {
       fontSize: Typography.displayMedium,
-      ...Font.heavy,
-      color: Colors.text,
+      ...Font.bold,
+      color: Colors.white,
       fontVariant: ["tabular-nums"],
+    },
+    plusMinusHost: {
+      width: Spacing.xxl,
+      height: Spacing.xxl,
     },
     plusMinusButton: {
       width: Spacing.xxl,
       height: Spacing.xxl,
       borderRadius: Radius.full,
-      backgroundColor: Colors.primaryMuted,
-      borderWidth: 1,
-      borderColor: Colors.borderLight,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
     },
     plusMinusText: {
-      fontSize: Typography.titleMedium,
+      fontSize: Typography.headlineSmall,
       ...Font.bold,
+    },
+    plusSign: {
+      color: Colors.gain,
+    },
+    slashSign: {
+      color: Colors.glassMid,
+    },
+    minusSign: {
+      color: Colors.loss,
     },
     chooser: {
       flexDirection: "row",

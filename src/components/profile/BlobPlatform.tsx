@@ -18,7 +18,10 @@ import Animated, {
 import { BlobAvatar } from "../BlobAvatar";
 import { Spacing, Radius, type ThemeColors } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import type { BlobAvatarConfig } from "../../constants/blobAvatar";
+import {
+  BLOB_INK as INK,
+  type BlobAvatarConfig,
+} from "../../constants/blobAvatar";
 
 interface BlobPlatformProps {
   config: BlobAvatarConfig;
@@ -30,16 +33,17 @@ interface BlobPlatformProps {
   onExpand: () => void;
 }
 
-// Decorative SVG art constants (platform disk + arc eyes) — same ink as the
-// BlobAvatar outline.
-const INK = "#120505";
+// Decorative SVG art constants (platform disk + arc eyes) — ink shared with
+// the BlobAvatar outline via BLOB_INK.
 const PLATFORM_W = 180;
 const PLATFORM_H = 72;
 const EYES_W = 64;
 const EYES_H = 16;
 const BLOB_SIZE = 96;
 
-const EYE_FLIP_MS = 200;
+// v3 motion spec (near-static): quick subtle eye flip (~180ms, the
+// founder-loved detail, kept); blob hide is a bare 150ms fade — no scale.
+const EYE_FLIP_MS = 180;
 const BLOB_HIDE_MS = 150;
 
 // The blob mascot standing on its green platform (profile-tab-normal frame).
@@ -53,28 +57,27 @@ export function BlobPlatform({
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
   const reducedMotion = useReducedMotion();
 
-  // scaleY +1 = happy arcs, -1 = flipped (sleepy/sad); blob scales away while
+  // scaleY +1 = happy arcs, -1 = flipped (sleepy/sad); blob fades away while
   // the customizer owns it.
   const flip = useSharedValue(customizerOpen ? -1 : 1);
-  const blobScale = useSharedValue(customizerOpen ? 0 : 1);
+  const blobOpacity = useSharedValue(customizerOpen ? 0 : 1);
   useEffect(() => {
     const eyeTarget = customizerOpen ? -1 : 1;
     const blobTarget = customizerOpen ? 0 : 1;
     if (reducedMotion) {
       flip.value = eyeTarget;
-      blobScale.value = blobTarget;
+      blobOpacity.value = blobTarget;
       return;
     }
     flip.value = withTiming(eyeTarget, { duration: EYE_FLIP_MS });
-    blobScale.value = withTiming(blobTarget, { duration: BLOB_HIDE_MS });
-  }, [customizerOpen, reducedMotion, flip, blobScale]);
+    blobOpacity.value = withTiming(blobTarget, { duration: BLOB_HIDE_MS });
+  }, [customizerOpen, reducedMotion, flip, blobOpacity]);
 
   const eyesStyle = useAnimatedStyle(() => ({
     transform: [{ scaleY: flip.value }],
   }));
   const blobStyle = useAnimatedStyle(() => ({
-    opacity: blobScale.value,
-    transform: [{ scale: blobScale.value }],
+    opacity: blobOpacity.value,
   }));
 
   const handleExpand = () => {
@@ -96,11 +99,11 @@ export function BlobPlatform({
         >
           <Defs>
             <LinearGradient id="platformGrad" x1="0.25" y1="0" x2="0.75" y2="1">
-              <Stop offset="0" stopColor={Colors.primaryLight} />
+              <Stop offset="0" stopColor={Colors.primary} />
               <Stop offset="1" stopColor={Colors.primaryDark} />
             </LinearGradient>
           </Defs>
-          {/* Disk side (cylinder wall) */}
+          {/* Disk side (cylinder wall) — deep platform greens (frame 429:186) */}
           <Path
             d="M 4 24 L 4 44 A 86 22 0 0 0 176 44 L 176 24"
             fill="url(#platformGrad)"
@@ -113,7 +116,7 @@ export function BlobPlatform({
             cy={24}
             rx={86}
             ry={20}
-            fill={Colors.primaryLight}
+            fill={Colors.primary}
             stroke={INK}
             strokeWidth={2.6}
           />
@@ -187,18 +190,19 @@ const makeStyles = (Colors: ThemeColors) =>
       left: (PLATFORM_W - EYES_W) / 2,
     },
     expandButton: {
-      // Top-right of the platform dome (frame 352:320).
+      // Top-right of the platform dome (frame 429:186) — white arrows on a
+      // glass disk.
       position: "absolute",
       right: Spacing.lg,
       top: 0,
       width: 36,
       height: 36,
       borderRadius: Radius.full,
-      backgroundColor: Colors.overlayLight,
+      backgroundColor: Colors.glassLight,
       alignItems: "center",
       justifyContent: "center",
     },
     expandButtonPressed: {
-      backgroundColor: Colors.overlay,
+      backgroundColor: Colors.glassMid,
     },
   });

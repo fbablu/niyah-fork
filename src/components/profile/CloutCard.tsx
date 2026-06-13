@@ -10,7 +10,6 @@ import {
   type ThemeColors,
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import { Card } from "../Card";
 import { getCloutProgress, getCloutTier } from "../../utils/clout";
 
 interface CloutCardProps {
@@ -32,8 +31,17 @@ export function CloutCard({ score, onInfoPress }: CloutCardProps) {
     onInfoPress();
   };
 
+  // No card surface in v2 (node 429:186): a bare glass track on the green
+  // screen with the "Clout" label underneath it.
   return (
-    <Card style={styles.card}>
+    <View style={styles.section}>
+      <View style={styles.track}>
+        <View
+          testID="clout-progress-fill"
+          style={[styles.fill, { width: `${progress * 100}%` }]}
+        />
+      </View>
+
       <View style={styles.headerRow}>
         <View style={styles.labelRow}>
           <Text style={styles.label}>Clout</Text>
@@ -46,38 +54,31 @@ export function CloutCard({ score, onInfoPress }: CloutCardProps) {
             <Ionicons
               name="information-circle-outline"
               size={18}
-              color={Colors.textSecondary}
+              color={Colors.white}
             />
           </Pressable>
         </View>
         <Text style={styles.score}>{Math.round(score)}</Text>
       </View>
 
-      <View style={styles.track}>
-        <View
-          testID="clout-progress-fill"
-          style={[styles.fill, { width: `${progress * 100}%` }]}
-        />
-      </View>
-
       <Text style={styles.tierLabel}>{tier.label}</Text>
-    </Card>
+    </View>
   );
 }
 
+// Proportional to the 402 frame: clout bar ≈ 75% of screen width, centered.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
-    card: {
-      marginBottom: Spacing.md,
-      backgroundColor: Colors.primaryMuted,
-      borderWidth: 1,
-      borderColor: Colors.primary,
+    section: {
+      width: "75%",
+      alignSelf: "center",
+      marginBottom: Spacing.xl,
     },
     headerRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      marginBottom: Spacing.sm,
+      marginTop: Spacing.sm,
     },
     labelRow: {
       flexDirection: "row",
@@ -87,28 +88,30 @@ const makeStyles = (Colors: ThemeColors) =>
     label: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     score: {
-      fontSize: Typography.headlineSmall,
+      fontSize: Typography.titleSmall,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
+    // Design value: 11px tall, radius 22 → Radius.xl (per-task exact values).
     track: {
-      height: Spacing.sm,
-      backgroundColor: Colors.backgroundTertiary,
-      borderRadius: Radius.full,
+      height: 11,
+      backgroundColor: Colors.glassSolid,
+      borderRadius: Radius.xl,
       overflow: "hidden",
     },
     fill: {
       height: "100%",
-      backgroundColor: Colors.primary,
-      borderRadius: Radius.full,
+      backgroundColor: Colors.white,
+      borderRadius: Radius.xl,
     },
     tierLabel: {
       fontSize: Typography.labelMedium,
       ...Font.medium,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.7,
       marginTop: Spacing.xs,
     },
   });

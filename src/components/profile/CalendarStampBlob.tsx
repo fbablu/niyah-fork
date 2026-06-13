@@ -1,17 +1,15 @@
 import React, { useEffect, useMemo, useRef } from "react";
+import { View } from "react-native";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import Animated, {
-  cancelAnimation,
+  Easing,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withDelay,
-  withRepeat,
-  withSequence,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import {
+  BLOB_INK as INK,
   BLOB_PALETTES,
   generateBlobAvatarPreset,
   generateBlobPath,
@@ -21,29 +19,21 @@ export interface CalendarStampBlobProps {
   /** Seed for the deterministic one-of-a-kind blob — the per-session collectible. */
   sessionId: string;
   size?: number;
-  /** Mount-stagger order for the stamp-press entrance (0 = first). */
-  index?: number;
-  /** Occasional idle blink — enable on at most the most-recent stamp. */
-  blink?: boolean;
   testID?: string;
 }
 
-// Stamp-press entrance: scale 1.5 → 1 with overshoot (comment 4's "stamp style
-// placement"). Blink dips the eyes' scaleY every few seconds.
-const STAMP_SPRING = { damping: 13, stiffness: 160 };
-const STAGGER_MS = 90;
-const BLINK_EVERY_MS = 3400;
+// v3 motion spec (near-static): entrance is a bare opacity fade — no scale,
+// no stagger, no idle blink. iOS-system feel: fades over transforms.
+const STAMP_IN_MS = 200;
 
-// Decorative blob art (same ink as BlobAvatar) + the "unique" preset's eye
-// geometry in its 100×100 viewBox: center (50, 42), gap 18, radius 4.2.
-const INK = "#120505";
+// Decorative blob art (ink shared with BlobAvatar via BLOB_INK) + the
+// "unique" preset's eye geometry in its 100×100 viewBox: center (50, 42),
+// gap 18, radius 4.2.
 const EYE = { cx: 50, cy: 42, gap: 18, r: 4.2 };
 
 export const CalendarStampBlob: React.FC<CalendarStampBlobProps> = ({
   sessionId,
   size = 28,
-  index = 0,
-  blink = false,
   testID,
 }) => {
   const reducedMotion = useReducedMotion();
@@ -64,35 +54,17 @@ export const CalendarStampBlob: React.FC<CalendarStampBlobProps> = ({
       entrance.value = 1; // jump-to-end
       return;
     }
-    entrance.value = withDelay(index * STAGGER_MS, withSpring(1, STAMP_SPRING));
-  }, [reducedMotion, index, entrance]);
+    entrance.value = withTiming(1, {
+      duration: STAMP_IN_MS,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [reducedMotion, entrance]);
   const entranceStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(1, entrance.value * 2),
-    transform: [{ scale: 1.5 - entrance.value * 0.5 }],
+    opacity: entrance.value,
   }));
 
-  const eyeScale = useSharedValue(1);
-  useEffect(() => {
-    if (!blink || reducedMotion) {
-      eyeScale.value = 1; // skip the idle loop
-      return;
-    }
-    eyeScale.value = withRepeat(
-      withSequence(
-        withDelay(BLINK_EVERY_MS, withTiming(0.15, { duration: 90 })),
-        withTiming(1, { duration: 140 }),
-      ),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(eyeScale);
-  }, [blink, reducedMotion, eyeScale]);
-  const eyeStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleY: eyeScale.value }],
-  }));
-
-  // Eyes are overlay views (not SVG nodes) so the blink animates without
-  // animatedProps; positions map the 100×100 eye geometry into pixels.
+  // Eyes are overlay views (not SVG nodes); positions map the 100×100 eye
+  // geometry into pixels.
   const eyeD = ((EYE.r * 2) / 100) * size;
   const eyeBase = {
     position: "absolute" as const,
@@ -131,13 +103,13 @@ export const CalendarStampBlob: React.FC<CalendarStampBlobProps> = ({
           strokeWidth={5}
         />
       </Svg>
-      <Animated.View
+      <View
         testID="stamp-eye-left"
-        style={[eyeBase, { left: eyeCenterLeft - eyeOffset }, eyeStyle]}
+        style={[eyeBase, { left: eyeCenterLeft - eyeOffset }]}
       />
-      <Animated.View
+      <View
         testID="stamp-eye-right"
-        style={[eyeBase, { left: eyeCenterLeft + eyeOffset }, eyeStyle]}
+        style={[eyeBase, { left: eyeCenterLeft + eyeOffset }]}
       />
     </Animated.View>
   );

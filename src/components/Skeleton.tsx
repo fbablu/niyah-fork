@@ -16,7 +16,7 @@ interface SkeletonProps {
   height?: DimensionValue;
   /** Corner radius in px. Default 8. Use height/2 for pills/circles. */
   radius?: number;
-  /** Override the placeholder fill. Defaults to the theme border neutral. */
+  /** Override the placeholder fill. Defaults to the glassLight overlay. */
   color?: string;
   style?: StyleProp<ViewStyle>;
 }
@@ -63,7 +63,11 @@ export const Skeleton: React.FC<SkeletonProps> = ({
           width,
           height,
           borderRadius: radius,
-          backgroundColor: color ?? Colors.border,
+          // glassLight (identical both themes) — every consumer now seats
+          // skeletons on the brand green field or its glass cards, where the
+          // old `Colors.border` neutral was near-invisible (~1.1:1 on
+          // primaryDark in dark/pinned theme).
+          backgroundColor: color ?? Colors.glassLight,
         },
         animatedStyle,
         style,

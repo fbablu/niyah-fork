@@ -159,6 +159,9 @@ export const BLOB_PALETTES: Record<BlobAvatarColorPreset, BlobPalette> = {
   coral: { start: "#FF8A80", end: "#E05555", backdrop: "#7A3535" },
 };
 
+/** Outline/eye ink shared by every blob renderer. */
+export const BLOB_INK = "#120505";
+
 /** A blob control point in the generator's `size`×`size` space. */
 export interface BlobPoint {
   x: number;

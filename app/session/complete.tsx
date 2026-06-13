@@ -1,5 +1,12 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
-import { View, Text, StyleSheet, Animated, Pressable } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Animated,
+  Easing,
+  Pressable,
+} from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   Typography,
@@ -44,6 +51,13 @@ const REASON_OPTIONS: { value: SurrenderReason; label: string }[] = [
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     header: {
@@ -54,22 +68,25 @@ const makeStyles = (Colors: ThemeColors) =>
     title: {
       fontSize: Typography.headlineSmall,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     subtitle: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: 2,
     },
     sectionTitle: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
+    // Glass seat for the results (glassLight, Radius.xl, borderless).
     resultsCard: {
       marginBottom: Spacing.sm,
       paddingVertical: Spacing.sm,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     participantRow: {
       flexDirection: "row",
@@ -77,7 +94,7 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "space-between",
       paddingVertical: 6,
       borderTopWidth: 1,
-      borderTopColor: Colors.border,
+      borderTopColor: WHITE_25,
     },
     participantLeft: {
       flexDirection: "row",
@@ -88,7 +105,7 @@ const makeStyles = (Colors: ThemeColors) =>
     participantName: {
       fontSize: Typography.bodySmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     statusBadge: {
       paddingHorizontal: Spacing.sm,
@@ -111,11 +128,14 @@ const makeStyles = (Colors: ThemeColors) =>
     badgeTextFailed: {
       color: Colors.loss,
     },
+    // Neutral (non-semantic) pending badge goes dark-glass on the green field;
+    // the completed/failed badges above keep their semantic gain/loss colors
+    // (dashboard U1 precedent).
     badgePending: {
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
     },
     badgeTextPending: {
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     payoutValue: {
       fontSize: Typography.bodyMedium,
@@ -125,7 +145,7 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.gain,
     },
     payoutNeutral: {
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
     paymentsSection: {
       marginBottom: Spacing.sm,
@@ -133,23 +153,24 @@ const makeStyles = (Colors: ThemeColors) =>
     noPaymentsCard: {
       alignItems: "center",
       paddingVertical: Spacing.md,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     noPaymentsText: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
     noPaymentsSubtext: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
     },
     statsGrid: {
       flexDirection: "row",
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.md,
       marginBottom: Spacing.sm,
     },
@@ -159,36 +180,41 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     statDivider: {
       width: 1,
-      backgroundColor: Colors.border,
+      backgroundColor: WHITE_25,
       marginHorizontal: Spacing.md,
     },
     statValue: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     statLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
+    // Brand-surface accent card: Colors.primary fill + white@0.25 border.
     motivationCard: {
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.primary,
       borderWidth: 1,
-      borderColor: Colors.primary,
+      borderColor: WHITE_25,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.sm,
       paddingVertical: Spacing.sm,
     },
     motivationText: {
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
       lineHeight: 18,
     },
+    // Forgiveness keeps its semantic gain colors; body text goes white so it
+    // reads on the green field in both themes.
     forgivenessCard: {
       backgroundColor: Colors.gainLight,
       borderWidth: 1,
       borderColor: Colors.gain,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.sm,
       paddingVertical: Spacing.sm,
     },
@@ -200,38 +226,38 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     forgivenessBody: {
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
       lineHeight: 18,
     },
+    // Glass seat for the forfeit receipt (glassLight, Radius.xl, borderless).
     receiptCard: {
-      backgroundColor: Colors.backgroundCard,
-      borderWidth: 1,
-      borderColor: Colors.border,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.sm,
       paddingVertical: Spacing.sm,
     },
     receiptTitle: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
     receiptBody: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: 18,
     },
+    // Glass seat for the reason capture; dark-glass chip pills.
     reasonCard: {
-      backgroundColor: Colors.backgroundCard,
-      borderWidth: 1,
-      borderColor: Colors.border,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.sm,
       paddingVertical: Spacing.sm,
     },
     reasonTitle: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     reasonChipRow: {
@@ -242,15 +268,21 @@ const makeStyles = (Colors: ThemeColors) =>
     reasonChip: {
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
-      borderRadius: Radius.md,
-      borderWidth: 1,
-      borderColor: Colors.border,
-      backgroundColor: Colors.backgroundTertiary,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
     },
     reasonChipText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       ...Font.medium,
+    },
+    // Shared Button styled via its public style prop only (Radius.full pill
+    // with a white@0.25 hairline so the primary fill separates from the
+    // field — propose.tsx precedent).
+    footerButton: {
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      borderColor: WHITE_25,
     },
   });
 
@@ -376,16 +408,19 @@ function CompleteScreenInner() {
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // v2 motion: subtle settle (~300ms ease-out, no overshoot) — the old
+    // tension:50/friction:7 spring overshot past 1 before settling.
     Animated.parallel([
-      Animated.spring(scaleAnim, {
+      Animated.timing(scaleAnim, {
         toValue: 1,
-        tension: 50,
-        friction: 7,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(opacityAnim, {
         toValue: 1,
-        duration: 400,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
     ]).start();
@@ -470,7 +505,15 @@ function CompleteScreenInner() {
         headerVariant="none"
         scrollable={false}
         stickyFooter={true}
-        footer={<Button title="Done" onPress={handleDone} size="medium" />}
+        backgroundColor={Colors.primaryDark}
+        footer={
+          <Button
+            title="Done"
+            onPress={handleDone}
+            size="medium"
+            style={styles.footerButton}
+          />
+        }
       >
         {/* Header */}
         <Animated.View

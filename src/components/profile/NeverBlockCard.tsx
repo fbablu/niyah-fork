@@ -9,7 +9,6 @@ import {
   type ThemeColors,
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import { Card } from "../Card";
 import {
   isScreenTimeAvailable,
   getScreenTimeAuthStatus,
@@ -23,6 +22,10 @@ import type { AppSelectionToken } from "../../../modules/niyah-screentime";
 // Apps that stay AVAILABLE during every block (music, maps, …). Subtracted
 // from the shield natively at apply time. UI is gated by the neverBlockEnabled
 // server flag since it sits in the staked shield-apply path.
+
+// White hierarchy on the glass seat — rgba so opacities never compound with
+// layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
 
 export function NeverBlockCard() {
   const Colors = useColors();
@@ -75,7 +78,7 @@ export function NeverBlockCard() {
   };
 
   return (
-    <Card style={styles.card}>
+    <View style={styles.card}>
       <Text style={styles.title}>Never block</Text>
       <Text style={styles.description}>
         Apps that stay available during every block — music, maps, whatever you
@@ -96,25 +99,29 @@ export function NeverBlockCard() {
           </>
         )}
       </View>
-    </Card>
+    </View>
   );
 }
 
+// Glass seat on the green field (v2 language): glassLight surface, white
+// text hierarchy, Radius.xl — identical in both themes by construction.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     card: {
       marginBottom: Spacing.md,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      padding: Spacing.lg,
     },
     title: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
     description: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.md,
       lineHeight: 20,
     },
@@ -124,10 +131,9 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: Spacing.md,
       flexWrap: "wrap",
     },
+    // Secondary action: dark-glass chip with white text (footer-pill family).
     button: {
-      backgroundColor: Colors.backgroundSecondary,
-      borderWidth: 1,
-      borderColor: Colors.border,
+      backgroundColor: Colors.glassDark,
       paddingVertical: Spacing.sm,
       paddingHorizontal: Spacing.lg,
       borderRadius: Radius.md,
@@ -137,11 +143,11 @@ const makeStyles = (Colors: ThemeColors) =>
     buttonText: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     summaryText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_70,
       flexShrink: 1,
     },
     clearText: {

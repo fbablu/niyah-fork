@@ -29,6 +29,13 @@ import { useWalletStore } from "../../src/store/walletStore";
 import { formatMoney, formatTime } from "../../src/utils/format";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatCountdown(ms: number): string {
@@ -43,9 +50,10 @@ function formatCountdown(ms: number): string {
 
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    // Full-bleed green brand field (docs/redesign-all-tabs-progress.md).
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     content: {
       flex: 1,
@@ -62,11 +70,11 @@ const makeStyles = (Colors: ThemeColors) =>
     title: {
       fontSize: Typography.headlineMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     subtitle: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
     sessionInfoRow: {
@@ -80,21 +88,24 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     sessionInfoLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginBottom: Spacing.xs,
     },
     sessionInfoValue: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
+    // Participant seats: glassLight card, glassDark avatar circles.
     participantsCard: {
       marginBottom: Spacing.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     participantsTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
     participantRow: {
@@ -106,7 +117,7 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 44,
       height: 44,
       borderRadius: 22,
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
       marginRight: Spacing.md,
@@ -122,11 +133,11 @@ const makeStyles = (Colors: ThemeColors) =>
     participantName: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     participantBlocks: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
     participantBlocksMissing: {
@@ -134,77 +145,85 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.loss,
       marginTop: Spacing.xs,
     },
+    // Ready-state pills: ready = white pill + primaryDark flip; waiting
+    // states = glassDark + white hierarchy; "You" = brand surface.
     badge: {
       paddingHorizontal: Spacing.sm,
       paddingVertical: Spacing.xs,
-      borderRadius: Radius.sm,
+      borderRadius: Radius.full,
       alignSelf: "flex-start",
       marginTop: Spacing.xs,
     },
     badgeInvited: {
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
     },
     badgeAccepted: {
-      backgroundColor: Colors.warningLight,
+      backgroundColor: Colors.glassDark,
     },
     badgeReady: {
-      backgroundColor: Colors.gainLight,
+      backgroundColor: Colors.white,
     },
     badgeYou: {
-      backgroundColor: Colors.infoLight,
+      backgroundColor: Colors.primary,
+      borderWidth: 1,
+      borderColor: WHITE_25,
     },
     badgeTextInvited: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.textSecondary,
+      color: WHITE_55,
     },
     badgeTextAccepted: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.warning,
+      color: WHITE_70,
     },
     badgeTextReady: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.gain,
+      color: Colors.primaryDark,
     },
     badgeTextYou: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.info,
+      color: Colors.white,
     },
     progressCard: {
       alignItems: "center",
       marginBottom: Spacing.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     progressText: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     progressBar: {
       width: "100%",
       height: 6,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.full,
       overflow: "hidden",
       marginTop: Spacing.md,
     },
     progressFill: {
       height: "100%",
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
       borderRadius: Radius.full,
     },
+    // Auto-timeout countdown keeps its semantic warning colors.
     countdownCard: {
       alignItems: "center",
       backgroundColor: Colors.warningLight,
       borderWidth: 1,
       borderColor: Colors.warning,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.md,
     },
     countdownLabel: {
       fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.xs,
     },
     countdownValue: {
@@ -217,12 +236,12 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingBottom: Spacing.xl,
       gap: Spacing.md,
       borderTopWidth: 1,
-      borderTopColor: Colors.border,
-      backgroundColor: Colors.background,
+      borderTopColor: WHITE_25,
+      backgroundColor: Colors.primaryDark,
     },
     startHint: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       textAlign: "center",
     },
     cancelRow: {
@@ -235,15 +254,26 @@ const makeStyles = (Colors: ThemeColors) =>
     shareButton: {
       flex: 1,
     },
+    // Shared Buttons restyled via public style/textStyle props only.
+    pillButton: {
+      borderRadius: Radius.full,
+    },
+    outlineButton: {
+      borderRadius: Radius.full,
+      borderColor: WHITE_55,
+    },
+    outlineButtonText: {
+      color: Colors.white,
+    },
     loadingContainer: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
       alignItems: "center",
       justifyContent: "center",
     },
     loadingText: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.md,
     },
   });
@@ -610,6 +640,7 @@ function WaitingRoomScreenInner() {
               size="large"
               loading={isStarting}
               disabled={isStarting || !everyoneHasBlockSelection}
+              style={styles.pillButton}
             />
             {!everyoneHasBlockSelection && (
               <Text style={styles.startHint}>
@@ -626,6 +657,8 @@ function WaitingRoomScreenInner() {
               onPress={handleShare}
               variant="outline"
               size="medium"
+              style={styles.outlineButton}
+              textStyle={styles.outlineButtonText}
             />
           </View>
           {isProposer && (
@@ -635,6 +668,7 @@ function WaitingRoomScreenInner() {
                 onPress={handleCancel}
                 variant="danger"
                 size="small"
+                style={styles.pillButton}
               />
             </View>
           )}

@@ -17,6 +17,7 @@ import * as WebBrowser from "expo-web-browser";
 import {
   Typography,
   Spacing,
+  Radius,
   Font,
   type ThemeColors,
 } from "../../src/constants/colors";
@@ -35,6 +36,12 @@ import {
   getConnectAccountStatus,
 } from "../../src/config/functions";
 import { logger } from "../../src/utils/logger";
+
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
 
 type AccountStatus = "none" | "pending" | "active" | "restricted";
 
@@ -145,7 +152,7 @@ function StripeOnboardingScreenInner() {
     if (isLoading) {
       return (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+          <ActivityIndicator size="large" color={Colors.white} />
           <Text style={styles.loadingText}>Checking account status...</Text>
         </View>
       );
@@ -168,7 +175,8 @@ function StripeOnboardingScreenInner() {
             onPress={safeBack}
             size="large"
             variant="secondary"
-            style={styles.actionButton}
+            style={styles.secondaryActionButton}
+            textStyle={styles.secondaryActionText}
           />
         </View>
       );
@@ -283,6 +291,7 @@ function StripeOnboardingScreenInner() {
     <SessionScreenScaffold
       headerVariant="centered"
       headerTitle="Payout Setup"
+      backgroundColor={Colors.primaryDark}
       scrollable={false}
     >
       {renderContent()}
@@ -307,18 +316,23 @@ const makeStyles = (Colors: ThemeColors) =>
     hero: {
       fontSize: Typography.displaySmall,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
     },
     subtitle: {
       fontSize: Typography.bodyLarge,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: Typography.bodyLarge * 1.5,
     },
+    // Glass seat for the info rows (glassLight, Radius.xl, borderless —
+    // overrides the outlined variant's hairline via the Card style prop).
     infoCard: {
       width: "100%",
       gap: Spacing.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      borderWidth: 0,
     },
     infoRow: {
       flexDirection: "row",
@@ -333,34 +347,48 @@ const makeStyles = (Colors: ThemeColors) =>
     infoText: {
       flex: 1,
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: Typography.bodyMedium * 1.5,
     },
     actionButton: {
       width: "100%",
+      borderRadius: Radius.full,
+    },
+    // Dark-glass pill for the medium-emphasis action (via Button's public
+    // style/textStyle props only).
+    secondaryActionButton: {
+      width: "100%",
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
+    },
+    secondaryActionText: {
+      color: Colors.white,
     },
     disclaimer: {
       textAlign: "center",
-      color: Colors.textMuted,
+      color: WHITE_55,
       fontSize: Typography.labelSmall,
       lineHeight: Typography.labelSmall * 1.5,
     },
     loadingText: {
-      color: Colors.textSecondary,
+      color: WHITE_70,
       fontSize: Typography.bodyMedium,
       marginTop: Spacing.md,
     },
+    // Status glyphs are text ("!", "✓") — explicit white so they don't fall
+    // back to the RN default black on the green field.
     statusEmoji: {
       fontSize: 48,
+      color: Colors.white,
     },
     statusTitle: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     statusDescription: {
       fontSize: Typography.bodyLarge,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: Typography.bodyLarge * 1.5,
     },

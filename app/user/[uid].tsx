@@ -1,11 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ActivityIndicator,
-} from "react-native";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
@@ -15,12 +9,19 @@ import {
   Font,
   type ThemeColors,
 } from "../../src/constants/colors";
-import { useColors } from "../../src/hooks/useColors";
-import { Skeleton, withErrorBoundary } from "../../src/components";
+import { useColors, ThemeOverrideContext } from "../../src/hooks/useColors";
+import { Button, Skeleton, withErrorBoundary } from "../../src/components";
 import { useAuthStore } from "../../src/store/authStore";
 import { usePartnerStore } from "../../src/store/partnerStore";
 import { useSocialStore } from "../../src/store/socialStore";
 import { PublicProfile } from "../../src/types";
+
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
 
 // ─── Rep badge ────────────────────────────────────────────────────────────────
 
@@ -35,7 +36,9 @@ const repColor = (level: string, Colors: ThemeColors): string => {
     case "sprout":
       return Colors.warning;
     default:
-      return Colors.textMuted;
+      // Was Colors.textMuted — theme-dependent murky brown that vanishes on
+      // the green field; the base level reads as quiet white instead.
+      return WHITE_55;
   }
 };
 
@@ -144,18 +147,18 @@ function PublicProfileScreenInner() {
             style={{ marginBottom: Spacing.md }}
           />
           <Skeleton
-            width="100%"
-            height={6}
-            radius={3}
+            width="92.5%"
+            height={11}
+            radius={Radius.xl}
             style={{ marginBottom: Spacing.xl }}
           />
           <Skeleton
-            width="100%"
+            width="92.5%"
             height={74}
-            radius={Radius.lg}
+            radius={Radius.xl}
             style={{ marginBottom: Spacing.xl }}
           />
-          <Skeleton width="100%" height={50} radius={Radius.full} />
+          <Skeleton width="92.5%" height={50} radius={Radius.full} />
         </View>
       </SafeAreaView>
     );
@@ -194,42 +197,45 @@ function PublicProfileScreenInner() {
       </View>
 
       <View style={styles.content}>
-        {/* ── Avatar ────────────────────────────────────────────────────── */}
-        <View style={styles.avatarCircle}>
-          <Text style={styles.avatarInitial}>
-            {profile.name.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        {/* ── Identity glass seat: avatar + name + rep badge + rep bar ──── */}
+        <View style={styles.identityCard}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarInitial}>
+              {profile.name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
 
-        {/* ── Name + rep badge ──────────────────────────────────────────── */}
-        <Text style={styles.name}>{profile.name}</Text>
-        <View
-          style={[
-            styles.repBadge,
-            { borderColor: repColor(profile.reputation.level, Colors) },
-          ]}
-        >
-          <View
-            style={[
-              styles.repDot,
-              { backgroundColor: repColor(profile.reputation.level, Colors) },
-            ]}
-          />
-          <Text
-            style={[
-              styles.repBadgeText,
-              { color: repColor(profile.reputation.level, Colors) },
-            ]}
-          >
-            {profile.reputation.level.charAt(0).toUpperCase() +
-              profile.reputation.level.slice(1)}{" "}
-            · {profile.reputation.score}
-          </Text>
-        </View>
+          {/* Name + rep badge (reputation data/copy unchanged — only the
+              surfaces are green-world; the level color stays on the dot
+              and the bar fill) */}
+          <Text style={styles.name}>{profile.name}</Text>
+          <View style={styles.repBadge}>
+            <View
+              style={[
+                styles.repDot,
+                { backgroundColor: repColor(profile.reputation.level, Colors) },
+              ]}
+            />
+            <Text style={styles.repBadgeText}>
+              {profile.reputation.level.charAt(0).toUpperCase() +
+                profile.reputation.level.slice(1)}{" "}
+              · {profile.reputation.score}
+            </Text>
+          </View>
 
-        {/* ── Progress bar ──────────────────────────────────────────────── */}
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progressWidth}%` }]} />
+          {/* Rep progress bar — CloutCard geometry (11 tall, Radius.xl):
+              glassMid track, level color as the fill */}
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${progressWidth}%`,
+                  backgroundColor: repColor(profile.reputation.level, Colors),
+                },
+              ]}
+            />
+          </View>
         </View>
 
         {/* ── Stats ─────────────────────────────────────────────────────── */}
@@ -250,58 +256,65 @@ function PublicProfileScreenInner() {
           </View>
         </View>
 
-        {/* ── Follow / Unfollow button ───────────────────────────────────── */}
-        <Pressable
-          style={[styles.followBtn, following_ && styles.followingBtn]}
-          onPress={handleToggleFollow}
-          disabled={followLoading}
-        >
-          {followLoading ? (
-            <ActivityIndicator
-              color={following_ ? Colors.primaryLight : Colors.white}
-            />
-          ) : (
-            <Text
-              style={[
-                styles.followBtnText,
-                following_ && styles.followingBtnText,
-              ]}
-            >
-              {following_ ? "Following" : "Follow"}
-            </Text>
-          )}
-        </Pressable>
+        <View style={styles.actionsZone}>
+          {/* ── Follow / Unfollow button — shared Button pill (style/textStyle
+              overrides only, mirroring the dashboard CTA treatment) ──────── */}
+          <Button
+            title={following_ ? "Following" : "Follow"}
+            onPress={handleToggleFollow}
+            loading={followLoading}
+            size="large"
+            variant={following_ ? "outline" : "primary"}
+            style={following_ ? styles.followingBtn : styles.followBtn}
+            textStyle={following_ ? styles.followingBtnText : undefined}
+          />
 
-        {/* ── Start Session (partners only) ─────────────────────────────── */}
-        {isPartner && (
-          <Pressable
-            style={styles.sessionBtn}
-            onPress={() => {
-              selectPartner(uid);
-              router.push("/session/select");
-            }}
-          >
-            <Text style={styles.sessionBtnText}>Start Session Together</Text>
-          </Pressable>
-        )}
+          {/* ── Start Session (partners only) ─────────────────────────────── */}
+          {isPartner && (
+            <Pressable
+              style={styles.sessionBtn}
+              onPress={() => {
+                selectPartner(uid);
+                router.push("/session/select");
+              }}
+            >
+              <Text style={styles.sessionBtnText}>Start Session Together</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
-const PublicProfileScreen = withErrorBoundary(
+const PublicProfileBody = withErrorBoundary(
   PublicProfileScreenInner,
   "user-profile",
+);
+
+// Green-world theme pin: user/[uid] is a ROOT-Stack screen, so it sits OUTSIDE
+// the pinned (tabs)/session layout subtrees and must pin itself. The provider
+// goes ABOVE the screen body — a provider rendered inside the component
+// couldn't affect the component's own useColors() — so the whole screen (own
+// styles + theme-driven children like Button/Skeleton) resolves to the dark
+// palette and renders identically in both themes.
+const PublicProfileScreen = () => (
+  <ThemeOverrideContext.Provider value="dark">
+    <PublicProfileBody />
+  </ThemeOverrideContext.Provider>
 );
 export default PublicProfileScreen;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Full-bleed GREEN brand screen (mirrors profile.tsx / index.tsx, v2 node
+// 429:186): primaryDark field, no shared horizontal padding — each section
+// owns its proportional width (~92.5%, centered).
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     center: {
       flex: 1,
@@ -316,21 +329,31 @@ const makeStyles = (Colors: ThemeColors) =>
     backText: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
     content: {
       flex: 1,
       alignItems: "center",
-      paddingHorizontal: Spacing.lg,
       paddingTop: Spacing.lg,
     },
+    // Identity = glass seat (glassLight, Radius.xl, borderless), like the
+    // dashboard header / balance cards.
+    identityCard: {
+      width: "92.5%",
+      alignItems: "center",
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      paddingVertical: Spacing.xl,
+      paddingHorizontal: Spacing.lg,
+      marginBottom: Spacing.md,
+    },
+    // Dark-glass circle with a white initial (the dashboard header-action
+    // circle treatment) — replaces the theme-dependent primaryMuted ring.
     avatarCircle: {
       width: 80,
       height: 80,
       borderRadius: 40,
-      backgroundColor: Colors.primaryMuted,
-      borderWidth: 2,
-      borderColor: Colors.primaryLight,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
       marginBottom: Spacing.md,
@@ -338,21 +361,22 @@ const makeStyles = (Colors: ThemeColors) =>
     avatarInitial: {
       fontSize: Typography.headlineLarge,
       ...Font.bold,
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
     name: {
       fontSize: Typography.headlineSmall,
       ...Font.heavy,
-      color: Colors.text,
+      color: Colors.white,
       letterSpacing: -0.3,
       marginBottom: Spacing.sm,
     },
+    // Dark-glass pill; the level color lives on the dot, copy stays white.
     repBadge: {
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      borderWidth: 1,
       borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
       paddingHorizontal: Spacing.md,
       paddingVertical: 5,
       marginBottom: Spacing.md,
@@ -365,27 +389,27 @@ const makeStyles = (Colors: ThemeColors) =>
     repBadgeText: {
       fontSize: Typography.labelLarge,
       ...Font.semibold,
+      color: Colors.white,
     },
+    // CloutCard geometry: 11 tall, Radius.xl, glassMid track (fill color is
+    // the rep level color, applied inline).
     progressTrack: {
       width: "100%",
-      height: 6,
-      backgroundColor: Colors.backgroundSecondary,
-      borderRadius: Radius.full,
-      marginBottom: Spacing.xl,
+      height: 11,
+      backgroundColor: Colors.glassMid,
+      borderRadius: Radius.xl,
       overflow: "hidden",
     },
     progressFill: {
       height: "100%",
-      backgroundColor: Colors.primaryLight,
-      borderRadius: Radius.full,
+      borderRadius: Radius.xl,
     },
+    // Stats = glass seat, borderless; white value / white@0.7 label hierarchy.
     statsRow: {
       flexDirection: "row",
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
-      borderWidth: 1,
-      borderColor: Colors.border,
-      width: "100%",
+      width: "92.5%",
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.xl,
       paddingVertical: Spacing.md,
     },
@@ -397,59 +421,55 @@ const makeStyles = (Colors: ThemeColors) =>
     statValue: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     statLabel: {
       fontSize: Typography.labelSmall,
       ...Font.regular,
-      color: Colors.textMuted,
+      color: WHITE_70,
       textAlign: "center",
     },
     statDivider: {
       width: 1,
-      backgroundColor: Colors.border,
+      backgroundColor: WHITE_25,
     },
+    actionsZone: {
+      width: "92.5%",
+      gap: Spacing.md,
+    },
+    // Button overrides (public style/textStyle props only): primary pill for
+    // Follow; outline pill (white@0.55 border / white text) for Following —
+    // the dashboard ctaButton / ctaButtonOutline treatment.
     followBtn: {
-      width: "100%",
-      paddingVertical: Spacing.md,
       borderRadius: Radius.full,
-      backgroundColor: Colors.primary,
-      alignItems: "center",
-      justifyContent: "center",
-      marginBottom: Spacing.md,
-      minHeight: 50,
     },
     followingBtn: {
-      backgroundColor: "transparent",
-      borderWidth: 1.5,
-      borderColor: Colors.primaryLight,
-    },
-    followBtnText: {
-      fontSize: Typography.titleSmall,
-      ...Font.semibold,
-      color: Colors.white,
+      borderRadius: Radius.full,
+      borderColor: WHITE_55,
     },
     followingBtnText: {
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
+    // Secondary action = outline pill, matching the dashboard's secondary CTAs.
     sessionBtn: {
       width: "100%",
       paddingVertical: Spacing.md,
       borderRadius: Radius.full,
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: "transparent",
       alignItems: "center",
       justifyContent: "center",
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: WHITE_55,
+      minHeight: 44,
     },
     sessionBtnText: {
       fontSize: Typography.titleSmall,
       ...Font.medium,
-      color: Colors.textSecondary,
+      color: Colors.white,
     },
     errorText: {
       fontSize: Typography.bodyMedium,
       ...Font.regular,
-      color: Colors.textMuted,
+      color: WHITE_70,
     },
   });

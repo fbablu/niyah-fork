@@ -8,11 +8,11 @@ import {
   ScrollView,
   Pressable,
   Alert,
-  Switch,
   Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Typography,
   Spacing,
@@ -22,10 +22,8 @@ import {
 } from "../../src/constants/colors";
 import { useColors } from "../../src/hooks/useColors";
 import { useScreenProtection } from "../../src/hooks/useScreenProtection";
-import { useThemeStore } from "../../src/store/themeStore";
 import * as Haptics from "expo-haptics";
 import {
-  Card,
   LegalContentView,
   InviteCTA,
   withErrorBoundary,
@@ -69,10 +67,14 @@ import { getViolationsByCategory } from "../../src/config/screentime";
 import { generateBlobAvatarPreset } from "../../src/constants/blobAvatar";
 import { logger } from "../../src/utils/logger";
 
+// White hierarchy on the green field — rgba so opacities never compound with
+// layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+
 function ProfileScreenInner() {
   useScreenProtection("profile");
   const Colors = useColors();
-  const { theme, toggleTheme } = useThemeStore();
   const router = useRouter();
   const { user, logout, setBlobAvatar, updateUser } = useAuthStore();
   // Granular field selectors so an unrelated store mutation doesn't re-render
@@ -358,122 +360,121 @@ function ProfileScreenInner() {
           />
         </View>
 
-        {/* ── Functional cards the design doesn't show, below the calendar ── */}
+        {/* ── Functional cards the design doesn't show, below the calendar.
+            Each card owns its glass seat on the green field now, so this is
+            a plain layout column (the old dark-glass shelf double-layered). ── */}
+        <View style={styles.functionalZone}>
+          {/* Invite Friends Card */}
+          <InviteCTA style={styles.inviteCard} />
 
-        {/* Invite Friends Card */}
-        <InviteCTA style={styles.inviteCard} />
+          <ScreenTimeCard />
+          <NeverBlockCard />
 
-        <ScreenTimeCard />
-        <NeverBlockCard />
+          {/* Linked Bank */}
+          {user?.linkedBank && (
+            <View style={styles.balanceCard}>
+              <View style={styles.bankCardHeader}>
+                <View style={styles.bankCardInfo}>
+                  <Text style={styles.balanceLabel}>Linked Bank</Text>
+                  <Text style={styles.bankName}>
+                    {(user.linkedBank as { institutionName?: string })
+                      .institutionName ?? "Bank"}
+                  </Text>
+                  <Text style={styles.bankMask}>
+                    Account ending in{" "}
+                    {(user.linkedBank as { mask?: string }).mask ?? "****"}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={handleManageBank}
+                  style={styles.manageBankButton}
+                  hitSlop={10}
+                >
+                  <Text style={styles.manageBankButtonText}>Manage</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
-        {/* Linked Bank */}
-        {user?.linkedBank && (
-          <Card style={styles.balanceCard}>
-            <View style={styles.bankCardHeader}>
-              <View style={styles.bankCardInfo}>
-                <Text style={styles.balanceLabel}>Linked Bank</Text>
-                <Text style={styles.bankName}>
-                  {(user.linkedBank as { institutionName?: string })
-                    .institutionName ?? "Bank"}
-                </Text>
-                <Text style={styles.bankMask}>
-                  Account ending in{" "}
-                  {(user.linkedBank as { mask?: string }).mask ?? "****"}
+          {/* Pending withdrawal (live-money info; deposit/withdraw moved into
+              BalanceSection's +/- chooser) */}
+          {pendingWithdrawal > 0 && (
+            <View style={styles.balanceCard}>
+              <View style={styles.pendingRowStandalone}>
+                <Text style={styles.pendingLabel}>Pending withdrawal</Text>
+                <Text style={styles.pendingAmount}>
+                  {formatMoney(pendingWithdrawal)}
                 </Text>
               </View>
+            </View>
+          )}
+
+          {/* Stats Grid */}
+          <View style={styles.statsRow}>
+            <View style={styles.miniStatCard}>
+              <Text style={styles.miniStatValue}>
+                {user?.totalSessions || 0}
+              </Text>
+              <Text style={styles.miniStatLabel}>Sessions</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.miniStatCard}>
+              <Text style={styles.miniStatValue}>{completionRate}%</Text>
+              <Text style={styles.miniStatLabel}>Success</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.miniStatCard}>
+              <Text style={styles.miniStatValue}>
+                {user?.longestStreak || 0}
+              </Text>
+              <Text style={styles.miniStatLabel}>Best Streak</Text>
+            </View>
+          </View>
+
+          <TransactionHistory
+            transactions={transactions}
+            loading={!isWalletHydrated}
+          />
+
+          {/* Settings: the Light Mode toggle was removed 2026-06-12 — Niyah
+              ships the single brand theme (founder decision). Legal is the
+              only settings row left. */}
+
+          {/* Legal */}
+          <View style={styles.sectionLast}>
+            <Text style={styles.sectionTitle}>Legal</Text>
+            <View style={styles.settingsCard}>
               <Pressable
-                onPress={handleManageBank}
-                style={styles.manageBankButton}
-                hitSlop={10}
+                onPress={() => setLegalModalVisible(true)}
+                style={styles.settingRow}
               >
-                <Text style={styles.manageBankButtonText}>Manage</Text>
+                <Text style={styles.settingLabel}>Terms & Privacy</Text>
+                <Text style={styles.settingChevron}>›</Text>
               </Pressable>
             </View>
-          </Card>
-        )}
-
-        {/* Pending withdrawal (live-money info; deposit/withdraw moved into
-            BalanceSection's +/- chooser) */}
-        {pendingWithdrawal > 0 && (
-          <Card style={styles.balanceCard}>
-            <View style={styles.pendingRowStandalone}>
-              <Text style={styles.pendingLabel}>Pending withdrawal</Text>
-              <Text style={styles.pendingAmount}>
-                {formatMoney(pendingWithdrawal)}
-              </Text>
-            </View>
-          </Card>
-        )}
-
-        {/* Stats Grid */}
-        <View style={styles.statsRow}>
-          <View style={styles.miniStatCard}>
-            <Text style={styles.miniStatValue}>{user?.totalSessions || 0}</Text>
-            <Text style={styles.miniStatLabel}>Sessions</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.miniStatCard}>
-            <Text style={styles.miniStatValue}>{completionRate}%</Text>
-            <Text style={styles.miniStatLabel}>Success</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.miniStatCard}>
-            <Text style={styles.miniStatValue}>{user?.longestStreak || 0}</Text>
-            <Text style={styles.miniStatLabel}>Best Streak</Text>
           </View>
         </View>
 
-        <TransactionHistory
-          transactions={transactions}
-          loading={!isWalletHydrated}
-        />
-
-        {/* Settings */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Settings</Text>
-          <Card style={styles.settingsCard} animate={false}>
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Light Mode</Text>
-              <Switch
-                value={theme === "light"}
-                onValueChange={toggleTheme}
-                trackColor={{
-                  false: Colors.backgroundTertiary,
-                  true: Colors.primary,
-                }}
-                thumbColor={Colors.white}
-              />
-            </View>
-          </Card>
-        </View>
-
-        {/* Legal */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Legal</Text>
-          <Card style={styles.settingsCard} animate={false}>
-            <Pressable
-              onPress={() => setLegalModalVisible(true)}
-              style={styles.settingRow}
-            >
-              <Text style={styles.settingLabel}>Terms & Privacy</Text>
-              <Text style={styles.settingChevron}>›</Text>
-            </Pressable>
-          </Card>
-        </View>
-
-        {/* Account */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <Card style={styles.settingsCard} animate={false}>
-            <Pressable onPress={handleLogout} style={styles.settingRow}>
-              <Text style={styles.settingLabelDestructive}>Sign Out</Text>
-            </Pressable>
-            <View style={styles.settingDivider} />
-            <Pressable onPress={handleDeleteAccount} style={styles.settingRow}>
-              <Text style={styles.settingLabelDestructive}>Delete Account</Text>
-            </Pressable>
-          </Card>
-        </View>
+        {/* Footer pills (design 429:186): dark-glass Log out / Delete account.
+            Same confirm flows as before — only the surface changed. */}
+        <Pressable
+          onPress={handleLogout}
+          style={styles.footerPill}
+          accessibilityRole="button"
+          accessibilityLabel="Log out"
+        >
+          <Ionicons name="log-out-outline" size={18} color={Colors.white} />
+          <Text style={styles.footerPillText}>Log out</Text>
+        </Pressable>
+        <Pressable
+          onPress={handleDeleteAccount}
+          style={styles.footerPill}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+        >
+          <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+          <Text style={styles.footerPillTextDestructive}>Delete account</Text>
+        </Pressable>
 
         <HoldToConfirmModal
           visible={removeBankModalVisible}
@@ -548,17 +549,20 @@ function ProfileScreenInner() {
 const ProfileScreen = withErrorBoundary(ProfileScreenInner, "profile");
 export default ProfileScreen;
 
+// Full-bleed GREEN brand screen (v2, node 429:186): primaryDark background,
+// sections size themselves proportionally (no shared horizontal padding —
+// each redesigned component owns its percentage width).
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     scrollView: {
       flex: 1,
     },
     scrollContent: {
-      padding: Spacing.lg,
+      paddingTop: Spacing.lg,
       paddingBottom: Spacing.xxl,
     },
     inviteCard: {
@@ -570,22 +574,33 @@ const makeStyles = (Colors: ThemeColors) =>
     calendarSection: {
       marginBottom: Spacing.xl,
     },
+    // Layout column for the functional cards the design doesn't show — each
+    // card owns its glass seat now, so no shelf surface here (the old
+    // glassDark wrapper double-layered against the converted cards).
+    functionalZone: {
+      width: "92.5%",
+      alignSelf: "center",
+      marginBottom: Spacing.xl,
+    },
     balanceCard: {
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      padding: Spacing.lg,
       marginBottom: Spacing.md,
     },
     balanceLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.xs,
     },
     bankName: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     bankMask: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_55,
       marginTop: 2,
     },
     bankCardHeader: {
@@ -600,12 +615,12 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
       borderRadius: Radius.md,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
     },
     manageBankButtonText: {
       fontSize: Typography.bodySmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     pendingRowStandalone: {
       flexDirection: "row",
@@ -623,8 +638,8 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     statsRow: {
       flexDirection: "row",
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.md,
       marginBottom: Spacing.xl,
     },
@@ -634,29 +649,32 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     statDivider: {
       width: 1,
-      backgroundColor: Colors.border,
+      backgroundColor: Colors.glassMid,
     },
     miniStatValue: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     miniStatLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
-    section: {
-      marginBottom: Spacing.xl,
+    sectionLast: {
+      marginBottom: 0,
     },
+    // Sits directly on the green field — white, not the theme text token.
     sectionTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
+    // Glass seat for the settings rows.
     settingsCard: {
-      padding: 0,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       overflow: "hidden",
     },
     settingRow: {
@@ -666,22 +684,13 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingVertical: Spacing.md,
       paddingHorizontal: Spacing.lg,
     },
-    settingDivider: {
-      height: 1,
-      backgroundColor: Colors.border,
-      marginHorizontal: Spacing.lg,
-    },
     settingLabel: {
       fontSize: Typography.bodyMedium,
-      color: Colors.text,
-    },
-    settingLabelDestructive: {
-      fontSize: Typography.bodyMedium,
-      color: Colors.danger,
+      color: Colors.white,
     },
     settingChevron: {
       fontSize: Typography.titleMedium,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
     legalModal: {
       flex: 1,
@@ -700,17 +709,42 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.semibold,
       color: Colors.primary,
     },
+    // Dark-glass footer pills (~81% of the 402 frame, 44 tall, fully round).
+    footerPill: {
+      width: "81%",
+      alignSelf: "center",
+      height: 44,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: Spacing.sm,
+      marginBottom: Spacing.md,
+    },
+    footerPillText: {
+      fontSize: Typography.titleSmall,
+      ...Font.semibold,
+      color: Colors.white,
+    },
+    footerPillTextDestructive: {
+      fontSize: Typography.titleSmall,
+      ...Font.semibold,
+      color: Colors.danger,
+    },
     footer: {
       alignItems: "center",
       paddingVertical: Spacing.lg,
     },
     footerText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: Colors.white,
+      opacity: 0.6,
     },
     footerSubtext: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: Colors.white,
+      opacity: 0.6,
       marginTop: Spacing.xs,
     },
   });

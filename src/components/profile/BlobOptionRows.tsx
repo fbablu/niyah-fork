@@ -27,13 +27,24 @@ interface BlobOptionRowsProps {
 }
 
 // Eye-glyph tile canvas — geometry mirrors the "unique" shape's eye spec so
-// the option glyphs read exactly like the avatar's eyes.
+// the option glyphs read exactly like the avatar's eyes (black ink on the
+// green row, per frame 429:347).
 const EYE_W = 44;
 const EYE_H = 26;
 
+// v2 exact values (frame 429:347): rows are primary bars rounded ~33 at ~81%
+// width; the selected option sits in a glassMid squircle 64 rounded ~26.
+// Both radii are design-load-bearing — intentionally not Radius tokens.
+const ROW_RADIUS = 33;
+const OPTION_SIZE = 64;
+const OPTION_RADIUS = 26;
+const ROW_WIDTH = "81%";
+/** White shuffle-tile disk (frame 429:347, ellipse 429:551 ≈ 36pt). */
+const SHUFFLE_DISK = 36;
+
 // The customizer's three side-scroll option rows (profile-tab-blob-customizer
-// frame): eye shapes / colors / shapes. Selected option sits in a
-// backgroundSecondary circle.
+// frame 429:347): eye shapes / colors / shapes. Selected option sits in a
+// glassMid squircle on the primary-green row.
 export function BlobOptionRows({
   editing,
   uid,
@@ -151,7 +162,10 @@ export function BlobOptionRows({
           accessibilityRole="button"
           accessibilityLabel="Shuffle blob shape"
         >
-          <Ionicons name="shuffle" size={22} color={Colors.text} />
+          {/* Black shuffle glyph on a white disk (frame 429:347). */}
+          <View style={styles.shuffleDisk}>
+            <Ionicons name="shuffle" size={22} color={Colors.black} />
+          </View>
         </Pressable>
       </ScrollView>
     </View>
@@ -161,12 +175,13 @@ export function BlobOptionRows({
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     rows: {
-      paddingHorizontal: Spacing.lg,
+      alignItems: "center",
       gap: Spacing.md,
     },
     rowPill: {
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.xl,
+      width: ROW_WIDTH,
+      backgroundColor: Colors.primary,
+      borderRadius: ROW_RADIUS,
       flexGrow: 0,
     },
     rowContent: {
@@ -177,13 +192,21 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingVertical: Spacing.sm,
     },
     option: {
-      width: 56,
-      height: 56,
-      borderRadius: Radius.full,
+      width: OPTION_SIZE,
+      height: OPTION_SIZE,
+      borderRadius: OPTION_RADIUS,
       alignItems: "center",
       justifyContent: "center",
     },
     optionSelected: {
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassMid,
+    },
+    shuffleDisk: {
+      width: SHUFFLE_DISK,
+      height: SHUFFLE_DISK,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.white,
+      alignItems: "center",
+      justifyContent: "center",
     },
   });

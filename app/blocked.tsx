@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { useColors } from "../src/hooks/useColors";
+import { useColors, ThemeOverrideContext } from "../src/hooks/useColors";
 import {
   Spacing,
   Radius,
@@ -39,6 +39,13 @@ import { formatMoney } from "../src/utils/format";
 //
 // Mirrors the pattern Opal + One Sec use: minimal shield = brief gate, host
 // app = rich surrender flow.
+
+// Green-world text hierarchy (docs/redesign-all-tabs-progress.md): everything
+// on the full-bleed primaryDark field is white, white@0.7, or white@0.55 —
+// rgba so opacities never compound with layout opacity.
+const WHITE_85 = "rgba(255, 255, 255, 0.85)";
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
 
 const QUOTES = [
   "The urge to open this app will pass.\nWait it out.",
@@ -132,11 +139,7 @@ function BlockedScreenInner() {
   return (
     <View style={styles.root}>
       <LinearGradient
-        colors={[
-          Colors.background,
-          Colors.backgroundElevated,
-          Colors.background,
-        ]}
+        colors={[Colors.primaryDark, Colors.primary, Colors.primaryDark]}
         locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -208,9 +211,11 @@ function formatNames(names: string[]): string {
 
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    // Full-bleed green field (the gradient overlays primaryDark → primary →
+    // primaryDark for the same subtle center lift the old theme version had).
     root: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
       paddingTop: Platform.OS === "ios" ? 64 : 32,
       paddingBottom: 36,
       paddingHorizontal: Spacing.lg,
@@ -232,19 +237,27 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 180,
       height: 180,
       borderRadius: 90,
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
       opacity: 0.15,
     },
     avatarFallback: {
       width: 140,
       height: 140,
       borderRadius: 70,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
     },
+    // Urgency kept: white-flip pill so the semantic loss red stays legible on
+    // the green field (loss sinks into green; it reads on white — select.tsx
+    // precedent).
     kicker: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
       color: Colors.loss,
+      backgroundColor: Colors.white,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+      borderRadius: Radius.full,
+      overflow: "hidden",
       letterSpacing: 2,
       textTransform: "uppercase",
       marginBottom: Spacing.sm,
@@ -252,7 +265,7 @@ const makeStyles = (Colors: ThemeColors) =>
     title: {
       fontSize: Typography.headlineLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
       lineHeight: Typography.headlineLarge * 1.15,
       marginBottom: Spacing.lg,
@@ -260,26 +273,25 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     quote: {
       fontSize: Typography.bodyLarge,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: Typography.bodyLarge * 1.4,
       paddingHorizontal: Spacing.lg,
       marginBottom: Spacing.xl,
     },
+    // Glass seat (glassLight, Radius.xl, borderless).
     stakeCard: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
       borderRadius: Radius.xl,
       paddingVertical: Spacing.lg,
       paddingHorizontal: Spacing.xl,
       alignItems: "center",
-      borderWidth: 1,
-      borderColor: Colors.border,
       width: "100%",
       maxWidth: 320,
     },
     stakeLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       letterSpacing: 1.5,
       textTransform: "uppercase",
       marginBottom: Spacing.xs,
@@ -287,51 +299,73 @@ const makeStyles = (Colors: ThemeColors) =>
     stakeAmount: {
       fontSize: Typography.displayMedium,
       ...Font.heavy,
-      color: Colors.text,
+      color: Colors.white,
     },
     stakeContext: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
     },
     buttonStack: {
       gap: Spacing.md,
     },
+    // Emphasis flip (Colors.white + primaryDark content): "Back to focus" is
+    // THE action that keeps the stake, so it gets the white pill on green.
     primaryBtn: {
-      backgroundColor: Colors.primary,
-      borderRadius: Radius.xl,
+      backgroundColor: Colors.white,
+      borderRadius: Radius.full,
       paddingVertical: Spacing.lg,
       alignItems: "center",
-      shadowColor: Colors.primary,
+      shadowColor: Colors.black,
       shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.4,
+      shadowOpacity: 0.25,
       shadowRadius: 16,
       elevation: 8,
     },
     primaryBtnPressed: {
-      backgroundColor: Colors.primaryDark,
+      backgroundColor: WHITE_85,
       transform: [{ scale: 0.98 }],
     },
     primaryBtnText: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: "#fff",
+      color: Colors.primaryDark,
     },
     primaryBtnSubtext: {
       fontSize: Typography.labelSmall,
-      color: "rgba(255,255,255,0.75)",
+      color: Colors.primary,
       marginTop: 2,
     },
+    // Danger semantics kept (lossLight fill + loss border, confirm.tsx
+    // warning-card precedent); white text since loss red sinks into green.
     forfeitBtn: {
       paddingVertical: Spacing.md,
+      paddingHorizontal: Spacing.xl,
       alignItems: "center",
+      alignSelf: "center",
+      backgroundColor: Colors.lossLight,
+      borderWidth: 1,
+      borderColor: Colors.loss,
+      borderRadius: Radius.full,
     },
     forfeitText: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.loss,
+      color: Colors.white,
     },
   });
 
-const BlockedScreen = withErrorBoundary(BlockedScreenInner, "blocked");
+const BlockedScreenBody = withErrorBoundary(BlockedScreenInner, "blocked");
+
+// Green-world theme pin: blocked is a ROOT-Stack screen (shield deep link), so
+// it sits OUTSIDE the pinned (tabs)/session layout subtrees and must pin
+// itself. The provider goes ABOVE the screen body — a provider rendered inside
+// the component couldn't affect the component's own useColors() — so the whole
+// screen (own styles + theme-driven children) resolves to the dark palette and
+// renders identically in both themes.
+const BlockedScreen = () => (
+  <ThemeOverrideContext.Provider value="dark">
+    <BlockedScreenBody />
+  </ThemeOverrideContext.Provider>
+);
 export default BlockedScreen;

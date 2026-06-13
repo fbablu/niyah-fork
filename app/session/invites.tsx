@@ -31,6 +31,12 @@ import { getFunctionErrorMessage } from "../../src/utils/errors";
 import { validateAndPromptForAppSelection } from "../../src/config/screentime";
 import type { GroupInvite } from "../../src/types";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Convert milliseconds to a human-readable duration string. */
@@ -184,6 +190,8 @@ function GroupInvitesScreenInner() {
               onPress={() => handleDecline(invite.id)}
               loading={isDeclining}
               disabled={isLoading}
+              style={styles.outlineButton}
+              textStyle={styles.outlineButtonText}
             />
           </View>
           <View style={styles.buttonFlex}>
@@ -193,6 +201,7 @@ function GroupInvitesScreenInner() {
               onPress={() => handleAccept(invite.id)}
               loading={isAccepting}
               disabled={isLoading}
+              style={styles.pillButton}
             />
           </View>
         </View>
@@ -251,9 +260,10 @@ export default GroupInvitesScreen;
 
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    // Full-bleed green brand field (docs/redesign-all-tabs-progress.md).
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     scrollView: {
       flex: 1,
@@ -267,7 +277,7 @@ const makeStyles = (Colors: ThemeColors) =>
       marginBottom: Spacing.md,
     },
     backText: {
-      color: Colors.textSecondary,
+      color: WHITE_70,
       fontSize: Typography.bodyLarge,
       ...Font.medium,
     },
@@ -278,21 +288,23 @@ const makeStyles = (Colors: ThemeColors) =>
     title: {
       fontSize: Typography.headlineMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     subtitle: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
       textAlign: "center",
     },
 
-    // ─── Invite list ──────────────────────────────────────────────────
+    // ─── Invite list: glassLight seats ────────────────────────────────
     inviteList: {
       gap: Spacing.md,
     },
     inviteCard: {
       marginBottom: 0,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
 
     // ─── Sender row ───────────────────────────────────────────────────
@@ -311,7 +323,7 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 48,
       height: 48,
       borderRadius: 24,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
       marginRight: Spacing.md,
@@ -319,25 +331,25 @@ const makeStyles = (Colors: ThemeColors) =>
     avatarInitial: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: Colors.primary,
+      color: Colors.white,
     },
     senderInfo: {
       flex: 1,
     },
     fromLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginBottom: Spacing.xs,
     },
     fromName: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
 
-    // ─── Session details ──────────────────────────────────────────────
+    // ─── Session details: dark-glass inset panel ──────────────────────
     detailsSection: {
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.md,
       padding: Spacing.md,
       marginBottom: Spacing.md,
@@ -350,27 +362,37 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     detailLabel: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     detailValue: {
       fontSize: Typography.bodySmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     soloNote: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: Spacing.md,
       lineHeight: 18,
     },
 
-    // ─── Buttons ──────────────────────────────────────────────────────
+    // ─── Buttons (shared Button styled via public props only) ─────────
     buttonRow: {
       flexDirection: "row",
       gap: Spacing.md,
     },
     buttonFlex: {
       flex: 1,
+    },
+    pillButton: {
+      borderRadius: Radius.full,
+    },
+    outlineButton: {
+      borderRadius: Radius.full,
+      borderColor: WHITE_55,
+    },
+    outlineButtonText: {
+      color: Colors.white,
     },
 
     // ─── Empty state ──────────────────────────────────────────────────
@@ -380,18 +402,18 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     emptyIcon: {
       fontSize: Typography.displaySmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginBottom: Spacing.md,
     },
     emptyTitle: {
       fontSize: Typography.titleMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     emptyText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: 20,
       paddingHorizontal: Spacing.lg,

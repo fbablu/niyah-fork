@@ -32,7 +32,7 @@ export function CloutWeightRow({
 
   return (
     <View style={styles.row}>
-      <Ionicons name={icon} size={22} color={Colors.primary} />
+      <Ionicons name={icon} size={22} color={Colors.white} />
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
           <Text style={styles.rowLabel}>{label}</Text>
@@ -54,13 +54,19 @@ export function CloutWeightRow({
   );
 }
 
+// Green sheet system: each rule is a primary-surface row (the customizer's
+// option-row language) with white text and dark-glass chip/track.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     row: {
       flexDirection: "row",
       alignItems: "center",
       gap: Spacing.md,
-      marginBottom: Spacing.md,
+      marginBottom: Spacing.sm,
+      backgroundColor: Colors.primary,
+      borderRadius: Radius.xl,
+      paddingVertical: Spacing.md,
+      paddingHorizontal: Spacing.md,
     },
     rowBody: { flex: 1 },
     rowTop: {
@@ -72,28 +78,28 @@ const makeStyles = (Colors: ThemeColors) =>
     rowLabel: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     chip: {
       paddingHorizontal: Spacing.sm,
       paddingVertical: Spacing.xs,
       borderRadius: Radius.full,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.glassDark,
     },
     chipText: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
     miniTrack: {
       height: Spacing.xs,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.full,
       overflow: "hidden",
     },
     miniFill: {
       height: "100%",
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
       borderRadius: Radius.full,
     },
   });

@@ -2,12 +2,20 @@
  * Unit tests for CalendarStampBlob — the per-session collectible stamp.
  *
  * The reanimated mock makes useAnimatedStyle a no-op, so these pin the
- * static contract: deterministic seed → path/palette, and the eye overlay
- * geometry (the blink animates those views; they must exist + be paired).
+ * static contract — deterministic seed → path/palette, and the paired eye
+ * overlay geometry — plus the v3 near-static motion drivers (bare 200ms
+ * opacity fade; no spring, no stagger, no blink loop) via the
+ * animation-function mocks.
  */
 
 import React from "react";
 import { render, screen } from "@testing-library/react-native";
+import {
+  withDelay,
+  withRepeat,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { CalendarStampBlob } from "../../../components/profile/CalendarStampBlob";
 import {
   BLOB_PALETTES,
@@ -60,13 +68,25 @@ describe("CalendarStampBlob", () => {
     expect(stops[1].props.stopColor).toBe(palette.end);
   });
 
-  it("renders a pair of eye overlays at matching height (blink targets)", () => {
-    render(<CalendarStampBlob sessionId="sess-1" blink />);
+  it("renders a pair of eye overlays at matching height", () => {
+    render(<CalendarStampBlob sessionId="sess-1" />);
     const left = screen.getByTestId("stamp-eye-left");
     const right = screen.getByTestId("stamp-eye-right");
     const flatLeft = Object.assign({}, ...[left.props.style].flat(Infinity));
     const flatRight = Object.assign({}, ...[right.props.style].flat(Infinity));
     expect(flatLeft.top).toBe(flatRight.top);
     expect(flatLeft.left).toBeLessThan(flatRight.left);
+  });
+
+  it("enters with a bare 200ms fade — no spring, no stagger, no blink (v3)", () => {
+    render(<CalendarStampBlob sessionId="sess-1" />);
+    expect(withTiming).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ duration: 200 }),
+    );
+    expect(withTiming).toHaveBeenCalledTimes(1);
+    expect(withSpring).not.toHaveBeenCalled();
+    expect(withDelay).not.toHaveBeenCalled();
+    expect(withRepeat).not.toHaveBeenCalled();
   });
 });

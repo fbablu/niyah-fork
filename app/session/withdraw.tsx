@@ -367,6 +367,7 @@ function WithdrawScreenInner() {
           headerTitle="Withdraw"
           onBack={() => setStep("amount")}
           scrollable={true}
+          backgroundColor={Colors.primaryDark}
         >
           {/* Amount summary */}
           <View style={styles.summaryCard}>
@@ -470,7 +471,7 @@ function WithdrawScreenInner() {
               <View style={styles.footer}>
                 {isLoading ? (
                   <View style={styles.loadingRow}>
-                    <ActivityIndicator size="small" color={Colors.primary} />
+                    <ActivityIndicator size="small" color={Colors.white} />
                     <Text style={styles.loadingText}>
                       Processing withdrawal...
                     </Text>
@@ -495,7 +496,7 @@ function WithdrawScreenInner() {
             <>
               {isSettingUp || isCheckingStatus ? (
                 <View style={styles.linkingContainer}>
-                  <ActivityIndicator size="large" color={Colors.primary} />
+                  <ActivityIndicator size="large" color={Colors.white} />
                   <Text style={styles.linkingText}>
                     {isCheckingStatus
                       ? "Checking account status..."
@@ -568,6 +569,7 @@ function WithdrawScreenInner() {
       headerVariant="centered"
       headerTitle="Withdraw"
       scrollable={false}
+      backgroundColor={Colors.primaryDark}
       headerRight={
         <Pressable
           onPress={handleMaxAmount}
@@ -631,22 +633,30 @@ function WithdrawScreenInner() {
 const WithdrawScreen = withErrorBoundary(WithdrawScreenInner, "withdraw");
 export default WithdrawScreen;
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     // ── Amount step ──
     maxButton: { alignItems: "flex-end" },
     maxText: {
-      color: Colors.primary,
+      color: Colors.white,
       fontSize: Typography.bodyLarge,
       ...Font.semibold,
     },
     balanceInfo: { alignItems: "center", paddingVertical: Spacing.lg },
     balanceLabel: {
       fontSize: Typography.labelMedium,
-      color: Colors.textTertiary,
+      color: WHITE_70,
       marginBottom: Spacing.xs,
       ...Font.medium,
     },
+    // Semantic gain KEPT (confirm.tsx "On Completion" precedent).
     balanceAmount: {
       fontSize: Typography.titleMedium,
       ...Font.semibold,
@@ -654,18 +664,21 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     balanceHint: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginTop: Spacing.xs,
       ...Font.medium,
     },
     balanceCap: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: 2,
     },
+    // White on the green field — danger-red sinks into primaryDark
+    // (select.tsx insufficientText precedent); AmountDisplay still tints the
+    // amount itself with its internal semantic error color.
     errorText: {
       textAlign: "center",
-      color: Colors.danger,
+      color: Colors.white,
       fontSize: Typography.bodySmall,
       marginTop: -Spacing.md,
       marginBottom: Spacing.sm,
@@ -674,34 +687,34 @@ const makeStyles = (Colors: ThemeColors) =>
     footer: { paddingVertical: Spacing.lg, gap: Spacing.sm },
 
     // ── Method step — summary ──
+    // Glass seat (glassLight, Radius.xl, borderless — confirm.tsx precedent).
     summaryCard: {
       alignItems: "center",
       paddingVertical: Spacing.xl,
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.lg,
     },
     summaryLabel: {
       fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.xs,
       ...Font.medium,
     },
     summaryAmount: {
       fontSize: Typography.displaySmall,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
 
     // ── Bank info card ──
+    // Glass seat (glassLight, Radius.xl, borderless).
     bankCard: {
       flexDirection: "row",
       alignItems: "center",
       padding: Spacing.md,
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
-      borderWidth: 1,
-      borderColor: Colors.border,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.xl,
       gap: Spacing.md,
     },
@@ -709,7 +722,7 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 40,
       height: 40,
       borderRadius: Radius.md,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
     },
@@ -723,11 +736,11 @@ const makeStyles = (Colors: ThemeColors) =>
     bankName: {
       fontSize: Typography.bodyLarge,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     bankMask: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       ...Font.regular,
     },
     bankManageButton: {
@@ -737,31 +750,35 @@ const makeStyles = (Colors: ThemeColors) =>
     bankManageText: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.primary,
+      color: Colors.white,
     },
 
     // ── Section label ──
     sectionLabel: {
       fontSize: Typography.labelLarge,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textTransform: "uppercase",
       letterSpacing: 0.8,
       marginBottom: Spacing.md,
     },
 
     // ── Method cards ──
+    // Brand-surface card: Colors.primary fill + white@0.25 border; the
+    // selected card lifts to a glass seat with a white border (select.tsx
+    // optionCard precedent, border-emphasis variant — text stays white-family
+    // in both states).
     methodCard: {
       padding: Spacing.md,
-      borderRadius: Radius.lg,
-      backgroundColor: Colors.backgroundCard,
+      borderRadius: Radius.xl,
+      backgroundColor: Colors.primary,
       borderWidth: 2,
-      borderColor: Colors.border,
+      borderColor: WHITE_25,
       marginBottom: Spacing.sm,
     },
     methodCardSelected: {
-      borderColor: Colors.primary,
-      backgroundColor: Colors.primaryMuted,
+      borderColor: Colors.white,
+      backgroundColor: Colors.glassLight,
     },
     methodCardHeader: {
       flexDirection: "row",
@@ -772,30 +789,32 @@ const makeStyles = (Colors: ThemeColors) =>
     methodTitle: {
       fontSize: Typography.bodyLarge,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
-    methodTitleSelected: { color: Colors.primary },
+    methodTitleSelected: { color: Colors.white },
     methodSubtitle: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       ...Font.regular,
     },
+    // White-flip pills so the badges read on the primary fill; "Free" keeps
+    // its semantic gain color.
     methodBadge: {
       paddingHorizontal: Spacing.sm + 2,
       paddingVertical: Spacing.xs,
       borderRadius: Radius.full,
-      backgroundColor: Colors.gainLight,
+      backgroundColor: Colors.white,
     },
     methodBadgeText: {
       fontSize: Typography.labelSmall,
       ...Font.semibold,
       color: Colors.gain,
     },
-    methodBadgeAccent: { backgroundColor: Colors.primaryMuted },
+    methodBadgeAccent: { backgroundColor: Colors.white },
     methodBadgeTextAccent: {
       fontSize: Typography.labelSmall,
       ...Font.semibold,
-      color: Colors.primary,
+      color: Colors.primaryDark,
     },
 
     // ── Loading ──
@@ -807,7 +826,7 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingVertical: Spacing.xl,
     },
     loadingText: {
-      color: Colors.textSecondary,
+      color: WHITE_70,
       fontSize: Typography.bodyMedium,
       ...Font.medium,
     },
@@ -827,12 +846,12 @@ const makeStyles = (Colors: ThemeColors) =>
     setupTitle: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
     },
     setupDescription: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: Typography.bodyMedium * 1.6,
       textAlign: "center",
       paddingHorizontal: Spacing.md,
@@ -844,7 +863,7 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     refreshText: {
       fontSize: Typography.bodySmall,
-      color: Colors.primary,
+      color: Colors.white,
       ...Font.medium,
     },
     linkingContainer: {
@@ -855,14 +874,14 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     linkingText: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       ...Font.medium,
     },
 
     // ── Disclaimer ──
     disclaimer: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       textAlign: "center",
       lineHeight: Typography.labelSmall * 1.5,
       paddingHorizontal: Spacing.lg,

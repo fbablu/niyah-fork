@@ -52,12 +52,15 @@ export const ReceiptActivitySection: React.FC<ReceiptActivitySectionProps> = ({
   );
 };
 
+// Lives inside the green SessionReceiptSheet (primaryLight) — white text
+// hierarchy via opacity, glass dividers.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     sectionTitle: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.textTertiary,
+      color: Colors.white,
+      opacity: 0.7,
       textTransform: "uppercase",
       letterSpacing: 0.6,
       marginTop: Spacing.lg,
@@ -69,20 +72,22 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "space-between",
       paddingVertical: Spacing.md,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: Colors.border,
+      borderBottomColor: Colors.glassMid,
     },
     rowLabel: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.7,
     },
     rowValue: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     emptyLine: {
       fontSize: Typography.bodySmall,
-      color: Colors.textTertiary,
+      color: Colors.white,
+      opacity: 0.6,
       paddingVertical: Spacing.md,
     },
   });

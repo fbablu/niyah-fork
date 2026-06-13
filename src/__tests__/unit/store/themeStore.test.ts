@@ -2,22 +2,25 @@
  * Unit Tests for themeStore.ts
  *
  * Tests the persisted theme store: initial state, toggle, explicit set,
- * and hydration flag. Covers the two previously-uncovered action lines.
+ * hydration flag, and the single-brand-theme rehydrate normalization.
+ * The Light Mode UI toggle was removed 2026-06-12 (single brand theme);
+ * toggleTheme/setTheme remain exported API and stay under test.
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useThemeStore } from "../../../store/themeStore";
 
 describe("themeStore", () => {
   beforeEach(() => {
-    // Reset to a known baseline; device default is "dark" in the test env
-    // because Appearance.getColorScheme() returns null → falls back to "dark"
+    // Reset to the single brand baseline (initial seed is "dark"
+    // unconditionally — no Appearance.getColorScheme() involved).
     useThemeStore.setState({ theme: "dark", _hasHydrated: false });
   });
 
   describe("initial state", () => {
-    it("has a valid theme value on startup", () => {
+    it("seeds the single brand theme (dark) on startup", () => {
       const { theme } = useThemeStore.getState();
-      expect(["dark", "light"]).toContain(theme);
+      expect(theme).toBe("dark");
     });
 
     it("starts with _hasHydrated false", () => {
@@ -92,6 +95,36 @@ describe("themeStore", () => {
     it("theme changes do not affect _hasHydrated", () => {
       useThemeStore.getState().setHasHydrated(true);
       useThemeStore.getState().toggleTheme();
+      expect(useThemeStore.getState()._hasHydrated).toBe(true);
+    });
+  });
+
+  // ─── Rehydrate normalization (single brand theme) ────────────────────────────
+
+  describe("rehydrate normalization", () => {
+    it("normalizes a persisted 'light' theme back to 'dark'", async () => {
+      // Users who toggled light before 2026-06-12 have no UI toggle anymore —
+      // rehydration must not strand them on the retired theme.
+      (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+        JSON.stringify({
+          state: { theme: "light", _hasHydrated: true },
+          version: 0,
+        }),
+      );
+      await useThemeStore.persist.rehydrate();
+      expect(useThemeStore.getState().theme).toBe("dark");
+      expect(useThemeStore.getState()._hasHydrated).toBe(true);
+    });
+
+    it("keeps 'dark' and marks hydration complete on rehydrate", async () => {
+      (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+        JSON.stringify({
+          state: { theme: "dark", _hasHydrated: true },
+          version: 0,
+        }),
+      );
+      await useThemeStore.persist.rehydrate();
+      expect(useThemeStore.getState().theme).toBe("dark");
       expect(useThemeStore.getState()._hasHydrated).toBe(true);
     });
   });

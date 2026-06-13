@@ -1,14 +1,15 @@
 /**
  * Unit Tests for BlobMakerSheet component
  *
- * Pins the customizer-v2 contract (design comments 1 + 2): a TRANSPARENT
- * partial sheet (~66% height, backdrop + bottom-anchored panel) so the
- * platform's sleepy-eyes flip stays visible behind it, slingshot overshoot
- * springs on entrance (hero AND sheet), animated collapse-then-close
- * (backdrop tap included), the three option rows (5 eye glyphs / 6 palette
- * swatches, no custom color — blocked by firestore.rules /
- * normalizeBlobAvatarConfig validation), the die randomize-all, and save
- * semantics.
+ * Pins the customizer contract (frame 429:347 + the v3 near-static motion
+ * spec): a TRANSPARENT partial sheet (~66% height, glassDark backdrop +
+ * bottom-anchored primaryLight panel, top radius 57) so the platform's
+ * sleepy-eyes flip stays visible behind it, the plain timed entrance (sheet
+ * rise 220ms ease-out + backdrop fade 180ms, NO springs), the 180ms
+ * close-then-onClose (backdrop tap included), the three option rows
+ * (5 eye glyphs / 6 palette swatches, no custom color — blocked by
+ * firestore.rules / normalizeBlobAvatarConfig validation), the die
+ * randomize-all (instant swap + 150ms hero opacity dip), and save semantics.
  */
 
 import React from "react";
@@ -21,6 +22,7 @@ import {
   withTiming,
 } from "react-native-reanimated";
 import { BlobMakerSheet } from "../../../components/profile/BlobMakerSheet";
+import { DarkColors } from "../../../constants/colors";
 import {
   BLOB_AVATAR_COLORS,
   BLOB_AVATAR_EYES,
@@ -163,7 +165,7 @@ describe("BlobMakerSheet", () => {
       expect(screen.getByTestId("blob-maker-sheet")).toBeTruthy();
     });
 
-    it("sizes the sheet to ~66% of the screen (frame 401:106 partial sheet)", () => {
+    it("sizes the sheet to ~66% of the screen (frame 429:347 partial sheet)", () => {
       renderSheet();
       const style = StyleSheet.flatten(
         screen.getByTestId("blob-maker-sheet").props.style,
@@ -171,6 +173,25 @@ describe("BlobMakerSheet", () => {
       expect(style.height).toBe(
         Math.round(Dimensions.get("window").height * 0.66),
       );
+    });
+
+    it("paints the green customizer sheet: primaryLight bg, top radius 57 (v2)", () => {
+      renderSheet();
+      const style = StyleSheet.flatten(
+        screen.getByTestId("blob-maker-sheet").props.style,
+      );
+      // primaryLight is identical in both themes — the sheet is theme-stable.
+      expect(style.backgroundColor).toBe(DarkColors.primaryLight);
+      expect(style.borderTopLeftRadius).toBe(57);
+      expect(style.borderTopRightRadius).toBe(57);
+    });
+
+    it("dims the profile above with the glassDark backdrop (v2)", () => {
+      renderSheet();
+      const style = StyleSheet.flatten(
+        screen.getByTestId("blob-maker-backdrop").props.style,
+      );
+      expect(style.backgroundColor).toBe(DarkColors.glassDark);
     });
 
     it("tapping the backdrop collapses then closes without saving", () => {
@@ -182,25 +203,35 @@ describe("BlobMakerSheet", () => {
       expect(onSave).not.toHaveBeenCalled();
       expect(withTiming).toHaveBeenCalledWith(
         0,
-        expect.objectContaining({ duration: 250 }),
+        expect.objectContaining({ duration: 180 }),
         expect.any(Function),
       );
       expect(onClose).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("slingshot open/close", () => {
-    it("hero AND sheet enter with the rubber-band overshoot spring; backdrop fades in", () => {
+  describe("open/close motion (v3 spec — near-static, no springs)", () => {
+    it("sheet rises on a plain 220ms timing; backdrop fades in 180ms; zero springs", () => {
       renderSheet();
-      expect(withSpring).toHaveBeenCalledWith(1, {
-        damping: 12,
-        stiffness: 140,
-      });
-      expect(withSpring).toHaveBeenCalledTimes(2);
-      expect(withTiming).toHaveBeenCalledWith(1, { duration: 200 });
+      expect(withTiming).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ duration: 220 }),
+      );
+      expect(withTiming).toHaveBeenCalledWith(1, { duration: 180 });
+      expect(withSpring).not.toHaveBeenCalled();
     });
 
-    it("collapse saves, slingshots the hero down, then calls onClose", () => {
+    it("randomize dips the hero's opacity back over 150ms (instant content swap)", () => {
+      renderSheet();
+      fireEvent.press(screen.getByLabelText("Randomize your blob"));
+      expect(withTiming).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ duration: 150 }),
+      );
+      expect(withSpring).not.toHaveBeenCalled();
+    });
+
+    it("collapse saves, drops the sheet (180ms), then calls onClose", () => {
       runTimingCallbacks();
       const { onClose, onSave } = renderSheet();
 
@@ -209,7 +240,7 @@ describe("BlobMakerSheet", () => {
       expect(onSave).toHaveBeenCalledTimes(1);
       expect(withTiming).toHaveBeenCalledWith(
         0,
-        expect.objectContaining({ duration: 250 }),
+        expect.objectContaining({ duration: 180 }),
         expect.any(Function),
       );
       expect(onClose).toHaveBeenCalledTimes(1);
@@ -225,11 +256,12 @@ describe("BlobMakerSheet", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it("shows instantly under reduced motion (no entrance springs)", () => {
+    it("shows instantly under reduced motion (no entrance animation at all)", () => {
       (useReducedMotion as jest.Mock).mockImplementation(() => true);
       renderSheet();
-      // Jump-to-end: hero/sheet/backdrop snap to 1 with zero spring calls.
+      // Jump-to-end: sheet/backdrop snap to 1 with zero animation calls.
       expect(withSpring).not.toHaveBeenCalled();
+      expect(withTiming).not.toHaveBeenCalled();
       expect(screen.getByTestId("blob-maker-sheet")).toBeTruthy();
     });
 

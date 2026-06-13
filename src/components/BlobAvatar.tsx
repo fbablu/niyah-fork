@@ -14,7 +14,11 @@ import type {
   BlobAvatarEyesPreset,
   BlobAvatarShapePreset,
 } from "../constants/blobAvatar";
-import { BLOB_PALETTES, generateBlobPath } from "../constants/blobAvatar";
+import {
+  BLOB_INK as INK,
+  BLOB_PALETTES,
+  generateBlobPath,
+} from "../constants/blobAvatar";
 import Animated, {
   Easing,
   cancelAnimation,
@@ -134,7 +138,7 @@ export const BlobEyes: React.FC<{
           d={`M ${leftX - eyeRadius} ${centerY + 1} Q ${leftX} ${
             centerY - eyeRadius
           } ${leftX + eyeRadius} ${centerY + 1}`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.8}
           fill="none"
           strokeLinecap="round"
@@ -143,7 +147,7 @@ export const BlobEyes: React.FC<{
           d={`M ${rightX - eyeRadius} ${centerY + 1} Q ${rightX} ${
             centerY - eyeRadius
           } ${rightX + eyeRadius} ${centerY + 1}`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.8}
           fill="none"
           strokeLinecap="round"
@@ -155,12 +159,12 @@ export const BlobEyes: React.FC<{
   if (eyesPreset === "wink") {
     return (
       <>
-        <Circle cx={leftX} cy={centerY} r={eyeRadius} fill="#120505" />
+        <Circle cx={leftX} cy={centerY} r={eyeRadius} fill={INK} />
         <Path
           d={`M ${rightX - eyeRadius} ${centerY} L ${rightX + eyeRadius} ${
             centerY - eyeRadius * 0.35
           }`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.8}
           fill="none"
           strokeLinecap="round"
@@ -174,14 +178,14 @@ export const BlobEyes: React.FC<{
       <>
         <Path
           d={`M ${leftX - eyeRadius} ${centerY} L ${leftX + eyeRadius} ${centerY}`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.8}
           fill="none"
           strokeLinecap="round"
         />
         <Path
           d={`M ${rightX - eyeRadius} ${centerY} L ${rightX + eyeRadius} ${centerY}`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.8}
           fill="none"
           strokeLinecap="round"
@@ -197,28 +201,28 @@ export const BlobEyes: React.FC<{
           cx={leftX}
           cy={centerY}
           r={eyeRadius * 1.5}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.4}
           fill="none"
         />
-        <Circle cx={leftX} cy={centerY} r={eyeRadius * 0.5} fill="#120505" />
+        <Circle cx={leftX} cy={centerY} r={eyeRadius * 0.5} fill={INK} />
         <Circle
           cx={rightX}
           cy={centerY}
           r={eyeRadius * 1.5}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.4}
           fill="none"
         />
-        <Circle cx={rightX} cy={centerY} r={eyeRadius * 0.5} fill="#120505" />
+        <Circle cx={rightX} cy={centerY} r={eyeRadius * 0.5} fill={INK} />
       </>
     );
   }
 
   return (
     <>
-      <Circle cx={leftX} cy={centerY} r={eyeRadius} fill="#120505" />
-      <Circle cx={rightX} cy={centerY} r={eyeRadius} fill="#120505" />
+      <Circle cx={leftX} cy={centerY} r={eyeRadius} fill={INK} />
+      <Circle cx={rightX} cy={centerY} r={eyeRadius} fill={INK} />
     </>
   );
 };
@@ -309,7 +313,7 @@ export const BlobAvatar: React.FC<BlobAvatarProps> = ({
         <Path
           d={bodyPath}
           fill={`url(#blobGrad-${idSuffix})`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.6}
         />
 

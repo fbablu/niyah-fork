@@ -215,6 +215,13 @@ export function StatusBannerHost() {
   );
 }
 
+// The host floats at the root layout, OUTSIDE the dark-pinned green subtrees,
+// so it follows the user's theme while every screen beneath it is now a brand
+// green field. The old `*Light` tinted backgrounds are 12–20% alpha — in light
+// theme that left near-black `Colors.text` floating directly on dark green.
+// Surface + text are therefore the theme-invariant dark-glass pair
+// (glassDark is identical in both theme maps); severity stays semantic on the
+// border, dot, and action label.
 function severityPalette(
   severity: StatusBannerSeverity,
   Colors: ThemeColors,
@@ -222,32 +229,32 @@ function severityPalette(
   switch (severity) {
     case "success":
       return {
-        background: Colors.gainLight,
+        background: Colors.glassDark,
         border: Colors.gain,
         accent: Colors.gain,
-        text: Colors.text,
+        text: Colors.white,
       };
     case "warn":
       return {
-        background: Colors.warningLight,
+        background: Colors.glassDark,
         border: Colors.warning,
         accent: Colors.warning,
-        text: Colors.text,
+        text: Colors.white,
       };
     case "error":
       return {
-        background: Colors.lossLight,
+        background: Colors.glassDark,
         border: Colors.loss,
         accent: Colors.loss,
-        text: Colors.text,
+        text: Colors.white,
       };
     case "info":
     default:
       return {
-        background: Colors.infoLight,
+        background: Colors.glassDark,
         border: Colors.info,
         accent: Colors.info,
-        text: Colors.text,
+        text: Colors.white,
       };
   }
 }

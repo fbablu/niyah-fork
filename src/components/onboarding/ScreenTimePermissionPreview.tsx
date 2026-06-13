@@ -9,9 +9,7 @@ import {
 } from "react-native";
 import Animated, {
   Easing,
-  Extrapolation,
   cancelAnimation,
-  interpolate,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -54,7 +52,6 @@ export const ScreenTimePermissionPreview: React.FC<Props> = ({
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
 
   const glow = useSharedValue(0);
-  const bob = useSharedValue(0);
   const press = useSharedValue(0);
 
   useEffect(() => {
@@ -65,34 +62,15 @@ export const ScreenTimePermissionPreview: React.FC<Props> = ({
       -1,
       true,
     );
-    bob.value = withRepeat(
-      withTiming(1, { duration: 1100, easing: ease }),
-      -1,
-      true,
-    );
     return () => {
       cancelAnimation(glow);
-      cancelAnimation(bob);
     };
-  }, [reducedMotion, glow, bob]);
+  }, [reducedMotion, glow]);
 
   const cardStyle = useAnimatedStyle(() => ({
     shadowOpacity: 0.18 + glow.value * 0.32,
     shadowRadius: 10 + glow.value * 12,
     transform: [{ scale: 1 - press.value * 0.015 }],
-  }));
-
-  const arrowStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: interpolate(
-          bob.value,
-          [0, 1],
-          [0, -5],
-          Extrapolation.CLAMP,
-        ),
-      },
-    ],
   }));
 
   return (

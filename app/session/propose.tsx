@@ -33,6 +33,13 @@ import { formatMoney } from "../../src/utils/format";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
 import { validateAndPromptForAppSelection } from "../../src/config/screentime";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function parseDurationToMs(durationLabel: string): number {
@@ -81,13 +88,13 @@ const makeStyles = (Colors: ThemeColors) =>
     sectionLabel: {
       fontSize: Typography.labelLarge,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: Colors.white,
       textTransform: "uppercase",
       letterSpacing: 0.6,
       marginBottom: Spacing.sm,
       marginTop: Spacing.lg,
     },
-    // ── Chips ─────────────────────────────────────────────────────────────────
+    // ── Chips: glassDark pills; selected flips to white + primaryDark ────────
     chipsRow: {
       flexDirection: "row",
       gap: Spacing.sm,
@@ -97,21 +104,18 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingVertical: Spacing.sm,
       paddingHorizontal: Spacing.md,
       borderRadius: Radius.full,
-      borderWidth: 1.5,
-      borderColor: Colors.border,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
     },
     chipSelected: {
-      borderColor: Colors.primary,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.white,
     },
     chipText: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     chipTextSelected: {
-      color: Colors.primaryLight,
+      color: Colors.primaryDark,
     },
     // ── Schedule chips (two-line with sub) ───────────────────────────────────
     scheduleGrid: {
@@ -124,51 +128,52 @@ const makeStyles = (Colors: ThemeColors) =>
       minWidth: "45%",
       paddingVertical: Spacing.sm,
       paddingHorizontal: Spacing.md,
-      borderRadius: Radius.md,
-      borderWidth: 1.5,
-      borderColor: Colors.border,
-      backgroundColor: Colors.backgroundCard,
+      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
     },
     scheduleChipSelected: {
-      borderColor: Colors.primary,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.white,
     },
     scheduleChipLabel: {
       fontSize: Typography.bodySmall,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     scheduleChipLabelSelected: {
-      color: Colors.primaryLight,
+      color: Colors.primaryDark,
     },
     scheduleChipSub: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: 2,
     },
     scheduleChipSubSelected: {
-      color: Colors.primaryLight,
+      color: Colors.primaryDark,
       opacity: 0.7,
     },
-    // ── Custom inputs ─────────────────────────────────────────────────────────
+    // ── Custom inputs: glassDark fields, white text ───────────────────────────
     customInput: {
       marginTop: Spacing.sm,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.md,
       borderWidth: 1.5,
-      borderColor: Colors.border,
+      borderColor: "transparent",
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
       fontSize: Typography.bodyMedium,
       letterSpacing: 0,
       ...Font.regular,
-      color: Colors.text,
+      color: Colors.white,
     },
     customInputActive: {
-      borderColor: Colors.primary,
+      borderColor: WHITE_55,
     },
-    // ── People ────────────────────────────────────────────────────────────────
+    // ── People: glassLight seat, glassDark avatar circles ────────────────────
+    peopleCard: {
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+    },
     personRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -177,70 +182,72 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     personRowBorder: {
       borderBottomWidth: 1,
-      borderBottomColor: Colors.borderLight,
+      borderBottomColor: WHITE_25,
     },
     avatar: {
       width: 36,
       height: 36,
       borderRadius: 18,
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
     },
     avatarSelected: {
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.white,
     },
     avatarText: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: Colors.white,
     },
     avatarTextSelected: {
-      color: Colors.primaryLight,
+      color: Colors.primaryDark,
     },
     personName: {
       flex: 1,
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     personTag: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
     checkCircle: {
       width: 22,
       height: 22,
       borderRadius: 11,
       borderWidth: 1.5,
-      borderColor: Colors.border,
+      borderColor: WHITE_55,
       alignItems: "center",
       justifyContent: "center",
     },
     checkCircleSelected: {
-      backgroundColor: Colors.primary,
-      borderColor: Colors.primary,
+      backgroundColor: Colors.white,
+      borderColor: Colors.white,
     },
     checkMark: {
-      color: Colors.white,
+      color: Colors.primaryDark,
       fontSize: 12,
       ...Font.bold,
     },
     emptyText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textMuted,
+      color: WHITE_70,
       fontStyle: "italic",
       paddingVertical: Spacing.md,
     },
-    // ── Summary card ──────────────────────────────────────────────────────────
+    // ── Summary card: glassLight seat ─────────────────────────────────────────
     summaryCard: {
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.lg,
       marginTop: Spacing.lg,
     },
     summaryTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
     summaryRow: {
@@ -250,18 +257,21 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     summaryLabel: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     summaryValue: {
       fontSize: Typography.bodySmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     // ── Footer ────────────────────────────────────────────────────────────────
+    footerButton: {
+      borderRadius: Radius.full,
+    },
     footerHint: {
       textAlign: "center",
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
     // ── Success state ─────────────────────────────────────────────────────────
     successContainer: {
@@ -270,7 +280,7 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "center",
       padding: Spacing.xl,
       gap: Spacing.lg,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     successEmoji: {
       fontSize: 56,
@@ -278,19 +288,24 @@ const makeStyles = (Colors: ThemeColors) =>
     successTitle: {
       fontSize: Typography.headlineMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
     },
     successSubtitle: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: 22,
     },
     successDetail: {
       fontSize: Typography.bodySmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       textAlign: "center",
+    },
+    successButton: {
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      borderColor: WHITE_25,
     },
   });
 
@@ -473,15 +488,15 @@ function ProposeSessionScreenInner() {
         <Text style={styles.successTitle}>Challenge Proposed</Text>
         <Text style={styles.successSubtitle}>
           Your invite has been sent to{" "}
-          <Text style={{ color: Colors.primaryLight, ...Font.semibold }}>
+          <Text style={{ color: Colors.white, ...Font.semibold }}>
             {invitedNames}
           </Text>
           .{"\n"}The session starts{" "}
-          <Text style={{ color: Colors.text, ...Font.semibold }}>
+          <Text style={{ color: Colors.white, ...Font.semibold }}>
             {effectiveDay} at {effectiveTime}
           </Text>{" "}
           for{" "}
-          <Text style={{ color: Colors.text, ...Font.semibold }}>
+          <Text style={{ color: Colors.white, ...Font.semibold }}>
             {effectiveDuration}
           </Text>
           .
@@ -494,6 +509,7 @@ function ProposeSessionScreenInner() {
           title="Back to Home"
           onPress={() => router.replace("/(tabs)")}
           size="large"
+          style={styles.successButton}
         />
       </SafeAreaView>
     );
@@ -508,6 +524,7 @@ function ProposeSessionScreenInner() {
       title="Group Challenge"
       subtitle="Stake, pick friends, go."
       centerTitle={false}
+      backgroundColor={Colors.primaryDark}
       footer={
         <>
           <Button
@@ -516,6 +533,7 @@ function ProposeSessionScreenInner() {
             disabled={!canPropose || loading}
             loading={loading}
             size="large"
+            style={styles.footerButton}
           />
           {!canPropose && (
             <Text style={styles.footerHint}>
@@ -554,7 +572,7 @@ function ProposeSessionScreenInner() {
       <TextInput
         style={[styles.customInput, stakeFocused && styles.customInputActive]}
         placeholder="Custom amount (e.g. 15)"
-        placeholderTextColor={Colors.textMuted}
+        placeholderTextColor={WHITE_55}
         keyboardType="numeric"
         value={customStake}
         onChangeText={(v) => {
@@ -595,7 +613,7 @@ function ProposeSessionScreenInner() {
           durationFocused && styles.customInputActive,
         ]}
         placeholder="Custom duration (e.g. 90 mins)"
-        placeholderTextColor={Colors.textMuted}
+        placeholderTextColor={WHITE_55}
         value={customDuration}
         onChangeText={(v) => {
           setCustomDuration(v);
@@ -607,7 +625,7 @@ function ProposeSessionScreenInner() {
 
       {/* ── Invite Friends ───────────────────────────────────────────────── */}
       <Text style={styles.sectionLabel}>Invite Friends</Text>
-      <Card>
+      <Card style={styles.peopleCard}>
         {people.length === 0 ? (
           <Text style={styles.emptyText}>
             No friends on Niyah yet. Use "Find Friends from Contacts" on the
@@ -714,7 +732,7 @@ function ProposeSessionScreenInner() {
           <TextInput
             style={[styles.customInput, dayFocused && styles.customInputActive]}
             placeholder="Custom date (e.g. March 3rd)"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             value={customDay}
             onChangeText={(v) => {
               setCustomDay(v);
@@ -768,7 +786,7 @@ function ProposeSessionScreenInner() {
               timeFocused && styles.customInputActive,
             ]}
             placeholder="Custom time (e.g. 3:30 pm)"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             value={customTime}
             onChangeText={(v) => {
               setCustomTime(v);

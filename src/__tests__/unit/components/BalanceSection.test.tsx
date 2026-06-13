@@ -8,7 +8,10 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
-import { BalanceSection } from "../../../components/profile/BalanceSection";
+import {
+  BalanceSection,
+  supportsLiquidGlass,
+} from "../../../components/profile/BalanceSection";
 import type { Transaction } from "../../../types";
 
 let txId = 0;
@@ -128,6 +131,27 @@ describe("BalanceSection", () => {
       expect(screen.getByText("Deposit")).toBeTruthy();
       fireEvent.press(button);
       expect(screen.queryByText("Deposit")).toBeNull();
+    });
+  });
+
+  describe("liquid-glass pill gating", () => {
+    // The SwiftUI glassEffect modifier no-ops below iOS 26 (no background at
+    // all), so the pill must render the RN glassDark fallback — which is what
+    // every jest environment exercises (Platform.Version < 26).
+    it("renders the RN fallback pill, not the SwiftUI host, in this environment", () => {
+      renderSection();
+      expect(screen.getByTestId("plus-minus-fallback")).toBeTruthy();
+      expect(screen.queryByTestId("expo-ui-host")).toBeNull();
+    });
+
+    it("supportsLiquidGlass requires iOS and major version >= 26", () => {
+      expect(supportsLiquidGlass("ios", "26.0")).toBe(true);
+      expect(supportsLiquidGlass("ios", 26)).toBe(true);
+      expect(supportsLiquidGlass("ios", "27.1")).toBe(true);
+      expect(supportsLiquidGlass("ios", "18.5")).toBe(false);
+      expect(supportsLiquidGlass("ios", "not-a-version")).toBe(false);
+      // Android API levels are >= 26 but glass is Apple-only.
+      expect(supportsLiquidGlass("android", 36)).toBe(false);
     });
   });
 });

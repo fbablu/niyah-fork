@@ -16,7 +16,6 @@ import {
   type ThemeColors,
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import { Card } from "../Card";
 import {
   isScreenTimeAvailable,
   requestScreenTimeAuth,
@@ -25,6 +24,10 @@ import {
   getSavedAppSelection,
 } from "../../config/screentime";
 import type { AuthorizationStatus } from "../../../modules/niyah-screentime";
+
+// White hierarchy on the glass seat — rgba so opacities never compound with
+// layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
 
 export function ScreenTimeCard() {
   const Colors = useColors();
@@ -54,7 +57,7 @@ export function ScreenTimeCard() {
   if (!isScreenTimeAvailable) return null;
 
   return (
-    <Card style={styles.screenTimeCard}>
+    <View style={styles.screenTimeCard}>
       <Text style={styles.screenTimeTitle}>Screen Time</Text>
       <Text style={styles.screenTimeDescription}>
         {screenTimeAuth === "approved"
@@ -97,7 +100,7 @@ export function ScreenTimeCard() {
           {isEnabling ? (
             <ActivityIndicator
               size="small"
-              color="#F2EDE4"
+              color={Colors.white}
               style={styles.screenTimeButtonSpinner}
             />
           ) : null}
@@ -130,7 +133,7 @@ export function ScreenTimeCard() {
             {isSelectingApps ? (
               <ActivityIndicator
                 size="small"
-                color="#F2EDE4"
+                color={Colors.white}
                 style={styles.screenTimeButtonSpinner}
               />
             ) : null}
@@ -151,25 +154,29 @@ export function ScreenTimeCard() {
           )}
         </View>
       )}
-    </Card>
+    </View>
   );
 }
 
+// Glass seat on the green field (v2 language): glassLight surface, white
+// text hierarchy, Radius.xl — identical in both themes by construction.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     screenTimeCard: {
       marginBottom: Spacing.md,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      padding: Spacing.lg,
     },
     screenTimeTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
     screenTimeDescription: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.md,
       lineHeight: 20,
     },
@@ -193,7 +200,7 @@ const makeStyles = (Colors: ThemeColors) =>
     screenTimeButtonText: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     screenTimeActions: {
       flexDirection: "row",

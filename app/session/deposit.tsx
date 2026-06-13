@@ -528,6 +528,7 @@ function DepositScreenInner() {
         headerVariant="centered"
         headerTitle="Add Funds"
         scrollable={false}
+        backgroundColor={Colors.primaryDark}
       >
         {/* Balance Info */}
         <View style={styles.balanceInfo}>
@@ -582,7 +583,7 @@ function DepositScreenInner() {
         <View style={styles.footer}>
           {isLoading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={Colors.primary} />
+              <ActivityIndicator size="small" color={Colors.white} />
               <Text style={styles.loadingText}>Processing payment...</Text>
             </View>
           ) : (
@@ -608,13 +609,19 @@ function DepositScreenInner() {
             />
           )}
           {(DEMO_MODE || paymentsUnavailable || depositsPaused) && (
-            <Text style={styles.disclaimer}>
-              {depositsPaused
-                ? "Deposits are temporarily paused. Try again soon."
-                : DEMO_MODE
-                  ? "Demo mode - no real money"
-                  : "Payments unavailable in this build"}
-            </Text>
+            // Seat-wrapper only (copy byte-identical): the demo/paused/
+            // unavailable notice keeps semantic warning gold so it stays
+            // visually distinct on the green field (confirm.tsx warningCard
+            // precedent).
+            <View style={styles.disclaimerSeat}>
+              <Text style={styles.disclaimer}>
+                {depositsPaused
+                  ? "Deposits are temporarily paused. Try again soon."
+                  : DEMO_MODE
+                    ? "Demo mode - no real money"
+                    : "Payments unavailable in this build"}
+              </Text>
+            </View>
           )}
         </View>
       </SessionScreenScaffold>
@@ -635,6 +642,12 @@ function DepositScreenInner() {
 const DepositScreen = withErrorBoundary(DepositScreenInner, "deposit");
 export default DepositScreen;
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     balanceInfo: {
@@ -643,22 +656,25 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     balanceLabel: {
       fontSize: Typography.labelMedium,
-      color: Colors.textTertiary,
+      color: WHITE_70,
       marginBottom: Spacing.xs,
     },
     balanceAmount: {
       fontSize: Typography.titleMedium,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: Colors.white,
     },
     balanceCap: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: Spacing.xs,
     },
+    // White on the green field — danger-red sinks into primaryDark
+    // (select.tsx insufficientText precedent); AmountDisplay still tints the
+    // amount itself with its internal semantic error color.
     errorText: {
       textAlign: "center",
-      color: Colors.danger,
+      color: Colors.white,
       fontSize: Typography.bodySmall,
       marginTop: -Spacing.sm,
       marginBottom: Spacing.sm,
@@ -672,25 +688,27 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: Spacing.sm,
       paddingHorizontal: Spacing.sm,
     },
+    // Dark-glass pills; the selected amount flips to white + primaryDark
+    // (confirm.tsx appBadge/appBadgeActive precedent).
     quickAmount: {
       paddingVertical: Spacing.sm,
       paddingHorizontal: Spacing.lg,
       borderRadius: Radius.full,
-      backgroundColor: Colors.backgroundSecondary,
+      backgroundColor: Colors.glassDark,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: "transparent",
     },
     quickAmountSelected: {
-      backgroundColor: Colors.primaryMuted,
-      borderColor: Colors.primary,
+      backgroundColor: Colors.white,
+      borderColor: Colors.white,
     },
     quickAmountText: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: WHITE_70,
     },
     quickAmountTextSelected: {
-      color: Colors.primary,
+      color: Colors.primaryDark,
     },
     numPadContainer: {
       flex: 1,
@@ -708,13 +726,26 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingVertical: Spacing.lg,
     },
     loadingText: {
-      color: Colors.textSecondary,
+      color: WHITE_70,
       fontSize: Typography.bodyMedium,
       ...Font.medium,
     },
+    // Warning keeps its semantic gold colors (confirm.tsx warningCard
+    // precedent) so the demo/paused/unavailable notice stays visually
+    // distinct on the green field.
+    disclaimerSeat: {
+      alignSelf: "center",
+      backgroundColor: Colors.warningLight,
+      borderWidth: 1,
+      borderColor: Colors.warning,
+      borderRadius: Radius.lg,
+      paddingVertical: Spacing.sm,
+      paddingHorizontal: Spacing.md,
+    },
     disclaimer: {
       textAlign: "center",
-      color: Colors.textMuted,
+      color: Colors.warning,
       fontSize: Typography.labelSmall,
+      ...Font.medium,
     },
   });

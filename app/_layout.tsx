@@ -259,7 +259,7 @@ export default function RootLayout() {
     return () => {
       subscription.remove();
     };
-  }, [completeEmailLink]);
+  }, [completeEmailLink, updateUser]);
 
   return (
     <ErrorBoundary>

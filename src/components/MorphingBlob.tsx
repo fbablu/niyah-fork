@@ -13,6 +13,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import {
+  BLOB_INK as INK,
   pointsToBlobPath,
   type BlobPalette,
   type BlobPoint,
@@ -222,7 +223,7 @@ export const MorphingBlob: React.FC<MorphingBlobProps> = ({
           d={initialD}
           animatedProps={incomingProps}
           fill={`url(#morphNext-${idSuffix})`}
-          stroke="#120505"
+          stroke={INK}
           strokeWidth={2.6}
         />
       </Svg>
@@ -243,7 +244,7 @@ export const MorphingBlob: React.FC<MorphingBlobProps> = ({
             width: eyeSize,
             height: eyeSize,
             borderRadius: eyeSize / 2,
-            backgroundColor: "#120505",
+            backgroundColor: INK,
           }}
         />
         <View
@@ -251,7 +252,7 @@ export const MorphingBlob: React.FC<MorphingBlobProps> = ({
             width: eyeSize,
             height: eyeSize,
             borderRadius: eyeSize / 2,
-            backgroundColor: "#120505",
+            backgroundColor: INK,
           }}
         />
       </Animated.View>

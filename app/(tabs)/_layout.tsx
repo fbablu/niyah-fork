@@ -1,11 +1,20 @@
 import React, { useEffect } from "react";
 import { Tabs } from "../../src/components/BottomTabs";
-import { useColors } from "../../src/hooks/useColors";
+import { ThemeOverrideContext } from "../../src/hooks/useColors";
+import { ThemeColorMap } from "../../src/constants/colors";
 import { useThemeStore } from "../../src/store/themeStore";
 import { useAuthStore } from "../../src/store/authStore";
 
 export default function TabsLayout() {
-  const Colors = useColors();
+  // Green-world: every tab screen is a full-bleed brand-green surface whose
+  // green/glass tokens are theme-identical, so the whole tab subtree is pinned
+  // DARK (ThemeOverrideContext below) — theme-driven children (Balance
+  // internals, cards, modals) resolve to their dark near-white-text values
+  // instead of cream-on-green in light theme. The provider can't affect this
+  // component's OWN hooks ((auth)/_layout precedent), so the native tab-bar
+  // props read the dark palette directly: the bar stays stable dark over the
+  // green tabs in both themes.
+  const Colors = ThemeColorMap.dark;
   const _hasHydrated = useThemeStore((s) => s._hasHydrated);
   const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
 
@@ -29,46 +38,48 @@ export default function TabsLayout() {
   if (!_hasHydrated) return null;
 
   return (
-    <Tabs
-      hapticFeedbackEnabled
-      // scrollEdgeAppearance="opaque" forces UITabBarAppearance to use
-      // configureWithOpaqueBackground() instead of the default glass
-      // material.  The opaque path reliably applies backgroundColor
-      // (barTintColor) on iOS 26's floating-pill tab bar; the glass path
-      // sometimes ignores it for lighter theme colors.
-      scrollEdgeAppearance="opaque"
-      tabBarActiveTintColor={Colors.primary}
-      tabBarInactiveTintColor={Colors.textSecondary}
-      tabBarStyle={{ backgroundColor: Colors.background }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          tabBarIcon: () => ({ sfSymbol: "house" }),
-        }}
-      />
-      <Tabs.Screen
-        name="schedule"
-        options={{
-          title: "Schedule",
-          tabBarIcon: () => ({ sfSymbol: "calendar" }),
-        }}
-      />
-      <Tabs.Screen
-        name="friends"
-        options={{
-          title: "Friends",
-          tabBarIcon: () => ({ sfSymbol: "person.2" }),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: () => ({ sfSymbol: "person" }),
-        }}
-      />
-    </Tabs>
+    <ThemeOverrideContext.Provider value="dark">
+      <Tabs
+        hapticFeedbackEnabled
+        // scrollEdgeAppearance="opaque" forces UITabBarAppearance to use
+        // configureWithOpaqueBackground() instead of the default glass
+        // material.  The opaque path reliably applies backgroundColor
+        // (barTintColor) on iOS 26's floating-pill tab bar; the glass path
+        // sometimes ignores it for lighter theme colors.
+        scrollEdgeAppearance="opaque"
+        tabBarActiveTintColor={Colors.primary}
+        tabBarInactiveTintColor={Colors.textSecondary}
+        tabBarStyle={{ backgroundColor: Colors.background }}
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: "Home",
+            tabBarIcon: () => ({ sfSymbol: "house" }),
+          }}
+        />
+        <Tabs.Screen
+          name="schedule"
+          options={{
+            title: "Schedule",
+            tabBarIcon: () => ({ sfSymbol: "calendar" }),
+          }}
+        />
+        <Tabs.Screen
+          name="friends"
+          options={{
+            title: "Friends",
+            tabBarIcon: () => ({ sfSymbol: "person.2" }),
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: "Profile",
+            tabBarIcon: () => ({ sfSymbol: "person" }),
+          }}
+        />
+      </Tabs>
+    </ThemeOverrideContext.Provider>
   );
 }

@@ -54,17 +54,24 @@ const BLOCKED_APPS = [
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    // Glass seat for the partner summary (glassLight, Radius.xl, borderless).
     partnerCard: {
       marginBottom: Spacing.md,
-      backgroundColor: Colors.primaryMuted,
-      borderWidth: 1,
-      borderColor: Colors.primary,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     partnerLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.sm,
     },
     partnerInfo: {
@@ -76,7 +83,7 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 48,
       height: 48,
       borderRadius: 24,
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
       marginRight: Spacing.md,
@@ -84,7 +91,7 @@ const makeStyles = (Colors: ThemeColors) =>
     partnerInitial: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     partnerDetails: {
       flex: 1,
@@ -92,29 +99,30 @@ const makeStyles = (Colors: ThemeColors) =>
     partnerName: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
+    // Dark-glass pill reads on the glass seat over the green field.
     reputationBadge: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       paddingHorizontal: Spacing.sm,
       paddingVertical: Spacing.xs,
-      borderRadius: Radius.sm,
+      borderRadius: Radius.full,
       alignSelf: "flex-start",
     },
     reputationText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     changePartnerButton: {
       alignItems: "center",
       paddingVertical: Spacing.sm,
       borderTopWidth: 1,
-      borderTopColor: Colors.border,
+      borderTopColor: WHITE_25,
     },
     changePartnerText: {
       fontSize: Typography.labelMedium,
-      color: Colors.primary,
+      color: Colors.white,
       ...Font.medium,
     },
     noPartnerCard: {
@@ -124,11 +132,14 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     noPartnerText: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.md,
     },
+    // Glass seat for the session details (glassLight, Radius.xl).
     detailsCard: {
       marginBottom: Spacing.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     detailRow: {
       flexDirection: "row",
@@ -138,31 +149,32 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     detailLabel: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     detailValue: {
       fontSize: Typography.bodySmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     divider: {
       height: 1,
-      backgroundColor: Colors.border,
+      backgroundColor: WHITE_25,
       marginVertical: Spacing.md,
     },
     stakeValue: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     howItWorksCard: {
       marginBottom: Spacing.md,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     howItWorksTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
     outcomeRow: {
@@ -170,26 +182,31 @@ const makeStyles = (Colors: ThemeColors) =>
       alignItems: "center",
       marginBottom: Spacing.sm,
     },
+    // Base (duo-mode) dot is white; complete/surrender rows keep their
+    // semantic gain/loss inline overrides.
     outcomeDot: {
       width: 8,
       height: 8,
       borderRadius: 4,
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
       marginRight: Spacing.sm,
     },
     outcomeText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       flex: 1,
     },
     outcomeHighlight: {
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
+    // Warning keeps its semantic gold colors (waiting-room precedent); body
+    // text goes white so it reads on the green field in both themes.
     warningCard: {
       backgroundColor: Colors.warningLight,
       borderWidth: 1,
       borderColor: Colors.warning,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.md,
     },
     warningTitle: {
@@ -200,7 +217,7 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     warningText: {
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
       lineHeight: 20,
     },
     blockedSection: {
@@ -208,8 +225,10 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     blockedTitle: {
       fontSize: Typography.labelMedium,
-      ...Font.medium,
-      color: Colors.textSecondary,
+      ...Font.semibold,
+      color: WHITE_70,
+      textTransform: "uppercase" as const,
+      letterSpacing: 0.5,
       marginBottom: Spacing.sm,
     },
     appList: {
@@ -217,46 +236,49 @@ const makeStyles = (Colors: ThemeColors) =>
       flexWrap: "wrap",
       gap: Spacing.sm,
     },
+    // Dark-glass pills; the active selection flips to white + primaryDark.
     appBadge: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
       borderRadius: Radius.full,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: "transparent",
     },
     appBadgeActive: {
-      backgroundColor: Colors.gainLight,
-      borderColor: Colors.gain,
+      backgroundColor: Colors.white,
+      borderColor: Colors.white,
     },
     appName: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     appNameActive: {
-      color: Colors.gain,
+      color: Colors.primaryDark,
       ...Font.semibold,
     },
     blockedNote: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: Spacing.sm,
       fontStyle: "italic",
     },
+    // Brand-surface attention card: Colors.primary fill + white@0.25 border.
     setupCard: {
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.primary,
       borderWidth: 1,
-      borderColor: Colors.primary,
+      borderColor: WHITE_25,
+      borderRadius: Radius.xl,
       gap: Spacing.sm,
     },
     setupTitle: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     setupDescription: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     setupRow: {
       flexDirection: "row",
@@ -268,11 +290,20 @@ const makeStyles = (Colors: ThemeColors) =>
     setupRowText: {
       flex: 1,
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
+    },
+    // White-flip pills (Colors.white + primaryDark content) so the setup CTAs
+    // read on the brand-surface fill — via Button's public style props only.
+    setupButton: {
+      backgroundColor: Colors.white,
+      borderRadius: Radius.full,
+    },
+    setupButtonText: {
+      color: Colors.primaryDark,
     },
     disclaimer: {
       textAlign: "center",
-      color: Colors.textMuted,
+      color: WHITE_55,
       fontSize: Typography.labelSmall,
     },
   });
@@ -457,6 +488,7 @@ function ConfirmSessionScreenInner() {
           ? "Review your duo session details"
           : "Review your session details"
       }
+      backgroundColor={Colors.primaryDark}
       footer={
         <>
           <SlideToConfirm
@@ -595,6 +627,8 @@ function ConfirmSessionScreenInner() {
                   title="Authorize"
                   onPress={handleAuthorize}
                   size="small"
+                  style={styles.setupButton}
+                  textStyle={styles.setupButtonText}
                 />
               </View>
             )}
@@ -605,6 +639,8 @@ function ConfirmSessionScreenInner() {
                   title="Select Apps"
                   onPress={handleSelectApps}
                   size="small"
+                  style={styles.setupButton}
+                  textStyle={styles.setupButtonText}
                 />
               </View>
             )}

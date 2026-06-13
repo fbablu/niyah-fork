@@ -3,8 +3,10 @@
  *
  * Pins the platform-zone contract from the profile redesign (design
  * comment 1): happy arc eyes normally, flipped sleepy/sad eyes while the
- * customizer is open (animated ~200ms, instant under reduced motion), the
- * blob hiding when it "moves" into the sheet, and the expand affordance.
+ * customizer is open (animated ~180ms — the founder-loved flip, kept in the
+ * v3 near-static spec; instant under reduced motion), the blob fading out
+ * (150ms, no scale) when it "moves" into the sheet, and the expand
+ * affordance.
  */
 
 import React from "react";
@@ -45,7 +47,7 @@ describe("BlobPlatform", () => {
       expect(screen.queryByTestId("platform-eyes-happy")).toBeNull();
     });
 
-    it("animates the eye flip (200ms to -1) and blob hide (150ms to 0) on open", () => {
+    it("animates the eye flip (180ms to -1) and blob hide (150ms to 0) on open", () => {
       const { rerender } = renderPlatform(false);
       rerender(
         <BlobPlatform
@@ -55,7 +57,7 @@ describe("BlobPlatform", () => {
           onExpand={jest.fn()}
         />,
       );
-      expect(withTiming).toHaveBeenCalledWith(-1, { duration: 200 });
+      expect(withTiming).toHaveBeenCalledWith(-1, { duration: 180 });
       expect(withTiming).toHaveBeenCalledWith(0, { duration: 150 });
     });
 

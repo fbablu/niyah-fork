@@ -46,12 +46,19 @@ import { formatMoney, formatDuration } from "../../src/utils/format";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     sectionTitle: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textTransform: "uppercase" as const,
       letterSpacing: 0.5,
       marginBottom: Spacing.sm,
@@ -63,21 +70,23 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     carouselHint: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       textAlign: "center",
       marginTop: Spacing.sm,
       marginBottom: Spacing.lg,
     },
+    // Brand-surface carousel card: Colors.primary fill + white@0.25 border;
+    // the selected card flips to Colors.white with primaryDark content.
     optionCard: {
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.primary,
+      borderRadius: Radius.xl,
       padding: Spacing.lg,
       borderWidth: 2,
-      borderColor: "transparent",
+      borderColor: WHITE_25,
     },
     optionSelected: {
-      borderColor: Colors.primary,
-      backgroundColor: Colors.primaryMuted,
+      borderColor: Colors.white,
+      backgroundColor: Colors.white,
     },
     optionDisabled: {
       opacity: 0.5,
@@ -91,10 +100,14 @@ const makeStyles = (Colors: ThemeColors) =>
     optionName: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
+    optionNameSelected: {
+      color: Colors.primaryDark,
+    },
+    // Dark-glass pill reads on both the primary fill and the white flip.
     sectionChip: {
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
       paddingHorizontal: Spacing.sm,
       paddingVertical: 2,
       borderRadius: Radius.full,
@@ -102,13 +115,16 @@ const makeStyles = (Colors: ThemeColors) =>
     sectionChipText: {
       fontSize: Typography.labelSmall,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: Colors.white,
       letterSpacing: 0.5,
     },
     optionDuration: {
       fontSize: Typography.labelSmall,
-      color: Colors.textTertiary,
+      color: WHITE_70,
       marginBottom: Spacing.md,
+    },
+    optionDurationSelected: {
+      color: Colors.primaryDark,
     },
     optionPricing: {
       flexDirection: "row",
@@ -122,20 +138,29 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     priceLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textTertiary,
+      color: WHITE_55,
       marginBottom: Spacing.xs,
       textTransform: "uppercase",
       letterSpacing: 0.5,
     },
+    priceLabelSelected: {
+      color: Colors.primaryDark,
+    },
     stakeAmount: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
+    },
+    stakeAmountSelected: {
+      color: Colors.primaryDark,
     },
     earnAmount: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.gain,
+      color: Colors.white,
+    },
+    earnAmountSelected: {
+      color: Colors.primaryDark,
     },
     vsContainer: {
       paddingHorizontal: Spacing.lg,
@@ -145,21 +170,29 @@ const makeStyles = (Colors: ThemeColors) =>
     vsText: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
+    // White on the primary fill (loss-red sinks into green); flips back to
+    // the semantic loss color once the card is white.
     insufficientText: {
-      color: Colors.loss,
+      color: Colors.white,
       fontSize: Typography.labelSmall,
       marginTop: Spacing.sm,
       textAlign: "center",
     },
+    insufficientTextSelected: {
+      color: Colors.loss,
+    },
+    // Glass seat for the summary (glassLight, Radius.xl, borderless).
     summaryCard: {
       padding: Spacing.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     summaryTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
     summaryRow: {
@@ -169,19 +202,19 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     summaryLabel: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     summaryValue: {
       fontSize: Typography.bodySmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     bonusValue: {
-      color: Colors.primary,
+      color: Colors.white,
     },
     divider: {
       height: 1,
-      backgroundColor: Colors.border,
+      backgroundColor: WHITE_25,
       marginVertical: Spacing.md,
     },
     outcomeSection: {
@@ -190,7 +223,7 @@ const makeStyles = (Colors: ThemeColors) =>
     outcomeTitle: {
       fontSize: Typography.labelMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     outcomeRow: {
@@ -200,17 +233,21 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     outcomeLabel: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     outcomeValue: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     balanceText: {
       textAlign: "center",
-      color: Colors.textSecondary,
+      color: WHITE_70,
       fontSize: Typography.bodySmall,
+    },
+    // Shared Button styled via its public style prop only (Radius.full pill).
+    footerButton: {
+      borderRadius: Radius.full,
     },
   });
 

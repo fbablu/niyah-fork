@@ -15,6 +15,12 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PAD_WIDTH = Math.min(SCREEN_WIDTH - 48, 360);
 const KEY_SIZE = (PAD_WIDTH - 32) / 3;
 
+// NumPad/AmountDisplay render only on the money screens (deposit/withdraw),
+// which sit on the brand primaryDark field in both themes — white hierarchy
+// constants match the green-world convention (deposit.tsx WHITE_70 precedent).
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+
 interface NumPadKeyProps {
   value: string;
   onPress: (value: string) => void;
@@ -54,7 +60,7 @@ const NumPadKey: React.FC<NumPadKeyProps> = ({
           width: KEY_SIZE,
           height: KEY_SIZE * 0.65,
           borderRadius: Radius.md,
-          backgroundColor: Colors.backgroundSecondary,
+          backgroundColor: Colors.glassDark,
           alignItems: "center",
           justifyContent: "center",
         },
@@ -65,15 +71,15 @@ const NumPadKey: React.FC<NumPadKeyProps> = ({
         keyText: {
           fontSize: Typography.headlineMedium,
           ...Font.medium,
-          color: Colors.text,
+          color: Colors.white,
         },
         actionKeyText: {
-          color: Colors.textSecondary,
+          color: WHITE_70,
         },
         backspaceText: {
           fontSize: Typography.bodyMedium,
           ...Font.medium,
-          color: Colors.textSecondary,
+          color: WHITE_70,
         },
       }),
     [Colors],
@@ -216,7 +222,7 @@ export const AmountDisplay: React.FC<AmountDisplayProps> = ({
   const isEmpty = !amount;
   const animatedColor = errorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [Colors.text, Colors.danger],
+    outputRange: [Colors.white, Colors.danger],
   });
 
   const styles = useMemo(
@@ -228,7 +234,7 @@ export const AmountDisplay: React.FC<AmountDisplayProps> = ({
         },
         amountLabel: {
           fontSize: Typography.labelLarge,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginBottom: Spacing.sm,
           ...Font.medium,
         },
@@ -239,16 +245,16 @@ export const AmountDisplay: React.FC<AmountDisplayProps> = ({
         amountText: {
           fontSize: Typography.displayLarge,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
           letterSpacing: -2,
         },
         placeholderText: {
-          color: Colors.textTertiary,
+          color: WHITE_55,
         },
         cursor: {
           width: 3,
           height: 50,
-          backgroundColor: Colors.primary,
+          backgroundColor: Colors.white,
           marginLeft: 2,
           borderRadius: 2,
         },

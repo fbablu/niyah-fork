@@ -41,6 +41,9 @@ interface SessionScreenScaffoldProps {
   scrollable?: boolean;
   /** Whether footer sticks to bottom with marginTop: auto instead of border-top (default: false) */
   stickyFooter?: boolean;
+  /** Optional container background override (e.g. Colors.primaryDark for
+   *  green-world screens). Omitted = theme Colors.background, unchanged. */
+  backgroundColor?: string;
 }
 
 export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
@@ -56,6 +59,7 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
   footer,
   scrollable = true,
   stickyFooter = false,
+  backgroundColor,
 }) => {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
@@ -133,6 +137,7 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
       <View
         style={[
           styles.container,
+          backgroundColor != null && { backgroundColor },
           { paddingTop: insets.top, paddingBottom: insets.bottom },
         ]}
       >
@@ -156,6 +161,7 @@ export const SessionScreenScaffold: React.FC<SessionScreenScaffoldProps> = ({
     <View
       style={[
         styles.container,
+        backgroundColor != null && { backgroundColor },
         { paddingTop: insets.top, paddingBottom: insets.bottom },
       ]}
     >

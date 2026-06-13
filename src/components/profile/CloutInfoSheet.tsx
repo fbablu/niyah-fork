@@ -68,7 +68,7 @@ export function CloutInfoSheet({ visible, onClose }: CloutInfoSheetProps) {
             accessibilityRole="button"
             accessibilityLabel="Close"
           >
-            <Ionicons name="close" size={24} color={Colors.textSecondary} />
+            <Ionicons name="close" size={24} color={Colors.white} />
           </Pressable>
         </View>
 
@@ -114,15 +114,17 @@ export function CloutInfoSheet({ visible, onClose }: CloutInfoSheetProps) {
   );
 }
 
+// Green sheet system (customizer language, node 429:347): primaryLight sheet,
+// white grab bar + text, glass/primary rows.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: Colors.background },
+    container: { flex: 1, backgroundColor: Colors.primaryLight },
     grabBar: {
       alignSelf: "center",
       width: Spacing.xxl,
       height: Spacing.xs,
       borderRadius: Radius.full,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.white,
       marginTop: Spacing.sm,
     },
     headerRow: {
@@ -135,24 +137,26 @@ const makeStyles = (Colors: ThemeColors) =>
     title: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     content: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xl },
     intro: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.9,
       marginBottom: Spacing.lg,
     },
     bonusNote: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.7,
       marginTop: Spacing.xs,
       marginBottom: Spacing.lg,
     },
     tiersHeading: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     tierRow: {
@@ -161,20 +165,22 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "space-between",
       paddingVertical: Spacing.sm,
       borderBottomWidth: 1,
-      borderBottomColor: Colors.border,
+      borderBottomColor: Colors.glassMid,
     },
     tierLabel: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     tierRange: {
       fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.7,
     },
     footer: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.7,
       marginTop: Spacing.lg,
     },
   });

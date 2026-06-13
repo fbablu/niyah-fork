@@ -77,13 +77,17 @@ export function ProfileHeader({
   );
 }
 
+// Glass card on the full-bleed green profile screen (v2, node 429:186):
+// width is proportional (92.5% of the 402 frame), never a fixed px copy.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     card: {
+      width: "92.5%",
+      alignSelf: "center",
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
       borderRadius: Radius.xl,
       paddingVertical: Spacing.md,
       paddingHorizontal: Spacing.lg,
@@ -96,11 +100,11 @@ const makeStyles = (Colors: ThemeColors) =>
     name: {
       fontSize: Typography.headlineLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     email: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: Colors.white,
       marginTop: Spacing.xs,
     },
     statsRow: {
@@ -114,17 +118,17 @@ const makeStyles = (Colors: ThemeColors) =>
     statValue: {
       fontSize: Typography.titleMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     statLabel: {
-      fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      fontSize: Typography.labelMedium,
+      color: Colors.white,
       marginTop: 2,
     },
     statDivider: {
-      width: 1,
+      width: StyleSheet.hairlineWidth,
       height: 28,
-      backgroundColor: Colors.border,
+      backgroundColor: Colors.white,
       marginHorizontal: Spacing.md,
     },
   });

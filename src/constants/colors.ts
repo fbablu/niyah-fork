@@ -64,7 +64,15 @@ export const DarkColors = {
   shimmer: "#3A3228",
   skeleton: "#2E2820",
 
+  // Glass overlays for the brand-green profile surfaces (identical both themes —
+  // they layer on primary/primaryDark, which never change with theme)
+  glassLight: "rgba(217, 217, 217, 0.25)",
+  glassMid: "rgba(217, 217, 217, 0.5)",
+  glassDark: "rgba(0, 0, 0, 0.5)",
+  glassSolid: "#D9D9D9",
+
   white: "#FFFFFF",
+  black: "#000000",
 } as const;
 
 export const LightColors = {
@@ -127,7 +135,15 @@ export const LightColors = {
   shimmer: "#ECEAE3",
   skeleton: "#E3DFD7",
 
+  // Glass overlays for the brand-green profile surfaces (identical both themes —
+  // they layer on primary/primaryDark, which never change with theme)
+  glassLight: "rgba(217, 217, 217, 0.25)",
+  glassMid: "rgba(217, 217, 217, 0.5)",
+  glassDark: "rgba(0, 0, 0, 0.5)",
+  glassSolid: "#D9D9D9",
+
   white: "#FFFFFF",
+  black: "#000000",
 } as const;
 
 export type Theme = "dark" | "light";

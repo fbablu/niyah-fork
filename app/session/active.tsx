@@ -53,6 +53,13 @@ import { logger } from "../../src/utils/logger";
 
 type SessionMode = "solo_quick" | "solo_scheduled" | "solo_staked" | "group";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 function ActiveSessionScreenInner() {
   const Colors = useColors();
   const params = useLocalSearchParams<{
@@ -69,10 +76,12 @@ function ActiveSessionScreenInner() {
           marginTop: Spacing.sm,
           marginBottom: Spacing.md,
         },
+        // Dark-glass pill (select.tsx sectionChip precedent); the live dot
+        // keeps its semantic gain green.
         statusBadge: {
           flexDirection: "row",
           alignItems: "center",
-          backgroundColor: Colors.gainLight,
+          backgroundColor: Colors.glassDark,
           paddingHorizontal: Spacing.md,
           paddingVertical: Spacing.sm,
           borderRadius: Radius.full,
@@ -88,34 +97,43 @@ function ActiveSessionScreenInner() {
         statusText: {
           fontSize: Typography.labelSmall,
           ...Font.bold,
-          color: Colors.gain,
+          color: Colors.white,
           letterSpacing: 1,
         },
         title: {
           fontSize: Typography.headlineMedium,
           ...Font.bold,
-          color: Colors.text,
+          color: Colors.white,
         },
         subtitle: {
           fontSize: Typography.bodySmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginTop: Spacing.xs,
         },
         timerSection: {
           alignItems: "center",
           marginBottom: Spacing.md,
         },
+        // Emphasis flip (Colors.white) so the ring + MM:SS — the screen's one
+        // critical readout — stay high-contrast on the green field. Timer
+        // internals are U7's; this is a screen-local seat only.
+        timerSeat: {
+          backgroundColor: Colors.white,
+          borderRadius: Radius.full,
+          padding: Spacing.md,
+        },
+        // Glass seat for the payout (glassLight, Radius.xl, borderless);
+        // the amount keeps its semantic gain color.
         payoutCard: {
           alignItems: "center",
-          backgroundColor: Colors.gainLight,
-          borderWidth: 1,
-          borderColor: Colors.gain,
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           paddingVertical: Spacing.md,
           marginBottom: Spacing.md,
         },
         payoutLabel: {
           fontSize: Typography.labelMedium,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           marginBottom: Spacing.xs,
         },
         payoutAmount: {
@@ -123,6 +141,8 @@ function ActiveSessionScreenInner() {
           ...Font.bold,
           color: Colors.gain,
         },
+        // Violation accents keep their semantic loss colors (confirm.tsx
+        // warning-card precedent); breakdown copy goes white for the field.
         violationCard: {
           backgroundColor: Colors.lossLight,
           borderWidth: 1,
@@ -130,7 +150,7 @@ function ActiveSessionScreenInner() {
           paddingVertical: Spacing.sm,
           paddingHorizontal: Spacing.md,
           marginBottom: Spacing.md,
-          borderRadius: Radius.lg,
+          borderRadius: Radius.xl,
         },
         violationRow: {
           flexDirection: "row",
@@ -149,20 +169,21 @@ function ActiveSessionScreenInner() {
         },
         violationBreakdown: {
           fontSize: Typography.labelSmall,
-          color: Colors.textMuted,
+          color: WHITE_70,
           ...Font.medium,
           marginTop: 2,
         },
+        // Glass seat (glassLight, Radius.xl, borderless).
         tipsSection: {
-          backgroundColor: Colors.backgroundCard,
-          borderRadius: Radius.lg,
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           padding: Spacing.md,
           marginBottom: Spacing.md,
         },
         tipsTitle: {
           fontSize: Typography.bodyMedium,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
           marginBottom: Spacing.xs,
         },
         tipsList: {
@@ -177,32 +198,35 @@ function ActiveSessionScreenInner() {
           width: 4,
           height: 4,
           borderRadius: 2,
-          backgroundColor: Colors.textMuted,
+          backgroundColor: WHITE_55,
           marginRight: Spacing.sm,
         },
         tipText: {
           flex: 1,
           fontSize: Typography.bodySmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           lineHeight: 16,
         },
-        footerButtonsRow: {
-          flexDirection: "row",
-          gap: Spacing.sm,
-        },
+        // Surrender stays the quiet outline action; white text + white@0.25
+        // border via Button's public style props only (Radius.full pill).
         footerButton: {
-          flex: 1,
+          borderColor: WHITE_25,
+          borderRadius: Radius.full,
         },
+        footerButtonText: {
+          color: Colors.white,
+        },
+        // Leaderboard → glass treatment (glassLight seat, Radius.xl).
         participantsCard: {
-          backgroundColor: Colors.backgroundCard,
-          borderRadius: Radius.lg,
+          backgroundColor: Colors.glassLight,
+          borderRadius: Radius.xl,
           padding: Spacing.md,
           marginBottom: Spacing.md,
         },
         participantsTitle: {
           fontSize: Typography.bodyMedium,
           ...Font.semibold,
-          color: Colors.text,
+          color: Colors.white,
           marginBottom: Spacing.sm,
         },
         participantRow: {
@@ -219,12 +243,12 @@ function ActiveSessionScreenInner() {
         participantName: {
           flex: 1,
           fontSize: Typography.bodySmall,
-          color: Colors.text,
+          color: Colors.white,
           ...Font.medium,
         },
         participantStatus: {
           fontSize: Typography.labelSmall,
-          color: Colors.textSecondary,
+          color: WHITE_70,
           ...Font.medium,
         },
         participantViolations: {
@@ -242,12 +266,12 @@ function ActiveSessionScreenInner() {
         },
         participantYouTag: {
           fontSize: Typography.labelSmall,
-          color: Colors.textMuted,
+          color: WHITE_55,
           ...Font.medium,
         },
         warningText: {
           textAlign: "center",
-          color: Colors.textMuted,
+          color: WHITE_55,
           fontSize: Typography.labelSmall,
         },
       }),
@@ -662,6 +686,7 @@ function ActiveSessionScreenInner() {
       headerVariant="none"
       scrollable={false}
       stickyFooter={true}
+      backgroundColor={Colors.primaryDark}
       footer={
         <>
           <Button
@@ -690,6 +715,8 @@ function ActiveSessionScreenInner() {
             }}
             variant="outline"
             size="large"
+            style={styles.footerButton}
+            textStyle={styles.footerButtonText}
           />
           {mode !== "solo_quick" && (
             <Text style={styles.warningText}>
@@ -728,13 +755,15 @@ function ActiveSessionScreenInner() {
         {/* No pause: a staked session is end-only (pausing would free the
             phone mid-commitment). The countdown just runs; the only exit is
             finishing or the money-stamped "end early" control below. */}
-        <Timer
-          timeRemaining={timeRemaining}
-          totalTime={totalDuration}
-          size="medium"
-          showProgress={true}
-          mode="ring"
-        />
+        <View style={styles.timerSeat}>
+          <Timer
+            timeRemaining={timeRemaining}
+            totalTime={totalDuration}
+            size="medium"
+            showProgress={true}
+            mode="ring"
+          />
+        </View>
       </View>
 
       {/* Payout Card — hidden for solo quick-block (no money involved) */}
@@ -759,11 +788,13 @@ function ActiveSessionScreenInner() {
             const displayViolations = p.isCurrentUser
               ? Math.max(violationCount, p.violationCount)
               : p.violationCount;
+            // "Focused" dot is white on the green field (Colors.primary
+            // vanished into it); gain/loss semantics kept.
             const dotColor = p.surrendered
               ? Colors.loss
               : p.completed
                 ? Colors.gain
-                : Colors.primary;
+                : Colors.white;
             const statusText = p.surrendered
               ? "Out"
               : p.completed
@@ -772,7 +803,7 @@ function ActiveSessionScreenInner() {
             return (
               <Animated.View
                 key={p.userId}
-                layout={LinearTransition.springify().damping(18)}
+                layout={LinearTransition.springify().damping(20).stiffness(180)}
                 style={styles.participantRow}
               >
                 <View

@@ -7,7 +7,8 @@
 
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react-native";
-import { Text } from "react-native";
+import { StyleSheet, Text } from "react-native";
+import type { StyleProp, ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { SessionScreenScaffold } from "../../../components/SessionScreenScaffold";
 
@@ -169,6 +170,47 @@ describe("SessionScreenScaffold", () => {
       );
 
       expect(screen.getByText("Body")).toBeTruthy();
+    });
+  });
+
+  describe("backgroundColor override", () => {
+    const rootStyle = () => {
+      const tree = screen.toJSON() as {
+        props: { style: StyleProp<ViewStyle> };
+      };
+      return StyleSheet.flatten(tree.props.style);
+    };
+
+    it("applies the backgroundColor prop to the container", () => {
+      render(
+        <SessionScreenScaffold backgroundColor="#1B4332">
+          <Text>Body</Text>
+        </SessionScreenScaffold>,
+      );
+
+      expect(rootStyle().backgroundColor).toBe("#1B4332");
+    });
+
+    it("applies the override on the non-scrollable container too", () => {
+      render(
+        <SessionScreenScaffold backgroundColor="#1B4332" scrollable={false}>
+          <Text>Body</Text>
+        </SessionScreenScaffold>,
+      );
+
+      expect(rootStyle().backgroundColor).toBe("#1B4332");
+    });
+
+    it("keeps the default theme background when the prop is omitted", () => {
+      render(
+        <SessionScreenScaffold>
+          <Text>Body</Text>
+        </SessionScreenScaffold>,
+      );
+
+      const { backgroundColor } = rootStyle();
+      expect(backgroundColor).toBeDefined();
+      expect(backgroundColor).not.toBe("#1B4332");
     });
   });
 

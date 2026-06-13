@@ -20,6 +20,13 @@ import { usePartnerStore } from "../../src/store/partnerStore";
 import { REPUTATION_LEVELS } from "../../src/constants/config";
 import { Partner } from "../../src/types";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 function PartnerSelectionScreenInner() {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
@@ -121,6 +128,7 @@ function PartnerSelectionScreenInner() {
       headerVariant="back"
       title="Choose Your Partner"
       subtitle="Select an accountability partner for this session"
+      backgroundColor={Colors.primaryDark}
     >
       {/* Partner List */}
       {partners.length > 0 ? (
@@ -144,7 +152,7 @@ function PartnerSelectionScreenInner() {
           <TextInput
             style={styles.input}
             placeholder="Friend's name"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             value={inviteName}
             onChangeText={setInviteName}
             autoCapitalize="words"
@@ -152,7 +160,7 @@ function PartnerSelectionScreenInner() {
           <TextInput
             style={styles.input}
             placeholder="Friend's email"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             value={inviteEmail}
             onChangeText={setInviteEmail}
             keyboardType="email-address"
@@ -164,6 +172,8 @@ function PartnerSelectionScreenInner() {
                 title="Cancel"
                 variant="secondary"
                 onPress={() => setShowInvite(false)}
+                style={styles.glassButton}
+                textStyle={styles.glassButtonText}
               />
             </View>
             <View style={styles.inviteButtonFlex}>
@@ -171,6 +181,7 @@ function PartnerSelectionScreenInner() {
                 title="Send Invite"
                 onPress={handleSendInvite}
                 disabled={!inviteEmail || !inviteName}
+                style={styles.pillButton}
               />
             </View>
           </View>
@@ -226,12 +237,17 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: Spacing.md,
       marginBottom: Spacing.lg,
     },
+    // Partner rows: glassLight seats; the chosen one becomes the brand
+    // surface (primary fill + white@0.25 border).
     partnerCard: {
       marginBottom: 0,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     partnerCardSelected: {
-      borderWidth: 2,
-      borderColor: Colors.primary,
+      backgroundColor: Colors.primary,
+      borderWidth: 1,
+      borderColor: WHITE_25,
     },
     partnerRow: {
       flexDirection: "row",
@@ -241,7 +257,7 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 56,
       height: 56,
       borderRadius: 28,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.glassDark,
       alignItems: "center",
       justifyContent: "center",
       marginRight: Spacing.md,
@@ -249,7 +265,7 @@ const makeStyles = (Colors: ThemeColors) =>
     partnerInitial: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.primary,
+      color: Colors.white,
     },
     partnerInfo: {
       flex: 1,
@@ -261,22 +277,20 @@ const makeStyles = (Colors: ThemeColors) =>
       flexWrap: "wrap",
     },
     partnerTag: {
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.full,
       paddingVertical: 2,
       paddingHorizontal: Spacing.sm,
-      borderWidth: 1,
-      borderColor: Colors.primaryLight,
     },
     partnerTagText: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.primaryLight,
+      color: Colors.white,
     },
     partnerName: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
     partnerMeta: {
@@ -292,37 +306,40 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     reputationText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     sessionsText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
+    // Selected-state flip: white pill, primaryDark content.
     checkmark: {
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
       paddingHorizontal: Spacing.sm,
       paddingVertical: Spacing.xs,
-      borderRadius: Radius.sm,
+      borderRadius: Radius.full,
     },
     checkmarkText: {
       fontSize: Typography.labelSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.primaryDark,
     },
     emptyCard: {
       alignItems: "center",
       paddingVertical: Spacing.xl,
       marginBottom: Spacing.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     emptyTitle: {
       fontSize: Typography.titleMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     emptyText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: 20,
     },
@@ -333,26 +350,28 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     addButtonText: {
       fontSize: Typography.bodyMedium,
-      color: Colors.primary,
+      color: Colors.white,
       ...Font.semibold,
     },
     inviteCard: {
       marginBottom: Spacing.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     inviteTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
     input: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.md,
       padding: Spacing.md,
       fontSize: Typography.bodyMedium,
-      color: Colors.text,
+      color: Colors.white,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: "transparent",
       marginBottom: Spacing.md,
     },
     inviteButtons: {
@@ -362,18 +381,30 @@ const makeStyles = (Colors: ThemeColors) =>
     inviteButtonFlex: {
       flex: 1,
     },
+    // Shared Buttons restyled via public style/textStyle props only.
+    pillButton: {
+      borderRadius: Radius.full,
+    },
+    glassButton: {
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
+    },
+    glassButtonText: {
+      color: Colors.white,
+    },
     infoCard: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     infoTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     infoText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: 20,
       marginBottom: Spacing.md,
     },
@@ -390,6 +421,6 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     legendText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
   });

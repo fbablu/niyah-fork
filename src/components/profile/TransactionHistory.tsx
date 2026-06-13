@@ -3,14 +3,18 @@ import { View, Text, StyleSheet } from "react-native";
 import {
   Typography,
   Spacing,
+  Radius,
   Font,
   type ThemeColors,
 } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
-import { Card } from "../Card";
 import { Skeleton } from "../Skeleton";
 import { formatMoney, formatRelativeTime } from "../../utils/format";
 import type { Transaction } from "../../types";
+
+// White hierarchy on the green field — rgba so opacities never compound with
+// layout opacity.
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
@@ -51,9 +55,9 @@ export function TransactionHistory({
           </View>
         ))
       ) : transactions.length === 0 ? (
-        <Card style={styles.emptyCard}>
+        <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>No transactions yet</Text>
-        </Card>
+        </View>
       ) : (
         visible.map((tx) => (
           <View key={tx.id} style={styles.transactionRow}>
@@ -79,6 +83,8 @@ export function TransactionHistory({
   );
 }
 
+// Rows sit directly on the green field (v2 language): white text hierarchy,
+// glass separators, semantic gain/loss amounts kept.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     section: {
@@ -87,16 +93,18 @@ const makeStyles = (Colors: ThemeColors) =>
     sectionTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.md,
     },
     emptyCard: {
       alignItems: "center",
       paddingVertical: Spacing.xl,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     emptyText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
     transactionRow: {
       flexDirection: "row",
@@ -104,18 +112,18 @@ const makeStyles = (Colors: ThemeColors) =>
       alignItems: "center",
       paddingVertical: Spacing.sm,
       borderBottomWidth: 1,
-      borderBottomColor: Colors.border,
+      borderBottomColor: Colors.glassLight,
     },
     transactionInfo: {
       flex: 1,
     },
     transactionDesc: {
       fontSize: Typography.bodyMedium,
-      color: Colors.text,
+      color: Colors.white,
     },
     transactionDate: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: 2,
     },
     transactionAmount: {

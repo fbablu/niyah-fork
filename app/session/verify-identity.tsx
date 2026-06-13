@@ -44,6 +44,13 @@ import { logger } from "../../src/utils/logger";
 import { logEvent } from "../../src/utils/analytics";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 // Format numeric DOB digits into MM/DD/YYYY for display.
 function formatDobDisplay(digits: string): string {
   const d = digits.slice(0, 8);
@@ -253,6 +260,7 @@ function VerifyIdentityScreenInner() {
     <SessionScreenScaffold
       headerVariant="centered"
       headerTitle="Verify Identity"
+      backgroundColor={Colors.primaryDark}
       scrollable={false}
     >
       <KeyboardAwareScrollView
@@ -273,7 +281,7 @@ function VerifyIdentityScreenInner() {
             value={firstName}
             onChangeText={setFirstName}
             placeholder="First name on government ID"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             autoCapitalize="words"
             autoComplete="given-name"
             textContentType="givenName"
@@ -287,7 +295,7 @@ function VerifyIdentityScreenInner() {
             value={lastName}
             onChangeText={setLastName}
             placeholder="Last name on government ID"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             autoCapitalize="words"
             autoComplete="family-name"
             textContentType="familyName"
@@ -301,7 +309,7 @@ function VerifyIdentityScreenInner() {
             value={formatDobDisplay(dobDigits)}
             onChangeText={handleDob}
             placeholder="MM/DD/YYYY"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             keyboardType="number-pad"
             maxLength={10}
           />
@@ -315,7 +323,7 @@ function VerifyIdentityScreenInner() {
             value={line1}
             onChangeText={setLine1}
             placeholder="123 Main Street"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             autoCapitalize="words"
             autoComplete="address-line1"
             textContentType="streetAddressLine1"
@@ -332,7 +340,7 @@ function VerifyIdentityScreenInner() {
             value={line2}
             onChangeText={setLine2}
             placeholder="Apt 4B"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             autoCapitalize="words"
             autoComplete="address-line2"
             textContentType="streetAddressLine2"
@@ -346,7 +354,7 @@ function VerifyIdentityScreenInner() {
             value={city}
             onChangeText={setCity}
             placeholder="Nashville"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             autoCapitalize="words"
             autoComplete="address-line1"
             textContentType="addressCity"
@@ -361,7 +369,7 @@ function VerifyIdentityScreenInner() {
               value={stateCode}
               onChangeText={handleState}
               placeholder="TN"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={WHITE_55}
               autoCapitalize="characters"
               autoCorrect={false}
               maxLength={2}
@@ -375,7 +383,7 @@ function VerifyIdentityScreenInner() {
               value={zip}
               onChangeText={handleZip}
               placeholder="37203"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={WHITE_55}
               keyboardType="number-pad"
               maxLength={5}
               textContentType="postalCode"
@@ -433,7 +441,7 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     subtitle: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: Typography.bodyMedium * 1.5,
       marginBottom: Spacing.sm,
     },
@@ -448,26 +456,28 @@ const makeStyles = (Colors: ThemeColors) =>
     label: {
       fontSize: Typography.labelLarge,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
     },
     optional: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
     },
+    // Dark-glass input wells with white@0.25 hairlines read on the green
+    // field in both themes.
     input: {
       height: 52,
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.lg,
       paddingHorizontal: Spacing.md,
       fontSize: 18,
       ...Font.medium,
-      color: Colors.text,
+      color: Colors.white,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: WHITE_25,
     },
     hint: {
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       marginTop: Spacing.xs,
     },
     row: {
@@ -484,26 +494,30 @@ const makeStyles = (Colors: ThemeColors) =>
       letterSpacing: 2,
       textAlign: "center",
     },
+    // Semantic red box kept; body text goes white so it reads on the green
+    // field (confirm.tsx warningText precedent — the tint carries the
+    // severity, the text carries the message).
     errorBox: {
-      backgroundColor: "rgba(220, 38, 38, 0.1)",
+      backgroundColor: "rgba(220, 38, 38, 0.2)",
       borderRadius: Radius.md,
       padding: Spacing.md,
       borderWidth: 1,
-      borderColor: "rgba(220, 38, 38, 0.2)",
+      borderColor: "rgba(220, 38, 38, 0.4)",
     },
     errorText: {
-      color: Colors.danger,
+      color: Colors.white,
       fontSize: Typography.bodySmall,
       textAlign: "center",
     },
+    // Glass seat for the privacy disclosure (glassLight, Radius.xl).
     disclosure: {
-      backgroundColor: Colors.backgroundSecondary,
-      borderRadius: Radius.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.md,
     },
     disclosureText: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       lineHeight: Typography.labelSmall * 1.6,
     },
     footer: {
@@ -518,6 +532,6 @@ const makeStyles = (Colors: ThemeColors) =>
     cancelText: {
       fontSize: Typography.bodyMedium,
       ...Font.medium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
   });

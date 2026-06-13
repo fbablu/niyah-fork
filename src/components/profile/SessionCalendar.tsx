@@ -28,8 +28,9 @@ export interface CalendarStamp {
 export interface SessionCalendarProps {
   stamps: CalendarStamp[];
   streakCount: number;
-  /** The streak ring traces the user's current chosen blob — preset or
-   *  seeded "unique" (comment 3). Plain outlined circle only when absent. */
+  /** The streak badge is a white-filled silhouette of the user's current
+   *  chosen blob — preset or seeded "unique" (comment 3). Plain white
+   *  circle only when absent. */
   blobConfig?: BlobAvatarConfig;
   onStampPress: (s: CalendarStamp) => void;
   /** Month shown on mount (defaults to the device's current month). Read once. */
@@ -74,22 +75,14 @@ export const SessionCalendar: React.FC<SessionCalendarProps> = ({
     return year === new Date().getFullYear() ? name : `${name} ${year}`;
   }, [displayed, year]);
 
-  // One stamp per day (latest wins); entrance stagger follows completion
-  // order; only the most recent collectible idles with a blink.
-  const { byDay, order, latestId } = useMemo(() => {
-    const byDay = new Map<string, CalendarStamp>();
+  // One stamp per day (latest wins).
+  const byDay = useMemo(() => {
+    const map = new Map<string, CalendarStamp>();
     for (const s of stamps) {
-      const cur = byDay.get(s.dateKey);
-      if (!cur || s.completedAt > cur.completedAt) byDay.set(s.dateKey, s);
+      const cur = map.get(s.dateKey);
+      if (!cur || s.completedAt > cur.completedAt) map.set(s.dateKey, s);
     }
-    const sorted = [...byDay.values()].sort(
-      (a, b) => a.completedAt.getTime() - b.completedAt.getTime(),
-    );
-    return {
-      byDay,
-      order: new Map(sorted.map((s, i) => [s.sessionId, i])),
-      latestId: sorted[sorted.length - 1]?.sessionId,
-    };
+    return map;
   }, [stamps]);
 
   const shiftMonth = (delta: -1 | 1) => {
@@ -102,7 +95,7 @@ export const SessionCalendar: React.FC<SessionCalendarProps> = ({
   const cells = buildMonthCells(year, month);
 
   return (
-    <View>
+    <View style={styles.container}>
       <CalendarHeader
         monthLabel={monthLabel}
         streakCount={streakCount}
@@ -125,8 +118,6 @@ export const SessionCalendar: React.FC<SessionCalendarProps> = ({
                 <CalendarStampBlob
                   sessionId={stamp.sessionId}
                   size={STAMP_SIZE}
-                  index={order.get(stamp.sessionId) ?? 0}
-                  blink={stamp.sessionId === latestId}
                   testID={`calendar-stamp-${key}`}
                 />
               )}
@@ -157,40 +148,47 @@ export const SessionCalendar: React.FC<SessionCalendarProps> = ({
   );
 };
 
+// Green calendar (v2, node 429:186): primary grid, 1px WHITE cell borders
+// (hairline reads too thin against the render), bold white numerals pinned
+// top-right inside the cell's inset inner box. Grid ≈ 70.4% of screen width,
+// centered, perfectly square cells via aspectRatio.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    container: {
+      width: "70.4%",
+      alignSelf: "center",
+    },
     grid: {
       flexDirection: "row",
       flexWrap: "wrap",
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: Colors.border,
+      backgroundColor: Colors.primary,
     },
     weekdayCell: {
       width: `${100 / 7}%`,
       alignItems: "center",
       paddingVertical: Spacing.xs,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: Colors.border,
+      borderWidth: 1,
+      borderColor: Colors.white,
     },
     weekdayText: {
-      fontSize: Typography.labelMedium,
-      ...Font.semibold,
-      color: Colors.textSecondary,
+      fontSize: Typography.bodySmall,
+      ...Font.bold,
+      color: Colors.white,
     },
     cell: {
       width: `${100 / 7}%`,
       aspectRatio: 1,
       alignItems: "center",
       justifyContent: "center",
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: Colors.border,
+      borderWidth: 1,
+      borderColor: Colors.white,
     },
     dayNumber: {
       position: "absolute",
       top: Spacing.xs,
       right: Spacing.xs,
       fontSize: Typography.labelSmall,
-      ...Font.medium,
-      color: Colors.textSecondary,
+      ...Font.bold,
+      color: Colors.white,
     },
   });

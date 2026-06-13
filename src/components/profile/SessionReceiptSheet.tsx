@@ -74,7 +74,7 @@ export function SessionReceiptSheet({
             accessibilityRole="button"
             accessibilityLabel="Close"
           >
-            <Ionicons name="close" size={24} color={Colors.textSecondary} />
+            <Ionicons name="close" size={24} color={Colors.white} />
           </Pressable>
         </View>
         {stamp && (
@@ -94,7 +94,7 @@ export function SessionReceiptSheet({
                 <Ionicons
                   name="checkmark-circle"
                   size={18}
-                  color={Colors.gain}
+                  color={Colors.white}
                 />
                 <Text style={styles.statusText}>Completed</Text>
               </View>
@@ -107,18 +107,21 @@ export function SessionReceiptSheet({
   );
 }
 
+// Green sheet system (customizer language, node 429:347): primaryLight sheet,
+// white grab bar + text, glass dividers. Status renders white — gain ==
+// primaryLight here, so the semantic token would vanish into the sheet.
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryLight,
     },
     grabBar: {
       alignSelf: "center",
       width: Spacing.xl,
       height: Spacing.xs,
       borderRadius: Radius.full,
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.white,
       marginTop: Spacing.sm,
     },
     headerRow: {
@@ -128,12 +131,12 @@ const makeStyles = (Colors: ThemeColors) =>
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
       borderBottomWidth: 1,
-      borderBottomColor: Colors.border,
+      borderBottomColor: Colors.glassMid,
     },
     title: {
       fontSize: Typography.titleMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     content: {
       paddingHorizontal: Spacing.lg,
@@ -149,16 +152,17 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "space-between",
       paddingVertical: Spacing.md,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: Colors.border,
+      borderBottomColor: Colors.glassMid,
     },
     rowLabel: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: Colors.white,
+      opacity: 0.7,
     },
     rowValue: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     statusValue: {
       flexDirection: "row",
@@ -168,6 +172,6 @@ const makeStyles = (Colors: ThemeColors) =>
     statusText: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.gain,
+      color: Colors.white,
     },
   });

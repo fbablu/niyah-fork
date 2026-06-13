@@ -22,6 +22,7 @@ import {
 import {
   Typography,
   Spacing,
+  Radius,
   Font,
   type ThemeColors,
 } from "../../src/constants/colors";
@@ -42,6 +43,13 @@ import {
 } from "../../src/config/functions";
 import { logger } from "../../src/utils/logger";
 import { getFunctionErrorMessage } from "../../src/utils/errors";
+
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
 
 function BankSetupScreenInner() {
   useScreenProtection("bank-setup");
@@ -190,6 +198,7 @@ function BankSetupScreenInner() {
       <SessionScreenScaffold
         headerVariant="back"
         title="Bank Account"
+        backgroundColor={Colors.primaryDark}
         scrollable={false}
       >
         <View style={styles.center}>
@@ -220,7 +229,8 @@ function BankSetupScreenInner() {
             onPress={handleConnectBank}
             size="large"
             variant="secondary"
-            style={styles.actionButton}
+            style={styles.secondaryActionButton}
+            textStyle={styles.secondaryActionText}
             loading={isLoading}
           />
         </View>
@@ -233,12 +243,13 @@ function BankSetupScreenInner() {
       headerVariant="back"
       title="Connect Bank"
       subtitle="Link your bank account for direct withdrawals"
+      backgroundColor={Colors.primaryDark}
       scrollable={false}
     >
       <View style={styles.center}>
         {isLinking ? (
           <>
-            <ActivityIndicator size="large" color={Colors.primary} />
+            <ActivityIndicator size="large" color={Colors.white} />
             <Text style={styles.linkingText}>Linking your bank account...</Text>
             <Text style={styles.linkingSubtext}>
               This may take a few seconds
@@ -307,11 +318,12 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: Spacing.lg,
       paddingHorizontal: Spacing.md,
     },
+    // Light-glass seat circle reads on the green field in both themes.
     bankIcon: {
       width: 72,
       height: 72,
       borderRadius: 36,
-      backgroundColor: Colors.primaryMuted,
+      backgroundColor: Colors.glassLight,
       alignItems: "center",
       justifyContent: "center",
       marginBottom: Spacing.sm,
@@ -319,22 +331,27 @@ const makeStyles = (Colors: ThemeColors) =>
     bankIconText: {
       fontSize: 32,
       ...Font.bold,
-      color: Colors.primary,
+      color: Colors.white,
     },
     heroTitle: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
     },
     heroSubtitle: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: Typography.bodyMedium * 1.5,
     },
+    // Glass seat for the info rows (glassLight, Radius.xl, borderless —
+    // overrides the outlined variant's hairline via the Card style prop).
     infoCard: {
       width: "100%",
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      borderWidth: 0,
     },
     infoRow: {
       flexDirection: "row",
@@ -344,50 +361,65 @@ const makeStyles = (Colors: ThemeColors) =>
     },
     infoLabel: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       ...Font.medium,
     },
     infoValue: {
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
       ...Font.semibold,
     },
     infoDivider: {
       height: 1,
-      backgroundColor: Colors.border,
+      backgroundColor: WHITE_25,
     },
     actionButton: {
       width: "100%",
+      borderRadius: Radius.full,
+    },
+    // Dark-glass pill for the medium-emphasis action (via Button's public
+    // style/textStyle props only).
+    secondaryActionButton: {
+      width: "100%",
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
+    },
+    secondaryActionText: {
+      color: Colors.white,
     },
     disclaimer: {
       textAlign: "center",
-      color: Colors.textMuted,
+      color: WHITE_55,
       fontSize: Typography.labelSmall,
       lineHeight: Typography.labelSmall * 1.6,
     },
-    // Connected state
+    // Connected state — white instead of semantic gain (green-on-green sinks
+    // into the field; select.tsx insufficientText precedent).
     connectedTitle: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.gain,
+      color: Colors.white,
     },
     bankCard: {
       width: "100%",
       alignItems: "center",
       gap: Spacing.xs,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
+      borderWidth: 0,
     },
     bankInstitution: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     bankAccount: {
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     connectedDescription: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       textAlign: "center",
       lineHeight: Typography.bodySmall * 1.5,
     },
@@ -395,10 +427,10 @@ const makeStyles = (Colors: ThemeColors) =>
     linkingText: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     linkingSubtext: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
   });

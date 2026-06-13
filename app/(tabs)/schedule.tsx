@@ -8,7 +8,7 @@ import {
   StyleSheet,
   Alert,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import {
   Typography,
@@ -38,10 +38,16 @@ import { formatMoney } from "../../src/utils/format";
 // Per-template staking (Phase 2) + weekday-specific native enforcement are
 // tracked in docs/schedule-templates-plan-2026-06-03.md. Visual polish: Fardeen.
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 export default function ScheduleScreen() {
   const Colors = useColors();
   const styles = useMemo(() => makeStyles(Colors), [Colors]);
-  const insets = useSafeAreaInsets();
 
   const templates = useScheduleStore((s) => s.templates);
   const addPreset = useScheduleStore((s) => s.addPreset);
@@ -66,7 +72,7 @@ export default function ScheduleScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + Spacing.md }]}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -109,7 +115,15 @@ export default function ScheduleScreen() {
                       }
                       Haptics.selectionAsync();
                     }}
-                    trackColor={{ true: Colors.primary, false: Colors.border }}
+                    // ON keeps the primary brand track; OFF was Colors.border
+                    // (theme-dependent: invisible brown on dark / cream leak on
+                    // light against the green glass card) → theme-stable dark
+                    // glass. iOS paints the off track via ios_backgroundColor.
+                    trackColor={{
+                      true: Colors.primary,
+                      false: Colors.glassDark,
+                    }}
+                    ios_backgroundColor={Colors.glassDark}
                   />
                 </View>
 
@@ -166,8 +180,9 @@ export default function ScheduleScreen() {
                       }}
                       trackColor={{
                         true: Colors.primary,
-                        false: Colors.border,
+                        false: Colors.glassDark,
                       }}
+                      ios_backgroundColor={Colors.glassDark}
                     />
                   </View>
                 )}
@@ -285,48 +300,59 @@ export default function ScheduleScreen() {
           no need to open Niyah.
         </Text>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
+// Full-bleed GREEN brand screen (mirrors profile.tsx / index.tsx, v2 node
+// 429:186): primaryDark field, no shared horizontal padding — each section
+// owns its proportional width (~92.5%, centered).
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: Colors.background,
+      backgroundColor: Colors.primaryDark,
     },
     content: {
-      paddingHorizontal: Spacing.lg,
+      paddingTop: Spacing.lg,
       paddingBottom: Spacing.xxl,
       gap: Spacing.md,
     },
     title: {
+      width: "92.5%",
+      alignSelf: "center",
       fontSize: Typography.headlineMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
     },
     subtitle: {
+      width: "92.5%",
+      alignSelf: "center",
       fontSize: Typography.bodyMedium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.sm,
       lineHeight: Typography.bodyMedium * 1.4,
     },
     section: {
+      width: "92.5%",
+      alignSelf: "center",
       gap: Spacing.md,
     },
     sectionLabel: {
+      width: "92.5%",
+      alignSelf: "center",
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginTop: Spacing.md,
     },
+    // Template card = glass seat (glassLight, Radius.xl, borderless), like the
+    // dashboard balance/CTA cards.
     card: {
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
       padding: Spacing.lg,
       gap: Spacing.md,
-      borderWidth: 1,
-      borderColor: Colors.border,
     },
     cardHeader: {
       flexDirection: "row",
@@ -340,34 +366,37 @@ const makeStyles = (Colors: ThemeColors) =>
     cardName: {
       fontSize: Typography.bodyLarge,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     cardMeta: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     dayRow: {
       flexDirection: "row",
       justifyContent: "space-between",
     },
+    // Selected day flips to the white circle / primaryDark text treatment
+    // (the profile streak badge + dashboard done-step pattern); unselected
+    // sits in a dark-glass circle.
     dayChip: {
       width: 36,
       height: 36,
-      borderRadius: 18,
+      borderRadius: Radius.full,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: Colors.backgroundTertiary,
+      backgroundColor: Colors.glassDark,
     },
     dayChipOn: {
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
     },
     dayChipText: {
       fontSize: Typography.bodySmall,
       ...Font.semibold,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     dayChipTextOn: {
-      color: Colors.background,
+      color: Colors.primaryDark,
     },
     stakeRow: {
       flexDirection: "row",
@@ -375,7 +404,7 @@ const makeStyles = (Colors: ThemeColors) =>
       justifyContent: "space-between",
       gap: Spacing.md,
       borderTopWidth: 1,
-      borderTopColor: Colors.border,
+      borderTopColor: WHITE_25,
       paddingTop: Spacing.md,
     },
     stakeText: {
@@ -385,11 +414,11 @@ const makeStyles = (Colors: ThemeColors) =>
     stakeTitle: {
       fontSize: Typography.bodyMedium,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     stakeHint: {
       fontSize: Typography.labelSmall,
-      color: Colors.textSecondary,
+      color: WHITE_55,
     },
     deleteBtn: {
       alignSelf: "flex-start",
@@ -400,27 +429,34 @@ const makeStyles = (Colors: ThemeColors) =>
       color: Colors.loss,
     },
     presetGrid: {
+      width: "92.5%",
+      alignSelf: "center",
       flexDirection: "row",
       flexWrap: "wrap",
       gap: Spacing.md,
     },
+    // Add affordances = Colors.primary brand surfaces with the white@0.25
+    // border (the dashboard active-session treatment), distinct from the
+    // glass seats of blocks you already own.
     presetCard: {
       flexBasis: "47%",
       flexGrow: 1,
-      backgroundColor: Colors.backgroundCard,
-      borderRadius: Radius.lg,
+      backgroundColor: Colors.primary,
+      borderRadius: Radius.xl,
       padding: Spacing.lg,
       gap: 2,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: WHITE_25,
     },
     presetCardOff: {
       opacity: 0.5,
     },
+    // White, not Colors.loss: the clay red is illegible on the primary fill,
+    // and the 0.5 card dim already carries the disabled state.
     presetConflict: {
       fontSize: Typography.labelSmall,
       ...Font.medium,
-      color: Colors.loss,
+      color: Colors.white,
       marginTop: Spacing.xs,
     },
     customCard: {
@@ -429,15 +465,17 @@ const makeStyles = (Colors: ThemeColors) =>
     presetName: {
       fontSize: Typography.bodyLarge,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
     },
     presetMeta: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
     },
     footnote: {
+      width: "92.5%",
+      alignSelf: "center",
       fontSize: Typography.labelSmall,
-      color: Colors.textMuted,
+      color: WHITE_55,
       textAlign: "center",
       marginTop: Spacing.lg,
       lineHeight: Typography.labelSmall * 1.5,

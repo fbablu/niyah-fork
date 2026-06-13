@@ -10,6 +10,11 @@ module.exports = {
   testPathIgnorePatterns: ["/node_modules/", "/.expo/", "/android/", "/ios/"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
+    // @expo/ui calls requireNativeView at import time (throws under jest);
+    // BalanceSection lazy-requires it behind an iOS 26+ gate.
+    "^@expo/ui/swift-ui$": "<rootDir>/__mocks__/@expo/ui/swift-ui.tsx",
+    "^@expo/ui/swift-ui/modifiers$":
+      "<rootDir>/__mocks__/@expo/ui/swift-ui/modifiers.ts",
   },
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",

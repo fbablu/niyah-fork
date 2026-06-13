@@ -44,19 +44,30 @@ const REASON_OPTIONS: { value: SurrenderReason; label: string }[] = [
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Green-world text/border hierarchy (docs/redesign-all-tabs-progress.md):
+// everything on the full-bleed primaryDark field is white, white@0.7, or
+// white@0.55 — rgba so opacities never compound with layout opacity.
+const WHITE_70 = "rgba(255, 255, 255, 0.7)";
+const WHITE_55 = "rgba(255, 255, 255, 0.55)";
+const WHITE_25 = "rgba(255, 255, 255, 0.25)";
+
 const makeStyles = (Colors: ThemeColors) =>
   StyleSheet.create({
+    // Forfeit emphasis: white-flip card so the semantic loss red stays legible
+    // (select.tsx precedent — loss-red sinks into green; once the surface is
+    // white the amount keeps Colors.loss).
     warningCard: {
       alignItems: "center",
-      backgroundColor: Colors.lossLight,
+      backgroundColor: Colors.white,
       borderWidth: 1,
       borderColor: Colors.loss,
+      borderRadius: Radius.xl,
       paddingVertical: Spacing.xl,
       marginBottom: Spacing.md,
     },
     warningLabel: {
       fontSize: Typography.labelMedium,
-      color: Colors.textSecondary,
+      color: Colors.primaryDark,
       marginBottom: Spacing.xs,
     },
     lossAmount: {
@@ -64,35 +75,41 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.bold,
       color: Colors.loss,
     },
+    // Warning keeps its semantic gold colors (confirm.tsx precedent); body
+    // text goes white so it reads on the green field in both themes.
     reputationCard: {
       backgroundColor: Colors.warningLight,
       borderWidth: 1,
       borderColor: Colors.warning,
+      borderRadius: Radius.xl,
       marginBottom: Spacing.md,
     },
     reputationTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.warning,
       marginBottom: Spacing.sm,
     },
     reputationText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: Colors.white,
       lineHeight: 20,
     },
+    // Glass seat for the alternatives (glassLight, Radius.xl, borderless).
     alternativeCard: {
       marginBottom: Spacing.lg,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     alternativeTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.xs,
     },
     alternativeText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.md,
     },
     suggestions: {
@@ -106,20 +123,23 @@ const makeStyles = (Colors: ThemeColors) =>
       width: 6,
       height: 6,
       borderRadius: 3,
-      backgroundColor: Colors.primary,
+      backgroundColor: Colors.white,
       marginRight: Spacing.sm,
     },
     suggestionText: {
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
     },
+    // Glass seat for the reason capture (glassLight, Radius.xl).
     reasonCard: {
       marginBottom: Spacing.md,
+      backgroundColor: Colors.glassLight,
+      borderRadius: Radius.xl,
     },
     reasonTitle: {
       fontSize: Typography.titleSmall,
       ...Font.semibold,
-      color: Colors.text,
+      color: Colors.white,
       marginBottom: Spacing.sm,
     },
     chipRow: {
@@ -128,35 +148,35 @@ const makeStyles = (Colors: ThemeColors) =>
       gap: Spacing.xs,
       marginBottom: Spacing.sm,
     },
+    // Dark-glass pills; the selected chip flips to white + primaryDark.
     chip: {
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
-      borderRadius: Radius.md,
-      borderWidth: 1,
-      borderColor: Colors.border,
-      backgroundColor: Colors.backgroundCard,
+      borderRadius: Radius.full,
+      backgroundColor: Colors.glassDark,
     },
     chipSelected: {
-      borderColor: Colors.primary,
+      backgroundColor: Colors.white,
     },
     chipText: {
       fontSize: Typography.bodySmall,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       ...Font.medium,
     },
     chipTextSelected: {
-      color: Colors.primary,
+      color: Colors.primaryDark,
       ...Font.semibold,
     },
+    // Dark-glass input fields, white text (propose.tsx precedent).
     noteInput: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.md,
       borderWidth: 1,
-      borderColor: Colors.border,
+      borderColor: "transparent",
       padding: Spacing.sm,
       minHeight: 44,
       fontSize: Typography.bodySmall,
-      color: Colors.text,
+      color: Colors.white,
       textAlignVertical: "top",
     },
     confirmSection: {
@@ -165,18 +185,18 @@ const makeStyles = (Colors: ThemeColors) =>
     confirmLabel: {
       fontSize: Typography.labelMedium,
       ...Font.medium,
-      color: Colors.textSecondary,
+      color: WHITE_70,
       marginBottom: Spacing.sm,
       textAlign: "center",
     },
     confirmInput: {
-      backgroundColor: Colors.backgroundCard,
+      backgroundColor: Colors.glassDark,
       borderRadius: Radius.md,
       padding: Spacing.md,
       fontSize: Typography.titleMedium,
-      color: Colors.text,
+      color: Colors.white,
       borderWidth: 2,
-      borderColor: Colors.border,
+      borderColor: WHITE_25,
       textAlign: "center",
       letterSpacing: 4,
       ...Font.semibold,
@@ -188,6 +208,17 @@ const makeStyles = (Colors: ThemeColors) =>
     footer: {
       marginTop: Spacing.lg,
       gap: Spacing.sm,
+    },
+    // Shared Buttons styled via their public style prop only (Radius.full
+    // pills; the keep-going CTA gets a white@0.25 hairline so the primary
+    // fill separates from the green field — propose.tsx precedent).
+    footerButton: {
+      borderRadius: Radius.full,
+    },
+    keepGoingButton: {
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      borderColor: WHITE_25,
     },
   });
 
@@ -277,6 +308,7 @@ function SurrenderScreenInner() {
         scrollable={true}
         title="Surrender Session?"
         subtitle="This action cannot be undone"
+        backgroundColor={Colors.primaryDark}
       >
         {/* Loss Warning */}
         <Card style={styles.warningCard}>
@@ -348,7 +380,7 @@ function SurrenderScreenInner() {
               value={surrenderNote}
               onChangeText={setSurrenderNote}
               placeholder="Anything else? (optional)"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={WHITE_55}
               multiline
               maxLength={500}
             />
@@ -368,7 +400,7 @@ function SurrenderScreenInner() {
             value={confirmText}
             onChangeText={setConfirmText}
             placeholder="Type QUIT"
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={WHITE_55}
             autoCapitalize="characters"
             autoCorrect={false}
           />
@@ -382,12 +414,14 @@ function SurrenderScreenInner() {
             disabled={!canSurrender || surrendering}
             variant="danger"
             size="large"
+            style={styles.footerButton}
           />
           <Button
             title="Keep Going"
             onPress={() => router.back()}
             variant="primary"
             size="large"
+            style={styles.keepGoingButton}
           />
         </View>
       </SessionScreenScaffold>

@@ -16,15 +16,16 @@ import { getBlobBodyShape } from "../BlobAvatar";
 export interface CalendarHeaderProps {
   monthLabel: string;
   streakCount: number;
-  /** The streak ring traces the user's current chosen blob (comment 3): named
-   *  presets use their fixed body path, "unique" regenerates from the
-   *  shapeSeed. Plain outlined circle only when absent. */
+  /** The streak badge is a white-filled silhouette of the user's current
+   *  chosen blob (comment 3): named presets use their fixed body path,
+   *  "unique" regenerates from the shapeSeed. Plain white circle when
+   *  absent — black bold count either way (v2 white/black inversion). */
   blobConfig?: BlobAvatarConfig;
   /** -1 = previous month, +1 = next month. Caller owns the haptic. */
   onShiftMonth: (delta: -1 | 1) => void;
 }
 
-const STREAK_BADGE_SIZE = 36;
+const STREAK_BADGE_SIZE = 28;
 // Stroke is authored in viewBox units and the presets use different coordinate
 // spaces — scale by viewBox width so the rendered outline keeps the same
 // ~2px weight whichever blob shape is traced.
@@ -53,7 +54,7 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
           accessibilityLabel="Previous month"
           onPress={() => onShiftMonth(-1)}
         >
-          <Ionicons name="chevron-back" size={22} color={Colors.text} />
+          <Ionicons name="chevron-back" size={20} color={Colors.white} />
         </Pressable>
         <Text style={styles.monthLabel}>{monthLabel}</Text>
         <Pressable
@@ -62,7 +63,7 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
           accessibilityLabel="Next month"
           onPress={() => onShiftMonth(1)}
         >
-          <Ionicons name="chevron-forward" size={22} color={Colors.text} />
+          <Ionicons name="chevron-forward" size={20} color={Colors.white} />
         </Pressable>
       </View>
       <View
@@ -80,11 +81,11 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
             <Path
               testID="streak-blob-path"
               d={blobShape.bodyPath}
-              stroke={Colors.text}
+              stroke={Colors.white}
               strokeWidth={
                 Number(blobShape.viewBox.split(" ")[2]) * OUTLINE_STROKE_RATIO
               }
-              fill="none"
+              fill={Colors.white}
             />
           </Svg>
         ) : null}
@@ -111,7 +112,7 @@ const makeStyles = (Colors: ThemeColors) =>
     monthLabel: {
       fontSize: Typography.titleLarge,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.white,
       textAlign: "center",
     },
     streakBadge: {
@@ -120,14 +121,15 @@ const makeStyles = (Colors: ThemeColors) =>
       alignItems: "center",
       justifyContent: "center",
     },
+    // v2 inversion: white-filled badge, black bold count — both the plain
+    // circle and the blob-silhouette variant keep the white/black scheme.
     streakCircle: {
       borderRadius: Radius.full,
-      borderWidth: 2,
-      borderColor: Colors.text,
+      backgroundColor: Colors.white,
     },
     streakCount: {
-      fontSize: Typography.labelLarge,
+      fontSize: Typography.bodyMedium,
       ...Font.bold,
-      color: Colors.text,
+      color: Colors.black,
     },
   });

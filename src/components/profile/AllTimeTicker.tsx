@@ -47,8 +47,11 @@ const makeStyles = (Colors: ThemeColors) =>
       ...Font.semibold,
       fontVariant: ["tabular-nums"],
     },
+    // Sits directly on the green screen — white at reduced opacity, not a
+    // theme text token (the profile tab is theme-stable by design).
     label: {
       fontSize: Typography.labelMedium,
-      color: Colors.textTertiary,
+      color: Colors.white,
+      opacity: 0.7,
     },
   });
