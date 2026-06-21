@@ -4,8 +4,9 @@
 > Supersedes the old `may-26-resume.md`, `may-16-progress.md`, and the per-session summaries
 > (now in [`archive/`](./archive/)). When state changes, update **this** file — don't spawn a new resume doc.
 >
-> **2026-06-13 (green-world redesign — on `redesign-green-world`, UNCOMMITTED; Fardeen commits):**
-> A whole-app **GREEN-WORLD redesign shipped to TestFlight (builds 25–28)**. Every tab
+> **2026-06-13 (green-world redesign — COMMITTED on `redesign-green-world` AND `main`; both at
+> `560da1f` as of 2026-06-20):** A whole-app **GREEN-WORLD redesign shipped to TestFlight
+> (builds 25–28)**. Every tab
 > (dashboard/schedule/friends/profile), all 16 session screens, the money screens,
 > `app/blocked.tsx`, and `app/user/[uid].tsx` were restyled to a **single brand theme**: full-bleed
 > `Colors.primaryDark` (#1B4332) fields, `Colors.primary` (#2D6A4F) surfaces, `Colors.primaryLight`
@@ -170,12 +171,13 @@
 
 ## Right now
 
-- **Branch:** `redesign-green-world`, **UNCOMMITTED** (Fardeen commits) — the whole-app green-world
-  redesign + Profile v2 rebuild, on TestFlight as **builds 25–28 (latest = 28)**. Branches off
-  `main` (the de-pooled v1 line; the old `wallet-ledger` working branch + side branches/worktrees
-  were consolidated into `main` 2026-06-09). All money-path / legal / privacy-manifest work from the
-  pre-redesign line is on `main`; this branch is **UI/UX-only** plus the new Clout/Calendar/Balance
-  Profile components and constants — **no money-path or rules changes** rode the redesign.
+- **Branch:** `redesign-green-world`, **COMMITTED and already merged to `main`** — both are at
+  `560da1f` (verified 2026-06-20; working tree clean). The whole-app green-world redesign + Profile
+  v2 rebuild are on TestFlight as **builds 25–28 (latest = 28)**. Branches off `main` (the de-pooled
+  v1 line; the old `wallet-ledger` working branch + side branches/worktrees were consolidated into
+  `main` 2026-06-09). All money-path / legal / privacy-manifest work from the pre-redesign line is on
+  `main`; the redesign was **UI/UX-only** plus the new Clout/Calendar/Balance Profile components and
+  constants — **no money-path or rules changes** rode it.
   - **Single brand theme (this branch):** dark/light toggle removed from Profile (founder decision
     2026-06-12); subtrees wrap in `ThemeOverrideContext.Provider value="dark"`. `themeStore` retained
     for a future light variant. New tokens in `src/constants/colors.ts` + `BLOB_INK` in
@@ -195,6 +197,16 @@
   ticket-stub invites over `niyah.live/join`. Group server surface already supports it; solo needs a
   small reviewed `createSoloSession` extension or snaps to the cadence ladder. `propose.tsx` Day/Time
   pickers (never wired server-side) are removed by the wizard.
+  - **M1 DONE (2026-06-20, on `redesign-green-world`):** the reusable haptic `Dial` —
+    `src/components/session/Dial.tsx` (gesture-handler Pan + reanimated near-static 250ms ease-out
+    settle, `Haptics.selectionAsync` on each detent crossing + `impactAsync(Medium)` on commit,
+    `accessibilityRole="adjustable"` increment/decrement, `disabledAbove` cap that actually
+    reconciles the value down) + pure `src/components/session/dialMath.ts` + 35 tests
+    (`src/__tests__/unit/components/{Dial,dialMath}.test.ts`). Gates green (typecheck/eslint clean,
+    full jest 992 pass). **Pure client UI — no money-path / CF / rules / Stripe touched.** The Dial
+    isn't wired into any screen yet (that's M2+). **On-device feel-check in DEMO_MODE is the open
+    step before M2.** Next milestone = **M2 wizard scaffold** (separate sitting); **M0 money batch
+    (C1/C2/H1/M1) stays deferred for a settled, real-money-smoke session.**
 - **Landing is LIVE; prod money path = the deployed de-pooled `main` functions.** niyah.live is
   de-pooled and serves `/legal/{privacy,terms}`; the `niyah.live/stripe/return` bounce is live.
 - **Gates green (this branch):** typecheck 0 errors · jest ~957/963 (6 intentional skips) · eslint
@@ -303,9 +315,10 @@ actions** — Claude supplies messages only.
    recipe (upload ≠ review): `set -a; source .env; set +a`, then
    `npx eas build --platform ios --profile production --local` (writes a NEW `build-<ts>.ipa` —
    submit THAT file), then `npx eas submit --platform ios --profile production --path ./build-<ts>.ipa`.
-7c. **Merge `redesign-green-world` → `main` deliberately** — the redesign + Profile v2 are
-   UNCOMMITTED on the branch (UI/UX-only, no money-path/rules changes). Re-merge at the end of the
-   cycle; `main` is the live-payments branch.
+7c. ~~**Merge `redesign-green-world` → `main`**~~ — **DONE.** The redesign + Profile v2 are
+   committed and merged; `main` == `redesign-green-world` == `560da1f` (verified 2026-06-20, working
+   tree clean). Staking-wizard work now lands on `redesign-green-world` and rides the same merge
+   convention to `main`.
 7d. **Land the still-open money P0s before the next submit** — C1 double-debit, C2 recovery race,
    H1 payout idempotency, M1 stake-composition (precise fixes in `deep-audit-2026-06-08.md`);
    **C2 is a hard prerequisite for force-quit/recovery testing of the staking wizard.** Pair with a

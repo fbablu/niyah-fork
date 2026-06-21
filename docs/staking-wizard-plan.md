@@ -331,7 +331,7 @@ on the critical path. List it, link it, don't build it now.
 | M | Scope | Effort | Gate |
 | --- | --- | --- | --- |
 | 0 | Money prereqs (Fardeen-reviewed, separate commits): C2 (+ C1/H1/M1 batch), real-money smoke test | 0.5–1d + review | `pnpm test && pnpm test:functions` green; smoke test |
-| 1 | `Dial.tsx` + detent-math tests (people + dollar configs) | 1–1.5d | unit + render tests; on-device feel check |
+| 1 | ✅ **DONE (2026-06-20)** — `src/components/session/Dial.tsx` + pure `dialMath.ts` + tests (people 1–5 + dollar $2–$25 configs) | 1–1.5d | ✅ unit + render tests (35 cases) green, typecheck/eslint clean, full suite 992 pass; **on-device feel check pending (Fardeen)** |
 | 2 | Wizard scaffold: route group, `_layout` + draft store, progress UI; dashboard → two buttons; old routes still reachable | 1d | typecheck/tests; both buttons navigate |
 | 3 | Steps 1–2 (people dial + friend list reuse + auto-fold; stake dial + cap/balance clamps) | 1d | render tests; clamp unit tests |
 | 4 | Steps 3–4 (apps screen reusing picker+templates; schedule screen + schedule-tab cross-link) | 1–1.5d | gate behavior matches confirm.tsx contract |
