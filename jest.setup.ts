@@ -146,10 +146,17 @@ jest.mock("react-native-reanimated", () => ({
   useDerivedValue: jest.fn(<T>(fn: () => T) => ({ value: fn() })),
   useAnimatedStyle: jest.fn(() => ({})),
   useAnimatedProps: jest.fn(() => ({})),
+  useAnimatedScrollHandler: jest.fn((handlers: unknown) => handlers),
   useReducedMotion: jest.fn(() => false),
   cancelAnimation: jest.fn(),
   withTiming: jest.fn(<T>(value: T) => value),
   withSpring: jest.fn(<T>(value: T) => value),
+  withDecay: jest.fn(
+    (_config: unknown, cb?: (finished: boolean) => void) => {
+      if (typeof cb === "function") cb(true);
+      return 0;
+    },
+  ),
   withDelay: jest.fn(<T>(_: number, animation: T) => animation),
   withSequence: jest.fn(<T>(...animations: T[]) => animations[0]),
   withRepeat: jest.fn(<T>(animation: T) => animation),

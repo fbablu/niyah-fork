@@ -1,17 +1,16 @@
 import {
   clampPosition,
+  indexForOffset,
   indexOfValue,
   maxIndexForCap,
-  positionForOffset,
+  nearestRingIndex,
   rangeValues,
-  snapIndex,
-  valueForOffset,
+  ringDelta,
 } from "../../../components/session/dialMath";
 
-// The two configs the Dial ships with (people 1–5; dollars $2–$25 in cents).
 const PEOPLE = rangeValues(1, 5); // [1,2,3,4,5]
 const DOLLARS = rangeValues(200, 2500, 100); // [200,300,...,2500]
-const SPACING = 26; // matches Dial.tsx TICK_SPACING
+const SPACING = 26; // mirrors Dial.tsx TICK_SPACING
 
 describe("rangeValues", () => {
   it("builds an inclusive integer range", () => {
@@ -31,31 +30,15 @@ describe("rangeValues", () => {
   });
 });
 
-describe("positionForOffset", () => {
-  it("maps a left swipe of one spacing to +1 index (iOS-ruler direction)", () => {
-    expect(positionForOffset(0, -SPACING, SPACING)).toBe(1);
-    expect(positionForOffset(2, -2 * SPACING, SPACING)).toBe(4);
-  });
-
-  it("maps a right swipe to a lower (negative) position", () => {
-    expect(positionForOffset(0, SPACING, SPACING)).toBe(-1);
-  });
-
-  it("is a no-op when spacing is non-positive", () => {
-    expect(positionForOffset(2, 999, 0)).toBe(2);
-  });
-});
-
 describe("clampPosition", () => {
-  it("keeps fractional positions inside [0, count-1]", () => {
-    expect(clampPosition(2.5, 5)).toBe(2.5);
+  it("keeps an index inside [0, count-1]", () => {
+    expect(clampPosition(2, 5)).toBe(2);
     expect(clampPosition(-3, 5)).toBe(0);
     expect(clampPosition(99, 5)).toBe(4);
   });
 
   it("honors a cap (maxEnabledIndex)", () => {
     expect(clampPosition(4, 5, 2)).toBe(2);
-    expect(clampPosition(1.4, 5, 2)).toBe(1.4);
   });
 
   it("never returns past the hard max even if the cap is larger", () => {
@@ -67,16 +50,24 @@ describe("clampPosition", () => {
   });
 });
 
-describe("snapIndex", () => {
-  it("rounds to the nearest detent and clamps", () => {
-    expect(snapIndex(1.4, 5)).toBe(1);
-    expect(snapIndex(1.6, 5)).toBe(2);
-    expect(snapIndex(-3, 5)).toBe(0);
-    expect(snapIndex(99, 5)).toBe(4);
+describe("indexForOffset (scroll offset → detent index)", () => {
+  it("rounds the offset to the nearest detent", () => {
+    expect(indexForOffset(0, SPACING, 5)).toBe(0);
+    expect(indexForOffset(SPACING, SPACING, 5)).toBe(1);
+    expect(indexForOffset(SPACING * 2.7, SPACING, 5)).toBe(3);
+  });
+
+  it("clamps to the ends", () => {
+    expect(indexForOffset(-50, SPACING, 5)).toBe(0);
+    expect(indexForOffset(9999, SPACING, 5)).toBe(4);
   });
 
   it("respects the cap", () => {
-    expect(snapIndex(99, 5, 2)).toBe(2);
+    expect(indexForOffset(9999, SPACING, 5, 2)).toBe(2);
+  });
+
+  it("is safe for non-positive spacing", () => {
+    expect(indexForOffset(100, 0, 5)).toBe(0);
   });
 });
 
@@ -112,24 +103,42 @@ describe("maxIndexForCap", () => {
   });
 });
 
-describe("valueForOffset (end-to-end drag → committed value)", () => {
-  it("commits the detent the finger lands on", () => {
-    // From person 1 (index 0), drag left three detents → person 4.
-    expect(valueForOffset(PEOPLE, 0, -3 * SPACING, SPACING)).toBe(4);
-    // From $2 (index 0), drag left two detents → $4 (400 cents).
-    expect(valueForOffset(DOLLARS, 0, -2 * SPACING, SPACING)).toBe(400);
+describe("ringDelta (shortest 0–9 odometer step)", () => {
+  it("is a normal step within the ring", () => {
+    expect(ringDelta(3, 4)).toBe(1);
+    expect(ringDelta(5, 4)).toBe(-1);
   });
 
-  it("clamps a hard overshoot to the top detent", () => {
-    expect(valueForOffset(PEOPLE, 0, -10000, SPACING)).toBe(5);
+  it("wraps a carry the short way (9→0 = +1, 0→9 = -1)", () => {
+    expect(ringDelta(9, 0)).toBe(1);
+    expect(ringDelta(0, 9)).toBe(-1);
   });
 
-  it("cannot pass a cap", () => {
-    // Cap at index 2 (person 3): a big drag stops at person 3.
-    expect(valueForOffset(PEOPLE, 0, -10000, SPACING, 2)).toBe(3);
+  it("picks the shorter direction for bigger jumps", () => {
+    expect(ringDelta(8, 1)).toBe(3); // 8→9→0→1
+    expect(ringDelta(1, 8)).toBe(-3); // 1→0→9→8
   });
 
-  it("clamps a backward drag to the first detent", () => {
-    expect(valueForOffset(PEOPLE, 2, 10000, SPACING)).toBe(1);
+  it("is 0 for no change", () => {
+    expect(ringDelta(4, 4)).toBe(0);
+  });
+});
+
+describe("nearestRingIndex (shortest cell for a digit on a padded ring)", () => {
+  const PAD = 5;
+  it("returns the core cell when already there", () => {
+    expect(nearestRingIndex(4, 4 + PAD, PAD)).toBe(4 + PAD);
+  });
+
+  it("picks the wrap copy when it's closer (forward carry 9→0)", () => {
+    expect(nearestRingIndex(0, 14, PAD)).toBe(15);
+  });
+
+  it("picks the wrap copy for a backward carry (0→9)", () => {
+    expect(nearestRingIndex(9, 5, PAD)).toBe(4);
+  });
+
+  it("stays on the core for a normal neighbor step", () => {
+    expect(nearestRingIndex(4, 3 + PAD, PAD)).toBe(4 + PAD);
   });
 });

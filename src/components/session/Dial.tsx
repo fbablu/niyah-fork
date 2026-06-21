@@ -1,41 +1,45 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   type AccessibilityActionEvent,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { Font, Spacing, Typography } from "../../constants/colors";
 import { useColors } from "../../hooks/useColors";
+import { RollingNumber } from "./RollingNumber";
 import {
   clampPosition,
+  indexForOffset,
   indexOfValue,
   maxIndexForCap,
-  positionForOffset,
-  snapIndex,
 } from "./dialMath";
 
-// Reusable haptic dial — a horizontal tick-strip the user drags; it snaps to a
-// detent on release. Drives the staking wizard's people (1–5) and dollar
-// ($2–$25) steps. Motion is near-static per the house spec: a 250ms ease-out
-// settle, no springs/overshoot; Reduce Motion jumps straight to the detent.
+// Reusable haptic dial — a horizontal tick-strip the user scrolls; the detent
+// under the center line is the value. Built on a native ScrollView with
+// snapToInterval + decelerationRate, so flick/decelerate/snap is Apple's own
+// picker physics (the Clock-app feel) in one continuous motion — nothing to
+// tune. onScroll drives the odometer readout (RollingNumber) and a selection
+// tick at each detent (during drag AND the native coast); an impact fires on
+// settle. The cap (disabledAbove) snaps back if the user coasts into the dimmed
+// zone. VoiceOver uses the adjustable wrapper's increment/decrement actions.
 
 const TICK_SPACING = 26;
 const TICK_W = 2;
-const TICK_H_MAJOR = 30;
-const TICK_H_MINOR = 16;
+const TICK_H = 22;
 const STRIP_H = 40;
-const SETTLE_MS = 250;
+const READOUT_ROW_H = 56;
 const WHITE_70 = "rgba(255, 255, 255, 0.7)";
 
 interface DialProps {
@@ -47,7 +51,8 @@ interface DialProps {
   format: (value: number) => string;
   label: string;
   accessibilityLabel: string;
-  /** Max selectable VALUE (balance / daily cap): detents above render dimmed + un-draggable. */
+  /** Max selectable VALUE (balance / daily cap): detents above render dimmed and
+   *  the strip snaps back to the cap. */
   disabledAbove?: number;
   /** Optional readout subline, e.g. "Everyone stakes their own" in group mode. */
   subline?: string;
@@ -64,30 +69,40 @@ export const Dial: React.FC<DialProps> = ({
   subline,
 }) => {
   const Colors = useColors();
-  const reducedMotion = useReducedMotion();
   const [trackWidth, setTrackWidth] = useState(0);
 
   const count = values.length;
   const maxIndex = maxIndexForCap(values, disabledAbove);
-  const selectedIndex = clampPosition(indexOfValue(values, value), count, maxIndex);
+  const selectedIndex = clampPosition(
+    indexOfValue(values, value),
+    count,
+    maxIndex,
+  );
   // The readout / a11y / parent always reflect a REAL detent — never a raw prop
-  // that is off-ladder or above the cap. The settle effect reconciles `value`
-  // down to this so `disabledAbove` actually constrains the staked amount.
+  // that is off-ladder or above the cap. The sync effect reconciles `value`.
   const snappedValue = count > 0 ? values[selectedIndex] : value;
 
-  const pos = useSharedValue(selectedIndex);
-  const baseIndex = useSharedValue(selectedIndex);
-  const draggingRef = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const interactingRef = useRef(false); // finger down or coasting
+  const programmaticRef = useRef(false); // suppress ticks from our own scrollTo
   const lastEmittedRef = useRef(selectedIndex);
+  const initialOffsetRef = useRef(selectedIndex * TICK_SPACING);
 
-  // Latest props for the stable gesture callbacks, so the gesture is never
-  // rebuilt (and dropped) by a re-render mid-drag.
+  // Latest props for the scroll/a11y handlers.
   const valuesRef = useRef(values);
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const selectedIndexRef = useRef(selectedIndex);
+  const countRef = useRef(count);
+  const maxIndexRef = useRef(maxIndex);
   valuesRef.current = values;
   valueRef.current = value;
   onChangeRef.current = onChange;
+  selectedIndexRef.current = selectedIndex;
+  countRef.current = count;
+  maxIndexRef.current = maxIndex;
+
+  const sidePad = Math.max(0, (trackWidth - TICK_SPACING) / 2);
 
   const emit = useCallback((idx: number) => {
     const next = valuesRef.current[idx];
@@ -95,8 +110,26 @@ export const Dial: React.FC<DialProps> = ({
     if (next !== valueRef.current) onChangeRef.current(next);
   }, []);
 
-  const onCross = useCallback(
-    (idx: number) => {
+  // Imperatively snap the strip to a detent (only the cap clamp / external sync;
+  // normal stops are left to the native snapToInterval so the motion stays one
+  // continuous ease). Suppresses the resulting ticks via programmaticRef.
+  const snapTo = useCallback((idx: number) => {
+    programmaticRef.current = true;
+    scrollRef.current?.scrollTo({ x: idx * TICK_SPACING, animated: true });
+    setTimeout(() => {
+      programmaticRef.current = false;
+    }, 350);
+  }, []);
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (programmaticRef.current) return;
+      const idx = indexForOffset(
+        e.nativeEvent.contentOffset.x,
+        TICK_SPACING,
+        countRef.current,
+        maxIndexRef.current,
+      );
       if (idx === lastEmittedRef.current) return;
       lastEmittedRef.current = idx;
       Haptics.selectionAsync();
@@ -105,68 +138,43 @@ export const Dial: React.FC<DialProps> = ({
     [emit],
   );
 
-  const onSettle = useCallback(
-    (idx: number) => {
-      draggingRef.current = false;
+  const commit = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!interactingRef.current) return; // already settled this gesture
+      interactingRef.current = false;
+      const raw = Math.round(e.nativeEvent.contentOffset.x / TICK_SPACING);
+      const idx = clampPosition(raw, countRef.current, maxIndexRef.current);
       lastEmittedRef.current = idx;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       emit(idx);
+      if (raw !== idx) snapTo(idx); // coasted past the cap → ease back
     },
-    [emit],
+    [emit, snapTo],
   );
 
-  const startDrag = useCallback(() => {
-    draggingRef.current = true;
+  const onBeginDrag = useCallback(() => {
+    interactingRef.current = true;
+    programmaticRef.current = false; // a real touch always ticks
   }, []);
 
-  // External value changes (e.g. a balance clamp) settle the strip — but never
-  // while the finger is down (that would fight the drag).
-  useEffect(() => {
-    if (draggingRef.current) return;
-    lastEmittedRef.current = selectedIndex;
-    if (reducedMotion) {
-      pos.value = selectedIndex;
-    } else {
-      pos.value = withTiming(selectedIndex, {
-        duration: SETTLE_MS,
-        easing: Easing.out(Easing.cubic),
-      });
-    }
-    // Reconcile a clamped / off-ladder prop to the snapped detent so the parent
-    // (and the staked amount) can never exceed the cap or disagree with the
-    // readout. No-ops when `value` already sits on the snapped detent.
-    emit(selectedIndex);
-  }, [selectedIndex, reducedMotion, pos, emit]);
-
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetX([-6, 6])
-        .onBegin(() => {
-          baseIndex.value = pos.value;
-          runOnJS(startDrag)();
-        })
-        .onUpdate((e) => {
-          const p = clampPosition(
-            positionForOffset(baseIndex.value, e.translationX, TICK_SPACING),
-            count,
-            maxIndex,
-          );
-          pos.value = p;
-          runOnJS(onCross)(snapIndex(p, count, maxIndex));
-        })
-        .onEnd(() => {
-          const idx = snapIndex(pos.value, count, maxIndex);
-          pos.value = reducedMotion
-            ? idx
-            : withTiming(idx, {
-                duration: SETTLE_MS,
-                easing: Easing.out(Easing.cubic),
-              });
-          runOnJS(onSettle)(idx);
-        }),
-    [count, maxIndex, reducedMotion, onCross, onSettle, startDrag, pos, baseIndex],
+  const onEndDrag = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // No momentum will follow → settle now (else wait for momentum end).
+      if (Math.abs(e.nativeEvent.velocity?.x ?? 0) < 0.05) commit(e);
+    },
+    [commit],
   );
+
+  // Reconcile an external / clamped / off-ladder value to a real detent and keep
+  // the strip aligned to it — but never while the user is interacting.
+  useEffect(() => {
+    if (interactingRef.current) return;
+    emit(selectedIndex);
+    if (selectedIndex !== lastEmittedRef.current) {
+      lastEmittedRef.current = selectedIndex;
+      snapTo(selectedIndex);
+    }
+  }, [selectedIndex, emit, snapTo]);
 
   const onAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -177,21 +185,41 @@ export const Dial: React.FC<DialProps> = ({
             ? -1
             : 0;
       if (!dir) return;
-      const idx = Math.round(clampPosition(selectedIndex + dir, count, maxIndex));
-      if (idx === selectedIndex) return;
+      const cur = selectedIndexRef.current;
+      const idx = Math.round(
+        clampPosition(cur + dir, countRef.current, maxIndexRef.current),
+      );
+      if (idx === cur) return;
       Haptics.selectionAsync();
+      lastEmittedRef.current = idx;
       emit(idx);
+      snapTo(idx);
     },
-    [selectedIndex, count, maxIndex, emit],
+    [emit, snapTo],
   );
 
-  const stripStyle = useAnimatedStyle(
-    () => ({
-      transform: [
-        { translateX: trackWidth / 2 - TICK_SPACING / 2 - pos.value * TICK_SPACING },
-      ],
-    }),
-    [trackWidth],
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    setTrackWidth(e.nativeEvent.layout.width);
+  }, []);
+
+  // Static tick strip — independent of the selected value so per-tick scroll
+  // updates never re-render the scroller (the center pointer marks selection).
+  const ticks = useMemo(
+    () =>
+      values.map((v) => {
+        const dimmed = disabledAbove != null && v > disabledAbove;
+        return (
+          <View key={v} style={styles.tickCell}>
+            <View
+              style={[
+                styles.tick,
+                { backgroundColor: Colors.white, opacity: dimmed ? 0.2 : 0.5 },
+              ]}
+            />
+          </View>
+        );
+      }),
+    [values, disabledAbove, Colors],
   );
 
   if (count === 0) return null;
@@ -199,54 +227,60 @@ export const Dial: React.FC<DialProps> = ({
   return (
     <View style={styles.container}>
       <Text style={[styles.label, { color: WHITE_70 }]}>{label}</Text>
-      <GestureDetector gesture={pan}>
-        <View
-          accessible
-          accessibilityRole="adjustable"
-          accessibilityLabel={accessibilityLabel}
-          accessibilityValue={{
-            min: values[0],
-            max: values[count - 1],
-            now: snappedValue,
-            text: format(snappedValue),
-          }}
-          accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
-          onAccessibilityAction={onAccessibilityAction}
-          onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-          style={styles.track}
-        >
-          <Text style={[styles.readout, { color: Colors.white }]}>
-            {format(snappedValue)}
-          </Text>
-          {subline ? (
-            <Text style={[styles.subline, { color: WHITE_70 }]}>{subline}</Text>
-          ) : null}
-          <View style={styles.stripClip} pointerEvents="none">
-            <Animated.View style={[styles.strip, stripStyle]}>
-              {values.map((v, i) => {
-                const dimmed = disabledAbove != null && v > disabledAbove;
-                return (
-                  <View key={v} style={styles.tickCell}>
-                    <View
-                      style={[
-                        styles.tick,
-                        {
-                          backgroundColor: Colors.white,
-                          height: i === selectedIndex ? TICK_H_MAJOR : TICK_H_MINOR,
-                          opacity: dimmed ? 0.25 : i === selectedIndex ? 1 : 0.45,
-                        },
-                      ]}
-                    />
-                  </View>
-                );
-              })}
-            </Animated.View>
-          </View>
-          <View style={styles.pointerWrap} pointerEvents="none">
-            <View style={[styles.pointer, { backgroundColor: Colors.white }]} />
-          </View>
+      <View
+        style={styles.track}
+        onLayout={onLayout}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityValue={{
+          min: values[0],
+          max: values[count - 1],
+          now: snappedValue,
+          text: format(snappedValue),
+        }}
+        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+        onAccessibilityAction={onAccessibilityAction}
+      >
+        <RollingNumber
+          text={format(snappedValue)}
+          rowHeight={READOUT_ROW_H}
+          style={[styles.readout, { color: Colors.white }]}
+        />
+        {subline ? (
+          <Text style={[styles.subline, { color: WHITE_70 }]}>{subline}</Text>
+        ) : null}
+
+        {trackWidth > 0 ? (
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={TICK_SPACING}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            contentOffset={{ x: initialOffsetRef.current, y: 0 }}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            onScrollBeginDrag={onBeginDrag}
+            onScrollEndDrag={onEndDrag}
+            onMomentumScrollEnd={commit}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={styles.scroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingHorizontal: sidePad },
+            ]}
+          >
+            {ticks}
+          </ScrollView>
+        ) : null}
+
+        <View style={styles.pointerWrap} pointerEvents="none">
+          <View style={[styles.pointer, { backgroundColor: Colors.white }]} />
         </View>
-      </GestureDetector>
+      </View>
     </View>
   );
 };
@@ -274,37 +308,29 @@ const styles = StyleSheet.create({
     fontSize: Typography.bodySmall,
     marginTop: Spacing.xs,
   },
-  stripClip: {
+  scroll: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: Spacing.lg,
     height: STRIP_H,
-    overflow: "hidden",
   },
-  strip: {
-    position: "absolute",
-    left: 0,
-    bottom: 0,
-    height: STRIP_H,
-    flexDirection: "row",
-    alignItems: "flex-end",
-  },
+  scrollContent: { alignItems: "flex-end", height: STRIP_H },
   tickCell: {
     width: TICK_SPACING,
     height: STRIP_H,
     alignItems: "center",
     justifyContent: "flex-end",
   },
-  tick: { width: TICK_W, borderRadius: TICK_W / 2 },
+  tick: { width: TICK_W, height: TICK_H, borderRadius: TICK_W / 2 },
   pointerWrap: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: Spacing.lg,
-    height: TICK_H_MAJOR + 8,
+    height: TICK_H + 12,
     alignItems: "center",
     justifyContent: "flex-end",
   },
-  pointer: { width: 3, height: TICK_H_MAJOR + 8, borderRadius: 2 },
+  pointer: { width: 3, height: TICK_H + 12, borderRadius: 2 },
 });
